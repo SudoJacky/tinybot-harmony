@@ -1,10 +1,12 @@
 import { t } from '../model/I18n';
+import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Motion } from '../common/Theme';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { AnimatedIconName } from '../common/IconArtwork';
 
 @Component
 struct RailButton {
+  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   icon: AnimatedIconName = 'plus';
   @Prop label: string = '';
   @Prop disabled: boolean = false;
@@ -25,13 +27,14 @@ struct RailButton {
       pressed: { .backgroundColor($r('app.color.surface_variant')) },
       normal: { .backgroundColor(Color.Transparent) }
     })
-    .clickEffect(Motion.pressSmall).enabled(!this.disabled)
+    .hoverEffect(this.disabled ? HoverEffect.None : HoverEffect.Highlight)
+    .clickEffect(this.disabled || this.appearance.effectStrength === 0 ? null : Motion.press).enabled(!this.disabled)
     .onHover((hovered: boolean) => { this.hovered = hovered; })
     .onTouch((event: TouchEvent) => {
       if (event.type === TouchType.Down) { this.pressed = true; }
       else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.pressed = false; }
     })
-    .accessibilityText(this.label).onClick(() => this.onTap())
+    .accessibilityText(this.label).bindTips(this.label, { appearingTime: 550 }).onClick(() => this.onTap())
   }
 }
 
@@ -49,7 +52,7 @@ export struct HistoryRail {
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       Column() {
         Column({ space: 12 }) {
-          RailButton({ icon: 'compose', label: t('新建对话'),
+          RailButton({ icon: 'newChat', label: t('新建对话'),
             compId: 'workbench-rail-new-chat', disabled: !this.active, onTap: this.onNewChat })
           RailButton({ icon: 'search', label: t('搜索对话'),
             compId: 'workbench-rail-search', disabled: !this.active, onTap: this.onSearch })

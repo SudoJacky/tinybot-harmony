@@ -11,8 +11,17 @@
     body { margin: 0; height: 100dvh; display: flex; flex-direction: column; }
     button, textarea { font: inherit; }
     button { cursor: pointer; color: inherit; border: 1px solid #d9dfe8; border-radius: 8px; background: #fff; min-height: 36px; padding: 0 10px; }
-    button:disabled { opacity: .35; }
+    button:disabled { opacity: .35; cursor: default; }
     button[aria-current=true], button[aria-pressed=true] { border-color: #3767da; color: #1749b4; background: #eaf0ff; }
+    button:focus-visible { outline: 2px solid #1749b4; outline-offset: -3px; }
+    @media (hover: hover) and (pointer: fine) {
+      button:enabled:hover { box-shadow: inset 0 0 0 100vmax #1749b40d; }
+    }
+    button:enabled:active { box-shadow: inset 0 0 0 100vmax #1749b420; }
+    @media (prefers-reduced-motion: no-preference) {
+      button { transition: transform 130ms cubic-bezier(.2, 0, 0, 1), box-shadow 120ms ease-out; }
+      button:enabled:active { transform: scale(.97); }
+    }
     #toolbar { flex: none; display: flex; gap: 6px; padding: 0 8px; overflow: auto; background: #f1f3f6; }
     #toolbar button { margin: 6px 0; white-space: nowrap; }
     #viewport { flex: 1; min-height: 0; overflow: auto; }

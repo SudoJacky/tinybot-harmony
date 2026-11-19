@@ -220,7 +220,7 @@ export struct SettingsPanel {
         GroupCard() {
           Column() {
             NavRow({ title: t('称呼与回答偏好'), subtitle: this.userDocumentPreview(), compId: 'open-user-document',
-              icon: $r('sys.symbol.square_and_pencil'), disabled: !this.canEdit(), onTap: () => this.onUserDocument() })
+              icon: $r('sys.symbol.person_text_rectangle'), disabled: !this.canEdit(), onTap: () => this.onUserDocument() })
             RowDivider()
             SwitchRow({ title: t('自动保存任务结果'), icon: $r('sys.symbol.archivebox'), subtitle: t('把成功的回答归档到工作区的“任务结果”目录。'), compId: 'save-summary',
               isOn: this.assistantDraft.saveSummary, disabled: !this.canEdit(), highlighted: this.searchTarget === 'save-summary',
@@ -232,15 +232,15 @@ export struct SettingsPanel {
         SectionHeader({ title: t('记忆与上下文') })
         GroupCard() {
           Column() {
-            SwitchRow({ title: t('自动提取长期记忆'), icon: $r('sys.symbol.wand_and_stars'), compId: 'auto-memory',
+            SwitchRow({ title: t('自动提取长期记忆'), icon: $r('sys.symbol.bookmark_notepad'), compId: 'auto-memory',
               subtitle: t('助手可在聊天中主动维护记忆，每 10 轮还会额外调用模型做后台整理。'),
               isOn: this.assistantDraft.autoMemory, disabled: !this.canEdit(), highlighted: this.searchTarget === 'auto-memory',
               onChange: (value: boolean) => this.saveToggle('autoMemory', value) })
             RowDivider()
             NavRow({ title: t('管理长期记忆'), compId: 'open-memory',
-              icon: $r('sys.symbol.lightbulb'), disabled: !this.canEdit(), onTap: () => this.onTools('memory') })
+              icon: $r('sys.symbol.bookmark_notepad'), disabled: !this.canEdit(), onTap: () => this.onTools('memory') })
             RowDivider()
-            SwitchRow({ title: t("自动压缩历史"), icon: $r('sys.symbol.rectangle_stack'), compId: 'auto-compact', isOn: this.settings.autoCompact,
+            SwitchRow({ title: t('自动压缩历史'), icon: $r('sys.symbol.list_bullet'), compId: 'auto-compact', isOn: this.settings.autoCompact,
               subtitle: t('接近上下文上限时生成摘要，完整记录保留。'), disabled: !this.canEdit(), highlighted: this.searchTarget === 'auto-compact',
               onChange: (value: boolean) => this.saveToggle('autoCompact', value) })
           }
@@ -263,7 +263,7 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('邮箱连接'), icon: $r('sys.symbol.doc_text'), subtitle: t('只读访问邮件，为助手和卡片提供数据'), compId: 'open-mail-settings', onTap: this.onMail })
             RowDivider()
-            SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.link'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
+            SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.worldclock'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
               highlighted: this.searchTarget === 'browser-enabled',
               subtitle: this.browser.policy === 'unset' ? t('尚未设置，首次使用时询问。') : this.browser.policy === 'disabled' ? t('已关闭，助手不会再次请求启用。') : t('允许助手操作网页；你可以随时接管。'),
               disabled: this.browser.permissionSaving || !this.app.ready || this.app.saveError.length > 0,
@@ -288,7 +288,7 @@ export struct SettingsPanel {
         SectionHeader({ title: t('界面与语言') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('界面与外观'), icon: $r('sys.symbol.picture'),
+            NavRow({ title: t('界面与外观'), icon: $r('sys.symbol.paintpalette'),
               compId: 'open-appearance', onTap: () => this.onAppearance() })
             RowDivider()
             NavRow({ title: t('语言'), icon: $r('sys.symbol.translate'), value: languageName(this.language),
@@ -303,7 +303,7 @@ export struct SettingsPanel {
             NavRow({ title: t('Token 用量'), compId: 'open-usage',
               icon: $r('sys.symbol.clock'), onTap: () => this.onUsage() })
             RowDivider()
-            NavRow({ title: t('存储空间'), compId: 'open-storage', icon: $r('sys.symbol.rectangle_stack'),
+            NavRow({ title: t('存储空间'), compId: 'open-storage', icon: $r('sys.symbol.externaldrive'),
               subtitle: t('查看分类占用并清理缓存'), disabled: !this.canEdit(), onTap: () => this.onStorage() })
             RowDivider()
             NavRow({ title: t('备份与恢复'), compId: 'open-backup', icon: $r('sys.symbol.folder_badge_plus'),

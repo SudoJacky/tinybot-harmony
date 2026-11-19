@@ -9,7 +9,7 @@ export struct WebsiteIcon {
 
   build() {
     Stack() {
-      SymbolGlyph($r('sys.symbol.magnifyingglass')).fontSize(13)
+      SymbolGlyph($r('sys.symbol.worldclock')).fontSize(13)
         .fontColor([$r('app.color.text_tertiary')]).opacity(this.loaded ? 0 : 1)
       if (this.source && !this.failed) {
         Image(this.source).width(14).height(14).objectFit(ImageFit.Contain)

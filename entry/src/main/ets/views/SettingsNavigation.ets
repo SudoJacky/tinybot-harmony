@@ -1,7 +1,7 @@
 import { AnimatorResult } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { SegmentFrame, SegmentedMotion } from '../common/SegmentedMotion';
-import { Btn, Space } from '../common/Theme';
+import { Btn, Motion, Space } from '../common/Theme';
 import { t } from '../model/I18n';
 import { settingsSectionTitle } from '../model/SettingsSearch';
 import { AnimatedIcon } from '../common/AnimatedIcon';
@@ -12,10 +12,10 @@ const CATEGORY_TRACK_RADIUS: number = 25;
 export const SETTINGS_CATEGORY_SWIPE_DISTANCE: number = 44;
 const CATEGORIES: SettingsCategory[] = [
   { key: 'account', icon: 'account' },
-  { key: 'models', icon: 'cloud' },
-  { key: 'assistant', icon: 'compose' },
+  { key: 'models', icon: 'services' },
+  { key: 'assistant', icon: 'preferences' },
   { key: 'tools', icon: 'tools' },
-  { key: 'appearance', icon: 'mountain' },
+  { key: 'appearance', icon: 'appearance' },
   { key: 'data', icon: 'data' },
   { key: 'help', icon: 'help' }
 ];
@@ -140,6 +140,7 @@ export struct SettingsCategoryBar {
                   }
                 }.height(44).padding({ left: Space.md, right: Space.md }).borderRadius(22)
                   .backgroundColor(Color.Transparent)
+                  .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
                   .accessibilityText(settingsSectionTitle(item.key)).accessibilitySelected(this.selected === item.key)
                   .id('settings-open-' + item.key).onClick(() => this.onSelect(item.key))
                   .onHover((hovered: boolean) => {
@@ -182,7 +183,10 @@ export struct SettingsNavigation {
           }.width('100%')
         }.fontFamily(this.appearance.fontFamily).id('settings-category-' + item.key)
           .width('100%').height(48).padding({ left: 12, right: 12 }).borderRadius(12)
-          .backgroundColor(this.selected === item.key ? this.appearance.accentContainer : Color.Transparent)
+          .backgroundColor(this.selected === item.key ? this.appearance.accentContainer :
+            this.hoveredCategory === item.key ? $r('app.color.surface_variant') : Color.Transparent)
+          .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
+          .hoverEffect(HoverEffect.None).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
           .accessibilitySelected(this.selected === item.key).onClick(() => this.onSelect(item.key))
           .onHover((hovered: boolean) => {
             if (hovered) { this.hoveredCategory = item.key; }

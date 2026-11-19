@@ -310,11 +310,11 @@ usageData.steps[1].usage = { ...record, tokens: { input: 20, output: 120 } };
 usageMessage.update(usageData); usageView.flush();
 assert.equal(usageView.speed(), '40.0 tok/s');
 assert.ok([...usageView.texts.values()].some(node => node.create === '40.0 tok/s'));
-for (const value of ['8.0s', '30', '180']) {
+for (const value of ['8.0s', '输入 30', '输出 180', '缓存命中 未报告']) {
   assert.ok([...usageView.texts.values()].some(node => node.create === value), 'Rendered cumulative metric refreshes: ' + value);
 }
 assert.match(usageView.summary(), /模型用时 8.0s.*输出速度 40.0 tok\/s.*输入 30.*输出 180/);
-assert.ok(![...usageView.texts.values()].some(node => String(node.create).includes('模型用时')), 'Compact metrics use icons; accessible summary retains labels');
+assert.ok(![...usageView.texts.values()].some(node => String(node.create).includes('模型用时')), 'Elapsed time stays compact; the accessible summary names it');
 usageMessage.usageOpen = true; usageView.flush();
 assert.ok([...usageView.texts.values()].some(node => node.create === '输出速度'), 'Expanded details retain full labels');
 usageData.steps.push({ ...step('Final'), usage: { ...record, tokens: { input: 5, output: 30 } } });

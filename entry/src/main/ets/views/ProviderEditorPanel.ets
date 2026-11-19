@@ -44,7 +44,6 @@ export struct ProviderEditorPanel {
   private scroller: Scroller = new Scroller();
   private protocols: string[] = ['chat-completions', 'responses', 'anthropic-messages', 'gemini'].concat(IMAGE_PROTOCOLS);
   private protocolLabels: string[] = ['Chat Completions', 'Responses', 'Messages', 'Gemini', 'OpenAI Images', 'Gemini Image', 'Seedream', 'DashScope'];
-  private protocolLogos: Resource[] = [$r('app.media.logo_openai'), $r('app.media.logo_openai'), $r('app.media.logo_anthropic'), $r('app.media.logo_google')];
 
   aboutToAppear(): void { this.alive = true; this.modelError = this.initialModelError; }
   aboutToDisappear(): void { this.alive = false; this.focusRequest++; if (this.page === 'service') { this.editor.apiKey = ''; this.editor.balanceApiKey = ''; } }
@@ -123,7 +122,7 @@ export struct ProviderEditorPanel {
   private protocolHint(protocol: string): string {
     if (isImageProtocol(protocol)) { return t('用于图片生成和编辑'); }
     return protocol === 'chat-completions' ? t('兼容大多数 OpenAI 格式的服务') :
-      protocol === 'responses' ? t('OpenAI 新一代接口') : protocol === 'gemini' ? t('Google Gemini 原生接口') : t('Claude 模型使用的接口');
+      protocol === 'responses' ? t('兼容 OpenAI Responses 接口') : protocol === 'gemini' ? t('兼容 Gemini 接口') : t('兼容 Anthropic Messages 接口');
   }
   private endpointPlaceholder(): string {
     switch (this.editor.protocol) {
@@ -142,13 +141,9 @@ export struct ProviderEditorPanel {
         ForEach(this.protocols, (protocol: string, index: number) => {
           GridItem() {
             Column({ space: 6 }) {
-              if (isImageProtocol(protocol)) {
-                SymbolGlyph($r('sys.symbol.picture')).fontSize(24)
-                  .fontColor([this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary')])
-              } else {
-                Image(this.protocolLogos[index]).width(24).height(24).objectFit(ImageFit.Contain)
-                  .fillColor(this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary'))
-              }
+              SymbolGlyph(isImageProtocol(protocol) ? $r('sys.symbol.picture') : $r('sys.symbol.doc_text')).fontSize(24)
+                .fontColor([this.editor.protocol === protocol ? this.appearance.accent : $r('app.color.text_secondary')])
+                .accessibilityLevel('no')
               Text(this.protocolLabels[index]).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(17).maxLines(2).textAlign(TextAlign.Center)
                 .fontWeight(this.editor.protocol === protocol ? FontWeight.Medium : FontWeight.Normal)
                 .fontColor(this.editor.protocol === protocol ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
@@ -161,6 +156,7 @@ export struct ProviderEditorPanel {
             .animation({ duration: Motion.fast, curve: Motion.standard })
             .clickEffect(Motion.press)
             .accessibilityGroup(true)
+            .accessibilitySelected(this.editor.protocol === protocol)
             .accessibilityText(protocolName(protocol) + (this.editor.protocol === protocol ? t("，已选中") : ''))
             .onClick(() => { this.editor.changeProtocol(protocol); })
           }

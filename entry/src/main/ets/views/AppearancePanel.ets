@@ -1,4 +1,5 @@
 import { PageStyles } from '../common/PageStyles';
+import { AnimatedIcon } from '../common/AnimatedIcon';
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AppMaterials } from '../common/AppMaterials';
@@ -222,15 +223,15 @@ export struct AppearancePanel {
   preview() {
     Column({ space: Space.lg }) {
       Row({ space: Space.sm }) {
-        SymbolGlyph($r('sys.symbol.line_3_horizontal')).fontSize(18).fontColor([$r('app.color.text_secondary')])
-          .width(28).height(32).accessibilityLevel('no')
+        Stack() { AnimatedIcon({ iconName: 'history', tint: $r('app.color.text_secondary'), iconSize: 18 }) }
+          .width(28).height(32).accessibilityLevel('no-hide-descendants')
         Text(t('今天的计划')).fontFamily(this.appearance.fontFamily).fontSize(Font.body)
           .fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).layoutWeight(1)
           .textAlign(TextAlign.Center).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
           .width(28).height(32).accessibilityLevel('no')
-        SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(18).fontColor([this.appearance.accent])
-          .width(28).height(32).accessibilityLevel('no')
+        Stack() { AnimatedIcon({ iconName: 'newChat', tint: this.appearance.accent, iconSize: 18 }) }
+          .width(28).height(32).accessibilityLevel('no-hide-descendants')
       }.width('100%')
       Row() {
         Text(t('帮我安排今天的工作')).fontFamily(this.appearance.fontFamily).fontSize(Font.body).lineHeight(24)
@@ -285,7 +286,7 @@ export struct AppearancePanel {
               }.width('100%')
             }.padding(Space.lg).width('100%')
             RowDivider()
-            NavRow({ title: t('自定义颜色'), icon: $r('sys.symbol.picture'), value: this.options.accent === 'custom' ? this.options.customColor : '',
+            NavRow({ title: t('自定义颜色'), icon: $r('sys.symbol.paintpalette'), value: this.options.accent === 'custom' ? this.options.customColor : '',
               compId: 'appearance-custom-color', onTap: () => this.open('custom') })
           }
         }
@@ -305,7 +306,7 @@ export struct AppearancePanel {
         }
         SectionHeader({ title: t('光感与材质') })
         GroupCard() {
-          NavRow({ title: t('光感效果'), icon: $r('sys.symbol.wand_and_stars'),
+          NavRow({ title: t('光感效果'), icon: $r('sys.symbol.lightbulb_max'),
             value: this.materialAvailable() ? this.effectName(this.options.lightEffect) : t('关闭'),
             subtitle: this.materialAvailable() ? '' : t('使用纯色控件，关闭光感材质。'),
             compId: 'appearance-effect', onTap: () => this.open('effect') })

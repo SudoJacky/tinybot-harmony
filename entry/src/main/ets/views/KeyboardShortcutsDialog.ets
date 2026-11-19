@@ -39,9 +39,9 @@ export struct KeyboardShortcutsDialog {
         Text(t('键盘快捷键')).fontFamily(this.appearance.fontFamily).fontSize(20).fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary')).layoutWeight(1)
         Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.xmark')).fontSize(14).fontColor([$r('app.color.text_secondary')])
+          SymbolGlyph($r('sys.symbol.xmark')).fontSize(14).fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
         }.id('keyboard-shortcuts-close').width(40).height(40).backgroundColor(Color.Transparent)
-          .accessibilityText(t('关闭')).onClick(() => this.controller?.close())
+          .accessibilityText(t('关闭')).bindTips(t('关闭'), { appearingTime: 550 }).onClick(() => this.controller?.close())
       }.width('100%')
       Search({ value: this.query, placeholder: t('搜索快捷键') }).id('keyboard-shortcuts-search')
         .width('100%').height(36).borderRadius(18).border({ width: 1, color: $r('app.color.divider') })

@@ -36,10 +36,14 @@ function element(tag, text, parent, className) {
   return node;
 }
 
-function button(text, parent, action) {
+function button(text, parent, action, label) {
   const node = element('button', text, parent);
   node.type = 'button';
   node.onclick = action;
+  if (label) {
+    node.setAttribute('aria-label', label);
+    node.title = label;
+  }
   return node;
 }
 
@@ -208,8 +212,7 @@ function renderSlides() {
   const stage = element('section', undefined, deck, 'stage');
   const frame = element('div', undefined, stage, 'slide-frame');
   const navigation = element('nav', undefined, deck, 'slide-navigation');
-  const previous = button('‹', navigation, () => show(active - 1));
-  previous.setAttribute('aria-label', labels.previous);
+  const previous = button('‹', navigation, () => show(active - 1), labels.previous);
   const pages = button('', navigation, () => {
     const open = deck.classList.toggle('show-thumbnails');
     pages.setAttribute('aria-expanded', String(open));
@@ -217,8 +220,7 @@ function renderSlides() {
   });
   pages.setAttribute('aria-controls', rail.id);
   pages.setAttribute('aria-expanded', 'false');
-  const next = button('›', navigation, () => show(active + 1));
-  next.setAttribute('aria-label', labels.next);
+  const next = button('›', navigation, () => show(active + 1), labels.next);
   slideResize = new ResizeObserver((entries) => {
     for (const { target, contentRect } of entries) {
       target.resizeSlide(contentRect);
@@ -591,10 +593,10 @@ function renderSheet() {
     dragPointer = undefined;
     clearTarget();
   };
-  button('↑', controls, () => { rowStart -= 100; render(); }).disabled = rowStart === 1;
-  button('↓', controls, () => { rowStart += 100; render(); }).disabled = rowEnd >= maxRow;
-  button('←', controls, () => { colStart -= 24; render(); }).disabled = colStart === 1;
-  button('→', controls, () => { colStart += 24; render(); }).disabled = colEnd >= maxCol;
+  button('↑', controls, () => { rowStart -= 100; render(); }, labels.previousRows).disabled = rowStart === 1;
+  button('↓', controls, () => { rowStart += 100; render(); }, labels.nextRows).disabled = rowEnd >= maxRow;
+  button('←', controls, () => { colStart -= 24; render(); }, labels.previousColumns).disabled = colStart === 1;
+  button('→', controls, () => { colStart += 24; render(); }, labels.nextColumns).disabled = colEnd >= maxCol;
   element('span', columnName(colStart) + rowStart + ' – ' + columnName(colEnd) + rowEnd, controls);
   const rangeLabel = element('span', undefined, controls, 'cell-range');
   rangeLabel.id = 'cell-range';
