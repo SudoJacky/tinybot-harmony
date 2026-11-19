@@ -12,7 +12,9 @@ export interface WebAnnotationMark {
 
 export function webAnnotationScript(): string {
   return `(() => {
-    let enabled = false, marks = [], selected = '', layer, scheduled = false;
+    let enabled = false, marks = [], selected = '', pending = false, hovered, layer, scheduled = false;
+    const targetAt = target => target instanceof Element && document.body?.contains(target)
+      ? target.closest('h1,h2,h3,h4,h5,h6,button,a,p,img,canvas,svg,[role=button]') || target : null;
     const pathFor = element => {
       const path = [];
       for (let node = element; node && node !== document.body; node = node.parentElement) {
@@ -35,9 +37,10 @@ export function webAnnotationScript(): string {
         document.body.append(layer);
       }
       layer.replaceChildren();
-      for (const mark of selected ? [...marks, {location:selected,number:0}] : marks) {
+      const outline = selected ? {location:selected,number:0} : hovered ? {node:hovered,number:0} : null;
+      for (const mark of outline ? [...marks, outline] : marks) {
         let node;
-        try { node = document.querySelector(mark.location); } catch { continue; }
+        try { node = mark.node || document.querySelector(mark.location); } catch { continue; }
         if (!node) continue;
         const box = node.getBoundingClientRect();
         if (!box.width || !box.height || box.right < 0 || box.bottom < 0 || box.left > innerWidth || box.top > innerHeight) continue;
@@ -49,32 +52,46 @@ export function webAnnotationScript(): string {
           indicator.style.left = Math.max(0, Math.min(innerWidth - 22, box.right - 12)) + 'px';
           indicator.style.top = Math.max(0, box.top - 10) + 'px';
         } else {
-          indicator.style.cssText += 'border:2px dashed #3770e4;background:#3770e415';
+          indicator.style.cssText += selected ? 'border:2px dashed #3770e4;background:#3770e415' : 'border:2px solid #3770e4';
           Object.assign(indicator.style, {left:box.left+'px',top:box.top+'px',width:box.width+'px',height:box.height+'px'});
         }
         layer.append(indicator);
       }
     };
-    const redraw = () => { if (!scheduled && (layer || marks.length || selected)) { scheduled = true; requestAnimationFrame(draw); } };
+    const redraw = () => { if (!scheduled && (layer || marks.length || selected || hovered)) { scheduled = true; requestAnimationFrame(draw); } };
+    const hover = node => {
+      if (node === hovered) return;
+      hovered = node;
+      redraw();
+    };
     addEventListener('scroll', redraw, true);
     addEventListener('resize', redraw);
+    document.documentElement.addEventListener('pointerleave', () => hover(null));
+    addEventListener('pointermove', event => {
+      hover(enabled && !pending && !selected && event.pointerType === 'mouse' && event.buttons === 0 ? targetAt(event.target) : null);
+    }, true);
     addEventListener('message', event => {
       if (event.source !== parent || event.data?.channel !== 'tinybot-host' || event.data.type !== 'annotationState') return;
       enabled = event.data.enabled === true;
       marks = event.data.marks;
-      if (!enabled || event.data.clear) selected = '';
+      selected = event.data.selected;
+      pending = false;
+      if (!enabled || selected) hover(null);
       redraw();
     });
     addEventListener('click', event => {
-      if (!enabled || !event.isTrusted || !(event.target instanceof Element) || !document.body?.contains(event.target)) return;
+      if (!enabled || !event.isTrusted) return;
+      const node = targetAt(event.target);
+      if (!node) return;
       event.preventDefault(); event.stopImmediatePropagation();
-      const node = event.target.closest('h1,h2,h3,h4,h5,h6,button,a,p,img,canvas,svg,[role=button]') || event.target;
-      selected = pathFor(node);
-      if (selected.length > 1000) return;
+      if (pending || selected) return;
+      const location = pathFor(node);
+      if (location.length > 1000) return;
+      pending = true;
+      hover(null);
       const label = (node.getAttribute('aria-label') || node.getAttribute('alt') || node.textContent || '').trim().slice(0, 1000);
       parent.postMessage({channel:'tinybot-frame',type:'annotationTarget',target:{
-        kind:'element',location:selected,excerpt:label,x:event.clientX / innerWidth,y:event.clientY / innerHeight}}, '*');
-      redraw();
+        kind:'element',location,excerpt:label,x:event.clientX / innerWidth,y:event.clientY / innerHeight}}, '*');
     }, true);
   })();`;
 }

@@ -20,6 +20,7 @@
     .word p, .word h1, .word h2, .word h3 { white-space: pre-wrap; overflow-wrap: anywhere; position: relative; }
     .word h1, .word h2, .word h3 { font-family: system-ui, sans-serif; color: #24374a; }
     .word img { max-width: 100%; }
+    ::highlight(office-annotation) { background-color: #c4d8ff; color: #14264a; text-decoration: underline; }
     table { border-collapse: separate; border-spacing: 0; }
     .word table { width: 100%; }
     .word td { border: 1px solid #ccd4df; padding: 0 8px; }
@@ -50,8 +51,9 @@
     .shape svg { width: 100%; height: 100%; overflow: visible; display: block; }
     .shape p { margin: 0; }
     .annotating .stage .slide { cursor: crosshair; touch-action: none; user-select: none; }
-    .annotating .shape:hover { outline: 2px dashed #3770e4; }
     .annotating .shape:focus-visible { outline: 2px dashed #3770e4; }
+    .slide-hover { display: none; position: absolute; z-index: 2; border: 3px solid #3770e4; box-shadow: inset 0 0 0 1px white; pointer-events: none; }
+    .annotating .stage .slide-hover { display: block; }
     .slide-selection { position: absolute; border: 2px dashed #3770e4; background: #3770e420; pointer-events: none; }
     .grid { height: 100%; display: flex; flex-direction: column; }
     .grid-controls { display: flex; align-items: center; gap: 5px; padding: 5px 8px; }
@@ -63,10 +65,19 @@
     .grid-scroll thead th:first-child { z-index: 3; }
     .grid-scroll td { position: relative; min-width: 84px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
     .annotating td { cursor: crosshair; touch-action: none; user-select: none; }
-    .grid-scroll td.selected { box-shadow: inset 0 0 0 2px #3770e4; }
+    .annotating .grid-scroll td.cell-hover { box-shadow: inset 0 0 0 2px #3770e4; }
+    .grid-scroll td.selected { background-image: linear-gradient(#3770e420, #3770e420); box-shadow:
+      inset 0 var(--range-top, 0px) #3770e4, inset var(--range-right, 0px) 0 #3770e4,
+      inset 0 var(--range-bottom, 0px) #3770e4, inset var(--range-left, 0px) 0 #3770e4; }
+    .grid-scroll td[data-edges~=top] { --range-top: 2px; }
+    .grid-scroll td[data-edges~=right] { --range-right: -2px; }
+    .grid-scroll td[data-edges~=bottom] { --range-bottom: -2px; }
+    .grid-scroll td[data-edges~=left] { --range-left: 2px; }
+    .cell-range { color: #1749b4; background: #eaf0ff; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
     .pin { position: absolute; top: 1px; right: 1px; z-index: 1; min-width: 19px; padding: 2px; border: 1px solid white; border-radius: 100px; color: white; background: #2769d9; font: 600 11px/15px system-ui, sans-serif; text-align: center; user-select: none; }
     #comment, #text-action { position: fixed; z-index: 5; box-shadow: 0 8px 32px #14233c35; }
     #comment { display: flex; flex-direction: column; gap: 8px; overflow: auto; background: white; padding: 12px; width: 310px; border: 1px solid #d9dfe8; border-radius: 16px; }
+    #comment-excerpt { flex: none; margin: 0; padding-left: 8px; border-left: 2px solid #3770e4; color: #3c4f68; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #comment textarea { width: 100%; height: 68px; min-height: 36px; resize: vertical; padding: 4px; border: 0; border-radius: 4px; }
     #comment textarea:focus-visible { outline: 2px solid #b9ceff; }
     #comment footer { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
@@ -77,7 +88,8 @@
   <main id="viewport"></main>
   <button type="button" id="text-action" hidden></button>
   <form id="comment" hidden>
-    <textarea maxlength="2000" required></textarea>
+    <blockquote id="comment-excerpt" hidden></blockquote>
+    <textarea maxlength="2000" aria-describedby="comment-excerpt" required></textarea>
     <footer><button type="button"></button><button type="submit"></button></footer>
   </form>
   <script src="preview.bundle.js"></script>

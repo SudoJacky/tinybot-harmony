@@ -43,11 +43,13 @@ const emit=(name,value)=>callbacks.get(name).forEach(callback=>callback(value));
   keyboardArea={bottomRect:{left:1400,top:700,width:700,height:600},topRect:none,leftRect:none,rightRect:none};
   emit('avoidAreaChange',{type:2,area:keyboardArea});
   assert.deepEqual(geometry.at(-1), { width: 200, height: 600 / 3.5 });
+  assert.equal(chat.keyboardTop, 200, 'Avoidance starts at the keyboard rectangle, in window vp');
   assert.equal(chat.keyboardHeight, 0, 'An early avoid-area event only records geometry');
   assert.deepEqual(shown, [true, false]);
   keyboardArea={bottomRect:none,topRect:none,leftRect:none,rightRect:none};
   emit('avoidAreaChange',{type:2,area:keyboardArea});
   assert.deepEqual(geometry.at(-1), { width: 0, height: 0 });
+  assert.equal(chat.keyboardTop, -1);
   const adaptive={};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname,'../entry/src/main/ets/model/AdaptiveUi.ets'),'utf8'),{
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2021}

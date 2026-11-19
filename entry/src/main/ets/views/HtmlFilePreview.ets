@@ -5,6 +5,7 @@ import { UiValues } from '../model/InteractiveUi';
 import { t } from '../model/I18n';
 import { WebAnnotationMark, WebAnnotationTarget } from '../model/WebAnnotation';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
+import { WindowViewport } from '../viewmodel/WindowViewport';
 import { WebUiView } from './WebUiView';
 
 @Component
@@ -25,6 +26,12 @@ export struct HtmlFilePreview {
   @State private revision: number = 0;
   @State private viewWidth: number = 0;
   @State private viewHeight: number = 0;
+  @State private viewTop: number = 0;
+  @State private editorHeight: number = 160;
+  @State private viewport: WindowViewport = new WindowViewport();
+
+  aboutToAppear(): void { this.viewport.observe(this.getUIContext()); }
+  aboutToDisappear(): void { this.viewport.dispose(); }
 
   private marks(): WebAnnotationMark[] {
     const marks: WebAnnotationMark[] = [];
@@ -36,10 +43,11 @@ export struct HtmlFilePreview {
     return marks;
   }
 
-  private select(target: WebAnnotationTarget): void {
-    if (!this.annotating || !this.app.canQueueInput || this.selection) { return; }
+  private select(target: WebAnnotationTarget): boolean {
+    if (!this.annotating || !this.app.canQueueInput || this.selection) { return false; }
     this.selection = target;
     this.comment = ''; this.error = '';
+    return true;
   }
 
   private clear(): void {
@@ -60,26 +68,40 @@ export struct HtmlFilePreview {
   }
 
   private editorWidth(): number { return Math.max(0, Math.min(300, this.viewWidth - 16)); }
+  private visibleHeight(): number {
+    const keyboardTop = this.viewport.keyboardTop;
+    return keyboardTop < 0 ? this.viewHeight : Math.max(0, Math.min(this.viewHeight, keyboardTop - this.viewTop));
+  }
+
+  private editorTop(target: WebAnnotationTarget): number {
+    const visible = this.visibleHeight();
+    return Math.max(8, Math.min(this.viewHeight * target.y + 8, visible - this.editorHeight - 8));
+  }
 
   @Builder
   private editor(target: WebAnnotationTarget) {
-    Column({ space: Space.sm }) {
-      Text(target.excerpt || target.location).fontFamily(this.appearance.fontFamily).fontSize(12)
-        .fontColor($r('app.color.text_secondary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-      TextArea({ text: this.comment, placeholder: t('描述修改或提出问题…') }).fontFamily(this.appearance.fontFamily)
-        .maxLength(MAX_ANNOTATION_COMMENT).height(72).width('100%').onChange((value) => { this.comment = value; })
-      if (this.error) {
-        Text(this.error).fontSize(12).fontColor($r('app.color.danger')).width('100%')
-      }
-      Row({ space: Space.xs }) {
-        Button(t('取消')).attributeModifier(Btn.tonalSmall).enabled(!this.saving).onClick(() => this.clear())
-        Button(t('添加批注')).attributeModifier(Btn.primarySmall)
-          .enabled(!this.saving && this.app.canQueueInput && this.comment.trim().length > 0).onClick(() => this.save())
-      }.justifyContent(FlexAlign.End).width('100%')
-    }.padding(Space.md).width(this.editorWidth()).backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
+    Scroll() {
+      Column({ space: Space.sm }) {
+        Text(target.excerpt || target.location).fontFamily(this.appearance.fontFamily).fontSize(12)
+          .fontColor($r('app.color.text_secondary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
+        TextArea({ text: this.comment, placeholder: t('描述修改或提出问题…') }).fontFamily(this.appearance.fontFamily)
+          .maxLength(MAX_ANNOTATION_COMMENT).height(Math.max(40, Math.min(72, this.visibleHeight() - 100)))
+          .width('100%').onChange((value) => { this.comment = value; })
+        if (this.error) {
+          Text(this.error).fontSize(12).fontColor($r('app.color.danger')).width('100%')
+        }
+        Row({ space: Space.xs }) {
+          Button(t('取消')).attributeModifier(Btn.tonalSmall).enabled(!this.saving).onClick(() => this.clear())
+          Button(t('添加批注')).attributeModifier(Btn.primarySmall)
+            .enabled(!this.saving && this.app.canQueueInput && this.comment.trim().length > 0).onClick(() => this.save())
+        }.justifyContent(FlexAlign.End).width('100%')
+      }.padding(Space.md).width('100%')
+    }.width(this.editorWidth()).constraintSize({ maxHeight: Math.max(0, this.visibleHeight() - 16) })
+      .align(Alignment.TopStart).scrollBar(BarState.Auto).backgroundColor($r('app.color.surface')).borderRadius(Radius.lg)
       .border({ width: 0.5, color: $r('app.color.divider') }).shadow(ShadowStyle.OUTER_DEFAULT_MD)
+      .onAreaChange((_old, area) => { this.editorHeight = Number(area.height); })
       .position({ x: Math.max(8, Math.min(this.viewWidth * target.x + 8, this.viewWidth - this.editorWidth() - 8)),
-        y: Math.max(8, Math.min(this.viewHeight * target.y + 8, this.viewHeight - 204)) })
+        y: this.editorTop(target) })
   }
 
   build() {
@@ -100,7 +122,11 @@ export struct HtmlFilePreview {
           annotationMarks: this.marks(), annotationRevision: this.revision, onAnnotationTarget: (target) => this.select(target) })
         if (this.selection) { this.editor(this.selection) }
       }.width('100%').layoutWeight(1).clip(true)
-        .onAreaChange((_old, area) => { this.viewWidth = Number(area.width); this.viewHeight = Number(area.height); })
+        .onAreaChange((_old, area) => {
+          this.viewWidth = Number(area.width);
+          this.viewHeight = Number(area.height);
+          this.viewTop = Number(area.globalPosition.y);
+        })
     }.width('100%').height('100%')
   }
 }
