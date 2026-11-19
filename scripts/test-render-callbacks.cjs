@@ -120,14 +120,18 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   console.log('PASS emitted chat positioning: cold start, lazy tail, history, team card, touch, search, stale callbacks, empty chat and manual jump');
 
   const ResponsiveIcon = compile(methods('common/Widgets', ['updateStateVars'], 'IconButton'));
-  let diameter = 44;
-  const icon = Object.assign(new ResponsiveIcon(), { __diameter: { reset(value) { diameter = value; } } });
+  let diameter = 44, animatedIcon;
+  const icon = Object.assign(new ResponsiveIcon(), {
+    __diameter: { reset(value) { diameter = value; } },
+    __animatedIcon: { reset(value) { animatedIcon = value; } }
+  });
   for (const key of ['icon', 'tint', 'fill', 'disabled', 'label', 'animatedSelected']) { icon['__' + key] = { reset() {} }; }
-  for (const next of [36, 44, 36, 36]) {
-    icon.updateStateVars({ diameter: next });
-    assert.equal(diameter, next, 'A retained icon button must follow phone/tablet sizing updates');
+  for (const [nextDiameter, nextIcon] of [[36, 'plus'], [44, undefined], [36, 'newChat'], [36, 'browser']]) {
+    icon.updateStateVars({ diameter: nextDiameter, animatedIcon: nextIcon });
+    assert.equal(diameter, nextDiameter, 'A retained icon button must follow phone/tablet sizing updates');
+    assert.equal(animatedIcon, nextIcon, 'A retained icon button must accept icon changes and removal');
   }
-  console.log('PASS emitted icon button: retained instances accept responsive diameter updates');
+  console.log('PASS emitted icon button: retained instances accept diameter and animated icon updates');
 
   let addButton, updateAddButton;
   const AddButton = compile(methods('views/ChatPanel', ['composerAddButton']), {
@@ -136,6 +140,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
         super(); addButton = this; this.diameter = params.diameter;
         this.animatedIcon = params.animatedIcon; this.animatedSelected = params.animatedSelected;
         this.__diameter = { reset: value => { this.diameter = value; } };
+        this.__animatedIcon = { reset: value => { this.animatedIcon = value; } };
         this.__animatedSelected = { reset: value => { this.animatedSelected = value; } };
         for (const key of ['icon', 'tint', 'fill', 'disabled', 'label']) { this['__' + key] = { reset() {} }; }
       }

@@ -53,6 +53,7 @@ class ViewPU {
 const noop = new Proxy({}, { get: () => () => {} });
 const globals = { exports: {}, ViewPU, ObservedObject: { GetRawObject: value => value }, t: key => key, Motion: {}, Space: {}, Btn: {}, AppMaterials: {}, IS_PC: false,
   IconButton: class {}, SymbolGlyphModifier: class { fontColor() { return this; } }, Context: noop,
+  HoverEffect: { None: 'none', Highlight: 'highlight' }, HitTestMode: { None: 'none' },
   TransitionEffect: { OPACITY: { animation() { return this; } } },
   ListItemGroup: { create(options) { if (initial) { groups.add(current); options.header(); } }, pop() {} },
   Text: new Proxy({}, { get: (_, key) => key === 'create' ? value => {
@@ -171,6 +172,10 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   const widgetEmitted = debugArtifact('common/Widgets');
   const widgetTree = ts.createSourceFile(widgetEmitted, fs.readFileSync(widgetEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
   const icon = widgetTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'IconButton');
+  const animatedEmitted = debugArtifact('common/AnimatedIcon');
+  const animatedTree = ts.createSourceFile(animatedEmitted, fs.readFileSync(animatedEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
+  const animated = animatedTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'AnimatedIcon');
+  const iconChildren = new Map();
   let accessibilityLabel, buttonBackground, buttonBorder, buttonAnimation, backgroundAnimation;
   const materialAttributes = { exports: {} };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root,
@@ -187,15 +192,21 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
     Context: { animation: value => { buttonAnimation = value; } },
     systemMaterialAttribute: materialAttributes.exports.systemMaterialAttribute,
     AppearanceStyle: class { controlBackground = 'transparent'; materialAvailable = true; materialEnabled = true; },
-    ViewPU: class extends ViewPU { createStorageProp(_key, value) { return new Property(value); } },
+    ViewPU: class extends ViewPU {
+      createStorageProp(_key, value) { return new Property(value); }
+      declareWatch() {}
+      static create(child) { iconChildren.set(current, child); }
+      updateStateVarsOfChildByElmtId(id, params) { iconChildren.get(id).updateStateVars(params); }
+    },
     SynchedPropertySimpleOneWayPU: Property, SynchedPropertyObjectOneWayPU: Property, ObservedPropertySimplePU: Property,
     ObservedObject: { GetRawObject: v => v },
     Button: new Proxy({}, { get: (_, key) => key === 'accessibilityText' ? value => { accessibilityLabel = value; } :
       key === 'backgroundColor' ? value => { buttonBackground = value; backgroundAnimation = buttonAnimation; } :
       key === 'border' ? value => { buttonBorder = value; } : () => {} }) };
-  vm.runInNewContext(ts.transpileModule(icon.getText(widgetTree), { compilerOptions: {
+  vm.runInNewContext(ts.transpileModule(icon.getText(widgetTree) + '\n' + animated.getText(animatedTree), { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021
   } }).outputText, widgets);
+  widgets.AnimatedIcon = widgets.exports.AnimatedIcon;
   const button = new widgets.exports.IconButton(undefined, { label: '新对话 · Original' }); button.initialRender();
   assert.equal(accessibilityLabel, '新对话 · Original');
   assert.equal(buttonBackground, 'transparent', 'Supported devices retain the material background');
@@ -210,6 +221,11 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.equal(buttonBorder.width, 0);
   button.updateStateVars({ icon: button.icon, tint: button.tint, fill: button.fill, disabled: false, label: '新对话 · Renamed' }); button.flush();
   assert.equal(accessibilityLabel, '新对话 · Renamed', 'Retained project buttons must update their accessibility names');
+  button.animatedIcon = 'newChat'; button.flush();
+  const [animatedChild] = iconChildren.values();
+  assert.equal(animatedChild.iconName, 'newChat');
+  button.animatedIcon = 'browser'; button.flush();
+  assert.equal(animatedChild.iconName, 'browser', 'The existing animated child receives the updated icon name');
   console.log('PASS retained sidebar: rename, pin/unpin labels and ordering, delete/archive/restore, new chat, project create/edit and filtered-view creation');
 
   const batchData = seed();

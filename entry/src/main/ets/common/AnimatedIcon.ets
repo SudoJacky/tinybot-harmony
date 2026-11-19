@@ -10,7 +10,7 @@ export struct AnimatedIcon {
   @Prop @Watch('interactionChanged') interacting: boolean = false;
   @Prop @Watch('pressedChanged') pressed: boolean = false;
   @Prop tint: ResourceColor = $r('app.color.text_secondary');
-  iconName: AnimatedIconName = 'appearance';
+  @Prop iconName: AnimatedIconName = 'appearance';
   iconSize: number = 18;
   playOnAppear: boolean = false;
   @State private progress: number = 1;
