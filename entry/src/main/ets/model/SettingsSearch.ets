@@ -38,6 +38,8 @@ const ITEMS: SettingsSearchItem[] = [
   { id: 'open-search-settings', section: 'tools', title: '搜索服务', route: 'search-settings',
     keywords: '联网搜索 DeepSeek Tavily SearXNG Bing 必应 web search', requiresEditable: true },
   { id: 'open-mail-settings', section: 'tools', title: '邮箱连接', route: 'mail-settings', keywords: '邮件 email IMAP' },
+  { id: 'open-knowledge-base-settings', section: 'tools', title: '知识库', route: 'knowledge-base-settings',
+    keywords: '腾讯 Tencent IMA OpenAPI 资料源 Client ID API Key' },
   { id: 'browser-enabled', section: 'tools', title: '应用内浏览器', keywords: '浏览器权限 接管 web browser' },
   { id: 'open-skills', section: 'tools', title: 'Skills', route: 'skills', keywords: '技能', requiresEditable: true },
   { id: 'open-mcp', section: 'tools', title: 'MCP 服务', route: 'productivity', param: 'mcp', keywords: '工具服务器 server', requiresEditable: true },

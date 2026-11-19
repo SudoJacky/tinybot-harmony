@@ -72,7 +72,8 @@ const rows = () => [...panel.children.values()].filter(child => child instanceof
 const row = name => rows().find(child => child.compId === 'custom-capability-' + name);
 const button = id => [...buttons.values()].find(value => value.id === id);
 (async () => {
-  assert.equal(rows().length, 14);
+  const capabilityCount = groups.TOOL_CAPABILITIES.length;
+  assert.equal(rows().length, capabilityCount);
   for (const name of ['memory','skill-read','skill-manage','image']) assert.equal(row(name),undefined);
   assert.equal(button('enable-optional-tools').enabled,false);
   assert.equal(button('disable-optional-tools').enabled,true);
@@ -81,9 +82,9 @@ const button = id => [...buttons.values()].find(value => value.id === id);
   const retained = row('browser'); await retained.onChange(false); panel.flush();
   assert.equal(row('browser'), retained); assert.equal(retained.isOn, false);
   assert.ok(groups.TOOL_CAPABILITIES.find(capability => capability.id === 'browser').tools.every(name => thread.disabledTools.includes(name)));
-  assert.ok([...texts.values()].some(text => text.endsWith(':13/14')));
+  assert.ok([...texts.values()].some(text => text.endsWith(`:${capabilityCount - 1}/${capabilityCount}`)));
   await retained.onChange(true); panel.flush(); assert.equal(retained.isOn, true);
-  for (const id of ['mail','preview','team','mcp','image-generation']) {
+  for (const id of ['mail','ima','preview','team','mcp','image-generation']) {
     await row(id).onChange(false); panel.flush();
     assert.equal(row(id).isOn, false);
     assert.ok(groups.TOOL_CAPABILITIES.find(capability => capability.id === id).tools.every(name => thread.disabledTools.includes(name)));

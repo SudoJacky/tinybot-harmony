@@ -53,9 +53,40 @@ function form(app, tab, entryId = '') {
   assert.equal(findSettings('dark mode', searchProfiles, false)[0].route, 'appearance');
   assert.equal(findSettings('work  KIMI', searchProfiles, false)[0].param, 'my-kimi');
   assert.equal(findSettings('浏览器', searchProfiles, false)[0].id, 'browser-enabled');
+  for (const query of ['知识库', 'knowledge base', 'Tencent IMA']) {
+    assert.equal(findSettings(query, searchProfiles, false)[0].route, 'knowledge-base-settings');
+  }
   assert.equal(findSettings('开发者模式', searchProfiles, false).length, 0);
   assert.equal(findSettings('开发者模式', searchProfiles, true)[0].id, 'open-developer');
   console.log('PASS settings search matches bilingual titles, aliases and configured services across categories');
+
+  const setupLinks = [];
+  const setupContext = { openLink: async (url, options) => { setupLinks.push({ url, options }); } };
+  const Ima = controller('ImaSettingsPanel', ['openSetup'], {
+    IMA_SETUP_URL: 'https://ima.qq.com/agent-interface'
+  });
+  await Object.assign(new Ima(), { getUIContext: () => ({ getHostContext: () => setupContext }) }).openSetup();
+  assert.equal(setupLinks[0].url, 'https://ima.qq.com/agent-interface');
+  assert.equal(setupLinks[0].options.appLinkingOnly, false);
+
+  const knowledgeBaseAccess = { enabled: false, initialize() {}, async setEnabled(value) { this.enabled = value; } };
+  let providerLoads = 0;
+  const KnowledgeBases = controller('KnowledgeBaseSettingsPanel', ['aboutToAppear', 'aboutToDisappear', 'toggle', 'reloadIma'], {
+    knowledgeBaseAccess, imaClient: { async load() { providerLoads++; return { enabled: true }; } }
+  });
+  const knowledge = Object.assign(new KnowledgeBases(), {
+    getUIContext: () => ({ getHostContext: () => ({}) })
+  });
+  knowledge.aboutToAppear();
+  assert.equal(knowledge.accessEnabled, false);
+  assert.equal(providerLoads, 0);
+  await knowledge.toggle(true);
+  assert.equal(knowledge.accessEnabled, true);
+  assert.equal(knowledge.imaStatus, t('已启用'));
+  await knowledge.toggle(false);
+  assert.equal(knowledge.accessEnabled, false);
+  assert.equal(providerLoads, 1);
+  console.log('PASS knowledge base setup opens the official credentials page and defers providers until enabled');
 
   const Reveal = controller('SettingsPanel', ['revealSearchTarget'], {
     Space: { md: 12 }, SettingsRevealFrame: class { constructor(onIdle) { this.onIdle = onIdle; } }

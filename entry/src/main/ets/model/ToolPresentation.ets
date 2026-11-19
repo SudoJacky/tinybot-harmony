@@ -4,6 +4,8 @@ import { FileDiff } from './FileDiff';
 export function toolTitle(name: string): string {
   const titles: Record<string, string> = {
     'list_mail_accounts': t('查看邮箱连接'), 'search_mail': t('查询邮件'), 'read_mail': t('读取邮件'),
+    'list_ima_knowledge_bases': t('列出腾讯 ima 知识库'), 'browse_ima_knowledge': t('浏览腾讯 ima 知识库'),
+    'search_ima_knowledge': t('搜索腾讯 ima 知识库'),
     'get_life_panel': t('查看卡片详情'),
     'get_life_panel_catalog': t('查看卡片组件规范'), 'list_life_panels': t('查看 Life Panel'), 'publish_life_panel': t('保存卡片'),
     'get_life_board': t('查看看板'), 'list_life_boards': t('查看看板'), 'manage_life_board': t('管理看板'), 'manage_life_panel_task': t('管理卡片任务'),
@@ -30,6 +32,7 @@ export function toolTitle(name: string): string {
 export function toolGroupTitle(id: string): string {
   const titles: Record<string, string> = {
     'mail': t('邮件读取'),
+    'ima': t('腾讯 ima 知识库'),
     'workspace-read': t('文件读取与检索'), 'workspace-write': t('文件编辑'), 'context-read': t('附件与历史结果'),
     'web': t('网页读取与搜索'), 'browser': t('浏览器'), 'calculation': t('代码计算'), 'orchestration': t('工具编排'),
     'interaction': t('用户交互与计划'), 'delivery': t('预览与交付'), 'skill-read': t('Skills 读取'),
@@ -45,6 +48,7 @@ export function toolGroupTitle(id: string): string {
 export function toolCapabilityDescription(id: string): string {
   const descriptions: Record<string, string> = {
     'context-read': t('读取附件、查看图片和读取会话引用'), 'web': t('搜索互联网并读取网页内容'),
+    'ima': t('浏览和搜索腾讯 ima 知识库'),
     'browser': t('打开网页、查看页面、操作与接管浏览器'), 'calculation': t('在代码沙箱中计算和处理数据'),
     'orchestration': t('通过代码组合调用已授权工具'), 'user-input': t('通过表单向你确认信息'),
     'plan': t('创建和更新任务步骤'), 'team': t('招募、管理团队并完成员工交接'),
