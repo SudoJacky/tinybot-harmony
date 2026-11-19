@@ -2051,7 +2051,7 @@ export struct ChatPanel {
               .enabled(this.app.canQueueInput).onClick(() => this.app.enqueueInput('followUp'))
           }
           Row() {
-          IconButton({ icon: $r('sys.symbol.arrow_up'), label: t("发送"), compId: 'send-message', diameter: this.workbench ? 36 : 44, iconSize: 18,
+          IconButton({ animatedIcon: 'send', label: t('发送'), compId: 'send-message', diameter: this.workbench ? 36 : 44, iconSize: 18,
             fill: this.canSend() ? this.appearance.accent : $r('app.color.surface_variant'),
             tint: this.canSend() ? this.appearance.onAccent : $r('app.color.text_tertiary'),
             disabled: !this.canSend(), onTap: () => this.send() })

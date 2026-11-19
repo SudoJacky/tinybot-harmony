@@ -1795,7 +1795,7 @@ struct Index {
       // On the plain tablet title surface, API-26 light-sense material erases
       // the control fill; keep an opaque tint and reserve material for phones.
       Row({ space: 4 }) {
-        IconButton({ icon: $r('sys.symbol.rectangle_lefthalf_inset_filled'),
+        IconButton({ animatedIcon: 'panelLeft', animatedSelected: this.workbench().expanded || this.drawerOpen,
           label: this.workbench().expanded || this.drawerOpen ? t('收起会话栏') : t('展开会话列表'), compId: 'open-history',
           tint: this.workbench().expanded || this.drawerOpen ? this.appearance.accent : $r('app.color.text_primary'),
           fill: $r('app.color.surface_variant'), disabled: !this.app.ready, onTap: () => this.toggleHistory() })
@@ -1808,7 +1808,7 @@ struct Index {
             .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
             .accessibilityText(t('会话操作')).bindTips(t('会话操作'), { appearingTime: 550 })
             .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
-          IconButton({ icon: $r('sys.symbol.rectangle_righthalf_inset_filled'),
+          IconButton({ animatedIcon: 'panelRight', animatedSelected: this.detailPaneOpen,
             label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
             tint: this.detailPaneOpen ? this.appearance.accent : $r('app.color.text_primary'),
             fill: $r('app.color.surface_variant'),
@@ -1822,7 +1822,7 @@ struct Index {
   @Builder
   desktopHeader() {
     Row({ space: 4 }) {
-      IconButton({ icon: $r('sys.symbol.rectangle_lefthalf_inset_filled'),
+      IconButton({ animatedIcon: 'panelLeft', animatedSelected: this.workbench().expanded || this.drawerOpen,
         label: this.workbench().expanded || this.drawerOpen ? t('收起会话栏') : t('展开会话列表'), compId: 'open-history',
         tint: this.workbench().expanded || this.drawerOpen ? this.appearance.accent : $r('app.color.text_primary'),
         diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
@@ -1867,7 +1867,7 @@ struct Index {
         .bindTips(t('会话操作'), { appearingTime: 550 })
         .bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
       if (!this.detailCoversChat()) {
-        IconButton({ icon: $r('sys.symbol.rectangle_righthalf_inset_filled'),
+        IconButton({ animatedIcon: 'panelRight', animatedSelected: this.detailPaneOpen,
           label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
           tint: this.detailPaneOpen ? this.appearance.accent : $r('app.color.text_primary'),
           diameter: this.desktop ? 36 : 44, iconSize: 18, fill: this.detailPaneOpen ? $r('app.color.surface_variant') : $r('app.color.surface'),
@@ -1898,7 +1898,7 @@ struct Index {
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(); } })
       } else {
-        IconButton({ icon: $r('sys.symbol.worldclock'), label: t('应用内浏览器'), compId: 'empty-open-browser',
+        IconButton({ animatedIcon: 'browser', label: t('应用内浏览器'), compId: 'empty-open-browser',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.ready || this.browser.permissionSaving, onTap: () => this.openBrowser() })
       }

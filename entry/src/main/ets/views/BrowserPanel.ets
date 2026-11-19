@@ -387,7 +387,7 @@ export struct BrowserPanel {
           if (this.browser.loading) { this.driver?.userStop(); } else { this.driver?.userReload(); }
         } })
       this.addressField()
-      IconButton({ icon: this.pickingElement ? $r('sys.symbol.xmark') : $r('sys.symbol.viewfinder_square'),
+      IconButton({ icon: $r('sys.symbol.xmark'), animatedIcon: this.pickingElement ? undefined : 'elementPicker',
         label: this.pickingElement ? t('取消选择') : t('选择网页元素'), compId: 'browser-annotate',
         diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000',
         disabled: !this.pickingElement && !this.canCapturePage(),

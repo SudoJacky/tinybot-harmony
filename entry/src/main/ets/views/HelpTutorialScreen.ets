@@ -1,5 +1,6 @@
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AnimatedIcon } from '../common/AnimatedIcon';
+import { AnimatedIconName } from '../common/IconArtwork';
 import { TutorialControl, TutorialScreen, TUTORIAL_WIDTH, TUTORIAL_HEIGHT, tutorialRect } from '../model/HelpTutorial';
 import { EN_MESSAGES, ZH_MESSAGES } from '../model/LocaleCatalog';
 import { SpeechOrb } from '../common/SpeechOrb';
@@ -59,8 +60,9 @@ export struct HelpTutorialScreen {
   }
 
   @Builder
-  controlRow(control: TutorialControl, title: string, icon: Resource, subtitle: string = '', accent: boolean = false) {
-    NavRow({ title, subtitle, icon, accent }).width(tutorialRect(control).width).height(tutorialRect(control).height)
+  controlRow(control: TutorialControl, title: string, icon: Resource | undefined, subtitle: string = '',
+    accent: boolean = false, animatedIcon?: AnimatedIconName) {
+    NavRow({ title, subtitle, icon, accent, animatedIcon }).width(tutorialRect(control).width).height(tutorialRect(control).height)
       .position({ x: tutorialRect(control).x, y: tutorialRect(control).y })
   }
 
@@ -383,7 +385,7 @@ export struct HelpTutorialScreen {
     this.pageTitle(this.text('备份与恢复'))
     this.heading(this.text('华为云空间'), 92)
     this.card(16, 132, 328, 200)
-    this.controlRow('cloud-backup', this.text('备份到华为云空间'), $r('sys.symbol.cloud_and_arrow_up'), this.text('模型密钥随华为账号加密备份'))
+    this.controlRow('cloud-backup', this.text('备份到华为云空间'), undefined, this.text('模型密钥随华为账号加密备份'), false, 'backup')
     this.line(212)
     this.rowAt(this.text('刷新备份列表'), $r('sys.symbol.arrow_clockwise'), 212)
     this.line(268)

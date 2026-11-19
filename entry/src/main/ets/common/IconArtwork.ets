@@ -1,6 +1,7 @@
 export type AnimatedIconName = 'account' | 'services' | 'newChat' | 'sideChat' | 'preferences' | 'tools' | 'appearance' |
   'data' | 'help' | 'history' | 'search' | 'folder' | 'settings' | 'browser' | 'document' | 'branch' | 'plus' |
-  'announcement' | 'code' | 'preview' | 'dockRight';
+  'announcement' | 'code' | 'preview' | 'dockRight' | 'panelLeft' | 'panelRight' | 'elementPicker' | 'draw' |
+  'send' | 'backup' | 'restore';
 
 function pulse(progress: number, from: number, to: number): number {
   if (progress <= from || progress >= to) { return 0; }
@@ -53,6 +54,43 @@ export function iconPath(name: AnimatedIconName, progress: number, strength: num
       const tip = 17.5 + release - 0.5 * anticipation;
       return `M5 4.5 H19 Q21 4.5 21 6.5 V17.5 Q21 19.5 19 19.5 H5 Q3 19.5 3 17.5 V6.5 Q3 4.5 5 4.5 Z
         M14 4.5 V8 M14 16 V19.5 M6 12 H${tip} M${tip - 3} 9 L${tip} 12 L${tip - 3} 15`;
+    }
+    case 'panelLeft':
+    case 'panelRight': {
+      const left = name === 'panelLeft';
+      const shift = 1.6 * release - 0.6 * anticipation;
+      const divider = left ? 8.7 + shift : 15.3 - shift;
+      const railX = left ? 5.8 : 18.2;
+      return `M5 4.5 H19 Q21 4.5 21 6.5 V17.5 Q21 19.5 19 19.5 H5 Q3 19.5 3 17.5 V6.5 Q3 4.5 5 4.5 Z
+        M${divider} 4.5 V19.5 M${railX} 8.75 V15.25`;
+    }
+    case 'elementPicker': {
+      const inset = 3.5 + 1.45 * release - 0.45 * anticipation;
+      const far = 24 - inset;
+      return `M${inset} 9 V${inset} H9 M15 ${inset} H${far} V9
+        M${far} 15 V${far} H15 M9 ${far} H${inset} V15 M12 12 h0.01`;
+    }
+    case 'draw': {
+      const stroke = 19 + 1.8 * release - 0.8 * anticipation;
+      return `M4 18.5 L5.7 14.1 L15.9 3.9 Q16.8 3 17.7 3.9 L19.7 5.9 Q20.6 6.8 19.7 7.7
+        L9.5 17.9 L4 18.5 Z M14.5 5.3 L18.3 9.1 M5.7 14.1 L9.5 17.9 M4 21 H${stroke}`;
+    }
+    case 'send': {
+      const offset = 1.7 * release - 0.7 * anticipation;
+      const tip = 4.8 - offset;
+      return `M12 ${19.2 - offset} V${tip} M6.1 ${tip + 5.9} L12 ${tip} L17.9 ${tip + 5.9}`;
+    }
+    case 'backup':
+    case 'restore': {
+      const up = name === 'backup';
+      const shift = 1.45 * release - 0.65 * anticipation;
+      const tip = up ? 10.5 - shift : 20.1 + shift;
+      const tail = up ? 20.1 - shift : 10.5 + shift;
+      const shoulder = up ? tip + 3.4 : tip - 3.4;
+      return `M8 17.8 H6.1 C3.8 17.8 2.3 16.3 2.3 14.1 C2.3 12 3.9 10.5 6 10.25
+        C6.4 7.05 9.1 4.5 12.35 4.5 C15.55 4.5 18.25 6.85 18.7 9.9
+        C20.5 10.3 21.7 11.8 21.7 13.9 C21.7 16.1 20.1 17.8 18 17.8 H16
+        M12 ${tail} V${tip} M8.6 ${shoulder} L12 ${tip} L15.4 ${shoulder}`;
     }
     case 'tools': {
       const x = 8.2 - 0.95 * release;

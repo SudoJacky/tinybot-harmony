@@ -255,10 +255,10 @@ export struct WebDavBackupPanel {
         GroupCard() {
           Column() {
             NavRow({ title: t('备份'), subtitle: t('只上传配置与加密连接凭据，保留最近 3 个配置版本'),
-              compId: 'create-webdav-backup', icon: $r('sys.symbol.cloud_and_arrow_up'), disabled: this.locked(), onTap: () => this.transfer(false) })
+              compId: 'create-webdav-backup', animatedIcon: 'backup', disabled: this.locked(), onTap: () => this.transfer(false) })
             RowDivider()
             NavRow({ title: t('恢复备份'), subtitle: t('下载 WebDAV 备份并合并到本机'),
-              compId: 'restore-webdav-backup', icon: $r('sys.symbol.cloud_and_arrow_down'), disabled: this.locked(), onTap: () => this.chooseRestore() })
+              compId: 'restore-webdav-backup', animatedIcon: 'restore', disabled: this.locked(), onTap: () => this.chooseRestore() })
           }
         }
         ForEach(this.versions, (item: BackupSnapshot) => {

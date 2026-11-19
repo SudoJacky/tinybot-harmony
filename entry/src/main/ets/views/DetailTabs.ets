@@ -162,7 +162,7 @@ export struct DetailTabs {
         label: this.maximized ? t('恢复并排显示') : t('最大化侧栏'), compId: 'detail-toggle-maximized',
         diameter: this.touch ? 44 : 32, iconSize: 16, onTap: this.onMaximize })
     }
-    if (this.showCollapse) { IconButton({ icon: $r('sys.symbol.rectangle_righthalf_inset_filled'), label: t('关闭侧栏'), compId: 'detail-collapse',
+    if (this.showCollapse) { IconButton({ animatedIcon: 'panelRight', label: t('关闭侧栏'), compId: 'detail-collapse',
       diameter: this.touch ? 44 : 32, iconSize: 17, onTap: this.onCollapse }) }
   }
 

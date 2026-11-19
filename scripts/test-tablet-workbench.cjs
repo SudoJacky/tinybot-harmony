@@ -29,6 +29,52 @@ function probe(file, name, methods, globals = {}) {
   }).outputText, { exports, ...globals });
   return exports.Probe;
 }
+
+const MouseButton = { Left: 'left', Right: 'right' };
+const MouseAction = { Press: 'press', Release: 'release' };
+const TouchType = { Down: 'down', Up: 'up', Cancel: 'cancel' };
+const SourceType = { Mouse: 'mouse', TouchScreen: 'touch' };
+const IconControl = probe('common/Widgets', 'IconButton',
+  ['pressed', 'iconScale', 'disabledChanged', 'iconHover', 'iconMouse', 'iconTouch'],
+  { MouseButton, MouseAction, TouchType, SourceType });
+const iconControl = Object.assign(new IconControl(), {
+  appearance: { effectStrength: 1 }, disabled: false, iconHovered: false, mousePressed: false, touchPressed: false
+});
+iconControl.iconHover(true);
+assert.ok(iconControl.iconScale() > 1);
+iconControl.iconMouse({ button: MouseButton.Right, action: MouseAction.Press });
+assert.equal(iconControl.pressed(), false);
+iconControl.iconMouse({ button: MouseButton.Left, action: MouseAction.Press });
+iconControl.iconTouch({ source: SourceType.Mouse, type: TouchType.Down });
+assert.ok(iconControl.iconScale() < 1);
+iconControl.iconHover(false);
+assert.equal(iconControl.pressed(), false, 'Dragging a mouse press off the icon clears feedback');
+assert.equal(iconControl.iconScale(), 1);
+iconControl.iconTouch({ source: SourceType.TouchScreen, type: TouchType.Down });
+assert.ok(iconControl.iconScale() < 1);
+iconControl.iconTouch({ source: SourceType.TouchScreen, type: TouchType.Cancel });
+assert.equal(iconControl.iconScale(), 1);
+iconControl.iconHover(true);
+iconControl.iconMouse({ button: MouseButton.Left, action: MouseAction.Press });
+iconControl.iconMouse({ button: MouseButton.Left, action: MouseAction.Release });
+assert.ok(iconControl.iconScale() > 1, 'Releasing the mouse over the button restores the hover state');
+iconControl.disabled = true; iconControl.disabledChanged();
+iconControl.disabled = false;
+assert.equal(iconControl.iconScale(), 1);
+iconControl.appearance.effectStrength = 0;
+iconControl.iconHover(true);
+iconControl.iconTouch({ source: SourceType.TouchScreen, type: TouchType.Down });
+assert.equal(iconControl.iconScale(), 1);
+for (const name of ['panelLeft', 'panelRight', 'elementPicker', 'draw', 'send', 'backup', 'restore']) {
+  const rest = iconPath(name, 1, 1);
+  assert.notEqual(iconPath(name, 0.6, 1), rest);
+  assert.equal(iconPath(name, 0, 1), rest);
+  assert.equal(iconPath(name, 0.6, 0), rest);
+}
+assert.notEqual(iconPath('panelLeft', 1, 1), iconPath('panelRight', 1, 1));
+assert.notEqual(iconPath('backup', 1, 1), iconPath('restore', 1, 1));
+console.log('PASS reactive icon geometry, mouse leave/release, touch cancellation, disabled controls, and motion preference');
+
 const RAIL = WorkbenchLayout.RAIL_WIDTH;
 const ChatViewportLayout = probe('views/ChatPanel', 'ChatViewportLayout', ['onMeasureSize', 'onPlaceChildren']);
 const chatViewport = Object.assign(new ChatViewportLayout(), { centeredHeight: 742 });
