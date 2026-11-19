@@ -1,3 +1,14 @@
+Tinybot v1.3.3 · 回归与云测试说明
+版本：1.3.3 / 1003003；准备日期：2026-11-19
+
+- 包结构、SDK 版本、原生 Build ID 和 SHA-256 见交付目录的 package-info.json 与 SHA256SUMS.txt。
+- v1.3.3 的 Debug 构建、106 项源码与 Debug 测试、314 项 Hypium 单测和 6 项浏览器测试通过，覆盖 Office 与 HTML 批注。ArkTS 检查无错误，词条、内置 Skills 与文档构建通过。
+- Release 使用 assembleApp 构建。混淆产物回归通过，覆盖旧会话、模型请求、批注属性、隐私授权和画板加载。
+- PR #150 的 Debug 供测包在 MatePad 11.5 与 Mate 70 Pro+（API 26）验证了会话与文件传输、重复接收去重。PR #152 在 MateBook Pro 模拟器验证了分栏与重启恢复，在 MatePad 11.5 真机验证了触控命令面板交互。
+- 正式签名后的覆盖升级、API 20 与实体二合一设备回归及 AGC 云测试见 RELEASE-GAPS.txt。
+
+--- 历史验证记录 ---
+
 Tinybot v1.3.1 · 回归与云测试说明
 版本：1.3.1 / 1003001；准备日期：2026-11-13
 
