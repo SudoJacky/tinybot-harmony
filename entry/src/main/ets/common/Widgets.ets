@@ -33,7 +33,7 @@ export struct IconButton {
         AnimatedIcon({ iconName: this.animatedIcon, iconSize: this.iconSize, tint: this.tint,
           interacting: this.iconInteracting && !this.disabled, selected: this.animatedSelected === true })
       } else {
-        SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
+        SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint]).accessibilityLevel('no')
       }
     }.fontFamily(this.appearance.fontFamily)
     .id(this.compId).width(this.diameter).height(this.diameter)
@@ -267,10 +267,15 @@ export struct EmptyState {
   @Prop icon: Resource = $r('sys.symbol.doc_text');
   @Prop title: string = '';
   @Prop caption: string = '';
+  animatedIcon?: AnimatedIconName;
 
   build() {
     Column({ space: Space.md }) {
-      SymbolGlyph(this.icon).fontSize(40).fontColor([$r('app.color.text_tertiary')])
+      if (this.animatedIcon) {
+        AnimatedIcon({ iconName: this.animatedIcon, iconSize: 40, tint: $r('app.color.text_tertiary') })
+      } else {
+        SymbolGlyph(this.icon).fontSize(40).fontColor([$r('app.color.text_tertiary')]).accessibilityLevel('no')
+      }
       Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(15).fontColor($r('app.color.text_secondary'))
       if (this.caption.length > 0) {
         Text(this.caption).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).textAlign(TextAlign.Center).fontColor($r('app.color.text_tertiary'))
@@ -509,10 +514,15 @@ export struct IconBadge {
   @Prop tint?: ResourceColor;
   @Prop fill?: ResourceColor;
   diameter: number = 36;
+  animatedIcon?: AnimatedIconName;
 
   build() {
     Column() {
-      SymbolGlyph(this.icon).fontSize(Math.round(this.diameter * 0.55)).fontColor([this.tint || this.appearance.accent])
+      if (this.animatedIcon) {
+        AnimatedIcon({ iconName: this.animatedIcon, iconSize: Math.round(this.diameter * 0.55), tint: this.tint || this.appearance.accent })
+      } else {
+        SymbolGlyph(this.icon).fontSize(Math.round(this.diameter * 0.55)).fontColor([this.tint || this.appearance.accent]).accessibilityLevel('no')
+      }
     }.width(this.diameter).height(this.diameter).borderRadius(Math.round(this.diameter * 0.3))
     .justifyContent(FlexAlign.Center).backgroundColor(this.fill || this.appearance.accentContainer)
   }

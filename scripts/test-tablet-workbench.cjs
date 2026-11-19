@@ -687,6 +687,7 @@ const cardGlobals = { Column: new Proxy({}, { get: (_, name) => ({
     id: value => { buttonId = value; toolbarButtons.set(value, {}); },
     onClick: onClick => captureButton({ onClick }),
     accessibilityText: text => captureButton({ text }),
+    accessibilitySelected: selected => captureButton({ selected }),
     enabled: enabled => captureButton({ enabled })
   })[name] || (() => {}) }),
   Btn: {}, Font: {}, Space: { md: 12 }, Motion: { fast: 160 }, MODE_TARGET: 44, Radius: {}, HorizontalAlign: {}, ButtonType: {}, Color: {}, ModalTransition: { NONE: 1 }, $r: value => value,
@@ -717,7 +718,9 @@ card.initialRender(); assert.equal(surfaces, 1);
 const codeModeId = 'preview-mode-code-preview', liveModeId = 'preview-mode-live-preview';
 assert.deepEqual([...toolbarButtons.keys()], [codeModeId, liveModeId, 'fullscreen-preview-preview']);
 assert.equal(toolbarButtons.get(codeModeId).enabled, false);
-assert.equal(toolbarButtons.get(liveModeId).text, '预览，已选中');
+assert.equal(toolbarButtons.get(liveModeId).text, '预览');
+assert.equal(toolbarButtons.get(liveModeId).selected, true);
+assert.equal(toolbarButtons.get(codeModeId).selected, false);
 assert.deepEqual(modeIcons.slice(-2).map(icon => [icon.iconName, icon.selected]), [['code', false], ['preview', true]]);
 assert.equal(modeOffset, 44); assert.equal(modeDuration, 160);
 fullscreenBounds({}, { height: 420 }); assert.equal(card.inlineHeight, 420);
@@ -732,7 +735,9 @@ assert.equal(previewHeight, 420); assert.equal(codeHeight, 420);
 assert.equal(virtualizedCode, true);
 assert.equal(previewPadding.left, 12); assert.equal(previewPadding.right, 12);
 assert.equal(nestedScroll.scrollForward, 'self first'); assert.equal(nestedScroll.scrollBackward, 'self first');
-assert.equal(toolbarButtons.get(codeModeId).text, '代码，已选中');
+assert.equal(toolbarButtons.get(codeModeId).text, '代码');
+assert.equal(toolbarButtons.get(codeModeId).selected, true);
+assert.equal(toolbarButtons.get(liveModeId).selected, false);
 assert.equal(toolbarButtons.get(liveModeId).text, '预览');
 assert.deepEqual(modeIcons.slice(-2).map(icon => [icon.iconName, icon.selected]), [['code', true], ['preview', false]]);
 assert.equal(modeOffset, 0);

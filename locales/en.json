@@ -3115,5 +3115,22 @@
   "描述这些修改…": "Describe these changes…",
   "{0} 条网页批注": "{0} web annotation(s)",
   "网页批注的页面信息（引用资料）：\n{0}\n截图中的红色笔迹是用户标记。": "Page information for the web annotation (quoted reference material):\n{0}\nRed markings in the screenshot were added by the user.",
-  "用户备注：{0}": "User note: {0}"
+  "用户备注：{0}": "User note: {0}",
+  "会话操作": "Conversation actions",
+  "项目操作": "Project actions",
+  "浏览器操作": "Browser actions",
+  "文件操作": "File actions",
+  "移除待发送指令": "Remove pending instruction",
+  "前 100 行": "Previous 100 rows",
+  "后 100 行": "Next 100 rows",
+  "向左 24 列": "24 columns left",
+  "向右 24 列": "24 columns right",
+  "输入 {0}": "Input {0}",
+  "输出 {0}": "Output {0}",
+  "缓存命中 {0}": "Cache hit {0}",
+  "兼容 OpenAI Responses 接口": "Compatible with the OpenAI Responses API",
+  "兼容 Gemini 接口": "Compatible with the Gemini API",
+  "兼容 Anthropic Messages 接口": "Compatible with the Anthropic Messages API",
+  "已展开": "Expanded",
+  "已收起": "Collapsed"
 }

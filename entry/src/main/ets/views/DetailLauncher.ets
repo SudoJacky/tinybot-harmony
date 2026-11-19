@@ -66,7 +66,7 @@ export struct DetailLauncher {
           }
           this.option('folder', t('工作区文件'), 'detail-launcher-files', this.onFiles)
           this.option('browser', t('应用内浏览器'), 'detail-launcher-browser', this.onBrowser)
-          if (this.sideChatAvailable) { this.option('compose', t('新建旁聊'), 'detail-launcher-side-chat', this.onSideChat) }
+          if (this.sideChatAvailable) { this.option('sideChat', t('新建旁聊'), 'detail-launcher-side-chat', this.onSideChat) }
           if (this.workbench) { this.context() }
         }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.Top)

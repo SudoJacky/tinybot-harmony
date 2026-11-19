@@ -46,7 +46,7 @@ export struct BranchesPanel {
           .border({ width: { left: 1.5, bottom: 1.5 }, color: $r('app.color.divider') }).borderRadius({ bottomLeft: 8 })
       }
       Row({ space: Space.md }) {
-        IconBadge({ icon: thread.parentThreadId ? $r('sys.symbol.split') : $r('sys.symbol.ellipsis_message'),
+        IconBadge({ icon: $r('sys.symbol.ellipsis_message'), animatedIcon: thread.parentThreadId ? 'branch' : undefined,
           tint: thread.id === this.app.active.id ? this.appearance.accent : $r('app.color.text_secondary'),
           fill: thread.id === this.app.active.id ? this.appearance.accentContainer : $r('app.color.surface_variant') })
         Column({ space: 4 }) {
@@ -80,7 +80,7 @@ export struct BranchesPanel {
     List({ space: Space.sm }) {
       if (this.branched().length === 0) {
         ListItem() {
-          EmptyState({ icon: $r('sys.symbol.split'), title: t("还没有分支"),
+          EmptyState({ animatedIcon: 'branch', title: t("还没有分支"),
             caption: t("长按任意消息，选择“从这里创建分支”，即可在不影响原对话的情况下尝试另一种方向。") })
         }
       }

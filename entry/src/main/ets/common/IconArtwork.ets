@@ -1,5 +1,6 @@
-export type AnimatedIconName = 'account' | 'cloud' | 'compose' | 'tools' | 'mountain' | 'data' | 'help' |
-  'history' | 'search' | 'folder' | 'settings' | 'browser' | 'document' | 'branch' | 'plus' | 'announcement' | 'code' | 'preview';
+export type AnimatedIconName = 'account' | 'services' | 'newChat' | 'sideChat' | 'preferences' | 'tools' | 'appearance' |
+  'data' | 'help' | 'history' | 'search' | 'folder' | 'settings' | 'browser' | 'document' | 'branch' | 'plus' |
+  'announcement' | 'code' | 'preview' | 'dockRight';
 
 function pulse(progress: number, from: number, to: number): number {
   if (progress <= from || progress >= to) { return 0; }
@@ -9,17 +10,6 @@ function pulse(progress: number, from: number, to: number): number {
 
 function ellipse(x: number, y: number, rx: number, ry: number = rx): string {
   return `M${x - rx} ${y} a${rx} ${ry} 0 1 0 ${2 * rx} 0 a${rx} ${ry} 0 1 0 ${-2 * rx} 0 Z`;
-}
-
-function mountains(progress: number, strength: number): string {
-  const front = 11.4 + strength * (2.4 * pulse(progress, 0, 0.44) - 2.1 * pulse(progress, 0.34, 1));
-  const rear = 12.4 + strength * (1.8 * pulse(progress, 0.06, 0.49) - 1.2 * pulse(progress, 0.44, 1));
-  const sun = 8.65 + strength * (1.2 * pulse(progress, 0, 0.43) - 1.6 * pulse(progress, 0.32, 1));
-  const join = front + 0.45 + (16.4 - front - 0.45) * 0.55;
-  return `M5.5 4.5 H18.5 Q21 4.5 21 7 V17 Q21 19.5 18.5 19.5 H5.5 Q3 19.5 3 17 V7 Q3 4.5 5.5 4.5 Z
-    M3.1 17.1 L8.45 ${front + 0.45} Q9 ${front - 0.1} 9.55 ${front + 0.45} L14.1 16.4
-    M12.05 ${join} L14.55 ${rear + 0.45} Q15.1 ${rear - 0.1} 15.65 ${rear + 0.45} L20.9 17.05
-    ${ellipse(16.2, sun, 0.8)}`;
 }
 
 function gear(turn: number): string {
@@ -38,21 +28,31 @@ export function iconPath(name: AnimatedIconName, progress: number, strength: num
   const anticipation = pulse(progress, 0, 0.52) * strength;
   const release = pulse(progress, 0.26, 1) * strength;
   switch (name) {
-    case 'mountain': return mountains(progress, strength);
+    case 'appearance':
+      return `M12 3.5 C6.7 3.5 3 7.5 3 12.2 C3 17 7.2 20.5 12 20.5 H13.7 C15.6 20.5 16.3 19 15.1 17.7
+        C13.3 15.7 14.8 14.3 17.2 14.3 H18 C20 14.3 21 12.9 21 11.2 C21 6.8 17.3 3.5 12 3.5 Z
+        M7.1 11 h0.01 M10.2 ${7.6 - 0.8 * release} h0.01 M14.3 7.6 h0.01 M17.3 10.4 h0.01`;
     case 'account':
       return `M4 20 V18.7 C4 15.6 7.6 ${15.1 - release} 12 ${15.1 - release} C16.4 ${15.1 - release} 20 15.6 20 18.7 V20
         ${ellipse(12, 8.1 + anticipation - 1.5 * release, 3.45)}`;
-    case 'cloud': {
-      const arrow = 11.4 + anticipation - 1.65 * release;
-      return `M7 17.8 H6.3 A4.3 4.3 0 1 1 7.8 9.5 A5.3 5.3 0 0 1 18 10 A3.9 3.9 0 0 1 17.7 17.8 H16.9
-        M9.1 ${arrow + 2.8} L12 ${arrow} L14.9 ${arrow + 2.8} M12 ${arrow} V19.7`;
+    case 'services':
+      return `M5 5 H19 Q21 5 21 7 V17 Q21 19 19 19 H5 Q3 19 3 17 V7 Q3 5 5 5 Z M3 12 H21
+        M7 8.5 h0.01 M7 15.5 h0.01 M11 8.5 H${17 + 1.5 * release} M11 15.5 H17`;
+    case 'newChat': {
+      const arm = 3.1 + 0.9 * release - 0.4 * anticipation;
+      return `M6 4.5 H18 Q21 4.5 21 7.5 V14 Q21 17 18 17 H10.5 L3 21 V7.5 Q3 4.5 6 4.5 Z
+        M${12 - arm} 10.75 H${12 + arm} M12 ${10.75 - arm} V${10.75 + arm}`;
     }
-    case 'compose': {
-      const x = 9.1 + 1.45 * release;
-      const y = 15.4 + 0.7 * anticipation - 1.25 * release;
-      return `M12.4 4.2 H6.2 Q4 4.2 4 6.4 V17.8 Q4 20 6.2 20 H17.5 Q19.7 20 19.7 17.8 V12.4
-        M${x} ${y} l0.85 -3.85 6.1 -6.1 q0.8 -0.8 1.6 0 l1.15 1.15 q0.8 0.8 0 1.6 l-6.1 6.1 Z
-        M${x + 5.6} ${y - 8.25} l2.65 2.65`;
+    case 'sideChat':
+      return `M5.5 5 H13.4 Q16 5 16 7.6 V12 Q16 14.5 13.4 14.5 H8.5 L3 18 V7.6 Q3 5 5.5 5 Z
+        M${18.8 + release} 9 Q21 9.5 21 11.5 V20 L17 17.5 H12.5`;
+    case 'preferences':
+      return `M5 5 H19 Q21 5 21 7 V17 Q21 19 19 19 H5 Q3 19 3 17 V7 Q3 5 5 5 Z
+        ${ellipse(8.5, 10, 1.65)} M5.8 15.5 Q8.5 12.3 11.2 15.5 M14 9 H${18 + release} M14 14.5 H18`;
+    case 'dockRight': {
+      const tip = 17.5 + release - 0.5 * anticipation;
+      return `M5 4.5 H19 Q21 4.5 21 6.5 V17.5 Q21 19.5 19 19.5 H5 Q3 19.5 3 17.5 V6.5 Q3 4.5 5 4.5 Z
+        M14 4.5 V8 M14 16 V19.5 M6 12 H${tip} M${tip - 3} 9 L${tip} 12 L${tip - 3} 15`;
     }
     case 'tools': {
       const x = 8.2 - 0.95 * release;

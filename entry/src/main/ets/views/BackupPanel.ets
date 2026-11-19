@@ -180,7 +180,7 @@ export struct BackupPanel {
             NavRow({ title: t('从其他设备接收'), icon: $r('sys.symbol.arrow_down'), compId: 'device-sync-receive',
               disabled: this.locked(), onTap: () => this.discover(false) })
             ForEach(this.devices, (device: SyncDevice) => {
-              NavRow({ title: device.name, icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(),
+              NavRow({ title: device.name, icon: $r('sys.symbol.arrow_left_arrow_right'), disabled: this.locked(),
                 onTap: () => this.transfer(device) })
             }, (device: SyncDevice) => device.id)
           }
@@ -194,10 +194,10 @@ export struct BackupPanel {
         GroupCard() {
           Column() {
             NavRow({ title: t('备份'), subtitle: t('只上传配置与加密连接凭据，保留最近 3 个配置版本'),
-              compId: 'create-cloud-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.cloud(false) })
+              compId: 'create-cloud-backup', icon: $r('sys.symbol.cloud_and_arrow_up'), disabled: this.locked(), onTap: () => this.cloud(false) })
             RowDivider()
             NavRow({ title: t('恢复备份'), subtitle: t('选择设备与版本，确认恢复内容'),
-              compId: 'restore-cloud-backup', icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(), onTap: () => this.chooseRestore() })
+              compId: 'restore-cloud-backup', icon: $r('sys.symbol.cloud_and_arrow_down'), disabled: this.locked(), onTap: () => this.chooseRestore() })
           }
         }
         if (this.showVersions) {

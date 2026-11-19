@@ -9,7 +9,7 @@ export struct AnimatedIcon {
   @Prop @Watch('selectionChanged') selected: boolean = false;
   @Prop @Watch('interactionChanged') interacting: boolean = false;
   @Prop tint: ResourceColor = $r('app.color.text_secondary');
-  iconName: AnimatedIconName = 'mountain';
+  iconName: AnimatedIconName = 'appearance';
   iconSize: number = 18;
   playOnAppear: boolean = false;
   @State private progress: number = 1;

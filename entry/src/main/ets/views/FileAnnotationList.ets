@@ -40,9 +40,9 @@ export struct FileAnnotationList {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }.alignItems(HorizontalAlign.Start).layoutWeight(1)
         if (this.editable) {
-          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('编辑批注'), diameter: 32, iconSize: 15,
+          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('编辑批注'), iconSize: 15,
             disabled: this.disabled || this.saving, onTap: () => { this.editing = item.id; this.comment = item.comment; } })
-          IconButton({ icon: $r('sys.symbol.trash'), label: t('删除批注'), diameter: 32, iconSize: 15,
+          IconButton({ icon: $r('sys.symbol.trash'), label: t('删除批注'), iconSize: 15,
             disabled: this.disabled || this.saving, onTap: () => this.change(item.id) })
         }
       }.width('100%')

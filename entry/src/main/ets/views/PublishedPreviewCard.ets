@@ -104,7 +104,8 @@ export struct PublishedPreviewCard {
         tint: this.showCode === code ? this.appearance.accent : $r('app.color.text_secondary') })
     }.id((code ? 'preview-mode-code-' : 'preview-mode-live-') + this.preview.id)
       .width(MODE_TARGET).height(MODE_TARGET).padding(0).borderRadius(MODE_TARGET / 2).backgroundColor(Color.Transparent)
-      .accessibilityText((code ? t('代码') : t('预览')) + (this.showCode === code ? t('，已选中') : ''))
+      .accessibilityText(code ? t('代码') : t('预览')).accessibilitySelected(this.showCode === code)
+      .bindTips(code ? t('代码') : t('预览'), { appearingTime: 550 })
       .enabled(!code || this.inlineHeight > 0).clickEffect(this.appearance.effectStrength > 0 ? Motion.pressSmall : null)
       .onClick(() => this.selectMode(code))
   }
@@ -134,7 +135,7 @@ export struct PublishedPreviewCard {
       this.previewModeControl()
       Blank()
       if (this.desktop && this.inspectable) {
-        IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('在侧栏打开预览'),
+        IconButton({ animatedIcon: 'dockRight', label: t('在侧栏打开预览'),
           compId: 'dock-preview-' + this.preview.id, diameter: 40, iconSize: 17,
           fill: $r('app.color.surface_variant'), tint: $r('app.color.text_secondary'), onTap: this.onInspect })
       }

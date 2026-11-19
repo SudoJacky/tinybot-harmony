@@ -12,10 +12,10 @@ const CATEGORY_TRACK_RADIUS: number = 25;
 export const SETTINGS_CATEGORY_SWIPE_DISTANCE: number = 44;
 const CATEGORIES: SettingsCategory[] = [
   { key: 'account', icon: 'account' },
-  { key: 'models', icon: 'cloud' },
-  { key: 'assistant', icon: 'compose' },
+  { key: 'models', icon: 'services' },
+  { key: 'assistant', icon: 'preferences' },
   { key: 'tools', icon: 'tools' },
-  { key: 'appearance', icon: 'mountain' },
+  { key: 'appearance', icon: 'appearance' },
   { key: 'data', icon: 'data' },
   { key: 'help', icon: 'help' }
 ];

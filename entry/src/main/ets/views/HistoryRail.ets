@@ -31,7 +31,7 @@ struct RailButton {
       if (event.type === TouchType.Down) { this.pressed = true; }
       else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.pressed = false; }
     })
-    .accessibilityText(this.label).onClick(() => this.onTap())
+    .accessibilityText(this.label).bindTips(this.label, { appearingTime: 550 }).onClick(() => this.onTap())
   }
 }
 
@@ -49,7 +49,7 @@ export struct HistoryRail {
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       Column() {
         Column({ space: 12 }) {
-          RailButton({ icon: 'compose', label: t('新建对话'),
+          RailButton({ icon: 'newChat', label: t('新建对话'),
             compId: 'workbench-rail-new-chat', disabled: !this.active, onTap: this.onNewChat })
           RailButton({ icon: 'search', label: t('搜索对话'),
             compId: 'workbench-rail-search', disabled: !this.active, onTap: this.onSearch })

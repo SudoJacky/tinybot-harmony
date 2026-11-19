@@ -63,10 +63,10 @@ export struct DetailTabs {
     Menu() {
       MenuItem(() => materialMenuContent.bind(this)({ label: t('工作区文件'), icon: $r('sys.symbol.folder') }))
         .id('detail-add-files').onClick(() => this.onAddFiles())
-      MenuItem(() => materialMenuContent.bind(this)({ label: t('应用内浏览器'), icon: $r('sys.symbol.connection') }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('应用内浏览器'), icon: $r('sys.symbol.worldclock') }))
         .id('detail-add-browser').onClick(() => this.onAddBrowser())
       if (this.sideChatAvailable) {
-        MenuItem(() => materialMenuContent.bind(this)({ label: t('新建旁聊'), icon: $r('sys.symbol.ellipsis_message') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('新建旁聊'), icon: $r('sys.symbol.text_bubble_left_2') }))
           .id('detail-add-side-chat').onClick(() => this.onAddSideChat())
       }
     }
@@ -152,11 +152,11 @@ export struct DetailTabs {
       .bindTips(t('添加侧栏面板'), { appearingTime: 550 })
       .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
     if (this.showMaximize) {
-      IconButton({ icon: this.maximized ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
+      IconButton({ icon: this.maximized ? $r('sys.symbol.arrow_down_right_and_arrow_up_left') : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
         label: this.maximized ? t('恢复并排显示') : t('最大化侧栏'), compId: 'detail-toggle-maximized',
         diameter: this.touch ? 44 : 32, iconSize: 16, onTap: this.onMaximize })
     }
-    if (this.showCollapse) { IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('关闭侧栏'), compId: 'detail-collapse',
+    if (this.showCollapse) { IconButton({ icon: $r('sys.symbol.rectangle_righthalf_inset_filled'), label: t('关闭侧栏'), compId: 'detail-collapse',
       diameter: this.touch ? 44 : 32, iconSize: 17, onTap: this.onCollapse }) }
   }
 

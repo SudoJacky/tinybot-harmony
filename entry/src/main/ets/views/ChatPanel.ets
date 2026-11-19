@@ -1,4 +1,5 @@
 import { FileAnnotationList } from './FileAnnotationList';
+import { filePreviewIcon } from '../common/FileArtwork';
 import { KeyCode } from '@kit.InputKit';
 import { ChatShortcut, ChatShortcutAction, NavigationShortcut, chatShortcuts, handleDraftEnter } from '../common/KeyboardShortcuts';
 import { AdaptiveUi } from '../model/AdaptiveUi';
@@ -1198,7 +1199,7 @@ export struct ChatPanel {
       this.plusMenuRow($r('sys.symbol.doc_text'), t('文本文件'), 'plus-menu-text',
         this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false,
         () => this.dismissPlusMenu(() => this.attach('file')))
-      this.plusMenuRow($r('sys.symbol.square_and_pencil'), t('画板'), 'plus-menu-drawing',
+      this.plusMenuRow($r('sys.symbol.pencil_tip'), t('画板'), 'plus-menu-drawing',
         this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false,
         () => this.dismissPlusMenu(() => this.openDrawing()))
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
@@ -1232,7 +1233,7 @@ export struct ChatPanel {
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('camera')))
           this.plusTile($r('sys.symbol.doc_text'), t("文本文件"), 'attach-text',
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('file')))
-          this.plusTile($r('sys.symbol.square_and_pencil'), t('画板'), 'attach-drawing',
+          this.plusTile($r('sys.symbol.pencil_tip'), t('画板'), 'attach-drawing',
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.openDrawing()))
           this.plusTile($r('sys.symbol.folder'), t("工作区"), 'open-workspace', !this.app.busy,
             () => { this.showPlus = false; this.onFiles(); })
@@ -1252,7 +1253,7 @@ export struct ChatPanel {
       if (item.mime === 'image/jpeg') {
         Image('file://' + Attachments.path(item)).width('100%').height('100%').objectFit(ImageFit.Cover)
       } else {
-        SymbolGlyph($r('sys.symbol.doc_text')).fontSize(size < 32 ? 14 : 20).fontColor([this.appearance.accent])
+        SymbolGlyph(filePreviewIcon(item.name)).fontSize(size < 32 ? 14 : 20).fontColor([this.appearance.accent]).accessibilityLevel('no')
       }
     }.width(size).height(size).borderRadius(radius).clip(true).backgroundColor($r('app.color.surface_variant'))
   }
@@ -1304,7 +1305,7 @@ export struct ChatPanel {
           .backgroundColor(Color.Transparent).accessibilityText(item.name).onClick(() => this.previewAttachment(item))
       } else {
         Column({ space: 2 }) {
-          SymbolGlyph($r('sys.symbol.doc_text')).fontSize(18).fontColor([this.appearance.accent])
+          SymbolGlyph(filePreviewIcon(item.name)).fontSize(18).fontColor([this.appearance.accent]).accessibilityLevel('no')
           Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(11).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
           Text(fileSize(item.size)).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
@@ -1312,10 +1313,11 @@ export struct ChatPanel {
           .alignItems(HorizontalAlign.Start).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
       }
       Button({ type: ButtonType.Circle }) {
-        SymbolGlyph($r('sys.symbol.xmark')).fontSize(10).fontColor([Color.White])
+        SymbolGlyph($r('sys.symbol.xmark')).fontSize(10).fontColor([Color.White]).accessibilityLevel('no')
       }.id('remove-attachment-' + item.id).width(20).height(20).backgroundColor('#99000000')
         .margin({ top: 4, right: 4 }).accessibilityText(t('移除 ') + item.name)
-        .hitTestBehavior(HitTestMode.Block).responseRegion({ x: -10, y: -10, width: 40, height: 40 })
+        .bindTips(t('移除 ') + item.name, { appearingTime: 550 })
+        .hitTestBehavior(HitTestMode.Block).responseRegion({ x: -20, y: -4, width: 44, height: 44 })
         .enabled(this.canAttach()).onClick(() => this.removeAttachment(item.id))
     }.enabled(!this.app.busy)
   }
@@ -1422,7 +1424,7 @@ export struct ChatPanel {
         Text(fileSize(item.size)).fontFamily(this.appearance.fontFamily).fontSize(10)
           .fontColor($r('app.color.text_secondary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-      IconButton({ icon: $r('sys.symbol.trash'), label: t('移除 ') + item.name, compId: 'remove-attachment-' + item.id,
+      IconButton({ icon: $r('sys.symbol.xmark'), label: t('移除 ') + item.name, compId: 'remove-attachment-' + item.id,
         iconSize: 15, fill: '#00000000', tint: $r('app.color.text_secondary'), disabled: !this.canAttach(),
         onTap: () => this.removeAttachment(item.id) })
     }.width(this.panelWidth >= 330 ? 'calc(50% - 4vp)' : '100%').constraintSize({ minHeight: 48 })
@@ -1748,7 +1750,7 @@ export struct ChatPanel {
   toolApprovalOption(mode: ToolApprovalMode, description: string) {
     Button({ type: ButtonType.Normal }) {
       Row({ space: 12 }) {
-        SymbolGlyph(mode === 'ask' ? $r('sys.symbol.lock') : $r('sys.symbol.bolt')).fontSize(18).width(20)
+        SymbolGlyph(mode === 'ask' ? $r('sys.symbol.lock') : $r('sys.symbol.checkmark_shield')).fontSize(18).width(20)
           .fontColor([$r('sys.color.icon_primary')]).accessibilityLevel('no')
         Column({ space: 4 }) {
           Text(toolApprovalModeName(mode)).fontFamily(this.appearance.fontFamily).fontSize(14)
@@ -1779,8 +1781,9 @@ export struct ChatPanel {
   toolApprovalButton() {
     Button({ type: ButtonType.Capsule }) {
       Row({ space: 5 }) {
-        SymbolGlyph(this.thread.toolApprovalMode === 'full' ? $r('sys.symbol.bolt') : $r('sys.symbol.lock'))
+        SymbolGlyph(this.thread.toolApprovalMode === 'full' ? $r('sys.symbol.checkmark_shield') : $r('sys.symbol.lock'))
           .fontSize(14).fontColor([this.thread.toolApprovalMode === 'full' ? this.appearance.accent : $r('app.color.text_secondary')])
+          .accessibilityLevel('no')
         Text(toolApprovalModeName(this.thread.toolApprovalMode)).fontFamily(this.appearance.fontFamily)
           .fontSize(12).maxLines(1).fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
@@ -1789,6 +1792,7 @@ export struct ChatPanel {
       .backgroundColor(Color.Transparent)
       .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
       .accessibilityText(t('工具审批') + '：' + toolApprovalModeName(this.thread.toolApprovalMode))
+      .bindTips(t('工具审批') + '：' + toolApprovalModeName(this.thread.toolApprovalMode), { appearingTime: 550 })
       .onClick(() => { this.showToolApprovalMode = !this.showToolApprovalMode; })
       .bindPopup(this.showToolApprovalMode, { builder: this.toolApprovalMenu, placement: Placement.Top,
         systemMaterial: this.appearance.menu, popupColor: $r('app.color.surface'), radius: 20,
@@ -1816,6 +1820,7 @@ export struct ChatPanel {
       SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
     }.id('composer-options').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
       .backgroundColor(Color.Transparent).accessibilityText(t('输入选项'))
+      .bindTips(t('输入选项'), { appearingTime: 550 })
       .bindMenu(this.composerOptions, { systemMaterial: this.appearance.menu, mask: false })
   }
 
@@ -2028,7 +2033,7 @@ export struct ChatPanel {
                 .onClick(() => this.app.enqueueInput('followUp'))
             }
           }
-          IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
+          IconButton({ icon: $r('sys.symbol.square_fill'), label: t('停止生成'), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
             iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
             onTap: () => { this.app.stop(); } })
             .margin({ left: 4 })
@@ -2086,7 +2091,7 @@ export struct ChatPanel {
         iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.voiceOverlayVisible(),
         onTap: () => this.showSpeechKeyboard() })
       if (this.app.generating) {
-        IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
+        IconButton({ icon: $r('sys.symbol.square_fill'), label: t('停止生成'), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
           iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
           onTap: () => { this.app.stop(); } })
           .transition(Motion.pop())
@@ -2098,7 +2103,7 @@ export struct ChatPanel {
   approvalCard() {
     Column({ space: 10 }) {
       Row({ space: Space.sm }) {
-        SymbolGlyph($r('sys.symbol.connection')).fontSize(20).fontColor([this.appearance.accent])
+        SymbolGlyph($r('sys.symbol.lock')).fontSize(20).fontColor([this.appearance.accent]).accessibilityLevel('no')
         Column({ space: 2 }) {
           Text(t('允许调用工具？')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
           Text(this.approval.title).fontFamily(this.appearance.fontFamily).id('approval-title').fontSize(15).fontWeight(FontWeight.Medium).maxLines(2)

@@ -247,8 +247,8 @@ export struct BrowserElementEditor {
             .enabled(!this.capturing && !this.working).onClick(() => this.reset())
         }
         Blank()
-        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('在截图上圈画批注'), compId: 'browser-annotation-draw',
-          diameter: 34, iconSize: 15, disabled: !this.captureEnabled || this.capturing || this.working,
+        IconButton({ icon: $r('sys.symbol.pencil_tip'), label: t('在截图上圈画批注'), compId: 'browser-annotation-draw',
+          iconSize: 15, disabled: !this.captureEnabled || this.capturing || this.working,
           onTap: () => this.capture(true) })
         Button(this.capturing ? t('添加中…') : t('添加批注')).id('browser-annotate-element').attributeModifier(Btn.primarySmall)
           .enabled(this.captureEnabled && !this.capturing && !this.working).onClick(() => this.capture(false))

@@ -38,6 +38,10 @@ interface OfficePreviewLabels {
   cancel: string;
   previous: string;
   next: string;
+  previousRows: string;
+  nextRows: string;
+  previousColumns: string;
+  nextColumns: string;
   thumbnails: string;
 }
 
@@ -86,7 +90,9 @@ export struct OfficePreview {
         return;
       }
       const labels: OfficePreviewLabels = { annotate: t('批注'), placeholder: t('描述修改或提出问题…'),
-        add: t('添加批注'), cancel: t('取消'), previous: t('上一页'), next: t('下一页'), thumbnails: t('幻灯片缩略图') };
+        add: t('添加批注'), cancel: t('取消'), previous: t('上一页'), next: t('下一页'),
+        previousRows: t('前 100 行'), nextRows: t('后 100 行'), previousColumns: t('向左 24 列'), nextColumns: t('向右 24 列'),
+        thumbnails: t('幻灯片缩略图') };
       await this.controller.runJavaScript('window.renderOffice(' + JSON.stringify(this.source.format) + ',' + JSON.stringify(labels) + ')');
     } catch (error) { this.fail('load_failed', error as Error); }
   }

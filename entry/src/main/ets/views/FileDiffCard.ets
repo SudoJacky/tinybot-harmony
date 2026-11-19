@@ -36,9 +36,9 @@ export struct FileDiffCard {
         Text('+' + this.diff.added).fontSize(12).fontFamily('monospace').fontColor(this.appearance.accent)
         Text('−' + this.diff.removed).fontSize(12).fontFamily('monospace').fontColor($r('app.color.danger'))
         Button({ type: ButtonType.Normal }) {
-          SymbolGlyph($r('sys.symbol.rectangle_on_rectangle')).fontSize(14).fontColor([$r('app.color.text_secondary')])
+          SymbolGlyph($r('sys.symbol.rectangle_on_rectangle')).fontSize(14).fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
         }.fontFamily(this.appearance.fontFamily).width(40).height(40).padding(0).backgroundColor(Color.Transparent)
-          .accessibilityText(t('复制差异')).onClick(() => this.copy())
+          .accessibilityText(t('复制差异')).bindTips(t('复制差异'), { appearingTime: 550 }).onClick(() => this.copy())
       }.width('100%').padding({ left: 10, right: 2 }).backgroundColor($r('app.color.surface_variant'))
       ForEach(this.visibleRows().map((_row: FileDiffRow, index: number) => index), (index: number) => {
         Column() {

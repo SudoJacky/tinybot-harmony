@@ -59,7 +59,7 @@ export struct PreviewFullscreen {
       Row() {
         Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary')).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        IconButton({ icon: $r('sys.symbol.xmark'), label: t('退出全屏'), compId: 'exit-fullscreen-preview', onTap: this.onClose })
+        IconButton({ icon: $r('sys.symbol.exit_full_screen'), label: t('退出全屏'), compId: 'exit-fullscreen-preview', onTap: this.onClose })
       }.width('100%').height(56).padding({ left: 16, right: 8 })
         .border({ width: { bottom: 0.5 }, color: $r('app.color.divider') })
       Column() {
