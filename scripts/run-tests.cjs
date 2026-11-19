@@ -122,6 +122,7 @@ const suites = {
     'test-browser-dom.cjs',
     'test-builtin-widgets-browser.cjs',
     'test-markdown-mermaid.cjs',
+    'test-office-preview-browser.cjs',
     'test-web-ui-browser.cjs',
   ],
 };

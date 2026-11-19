@@ -11,11 +11,62 @@ const fixtures=path.join(__dirname,'fixtures/interactive-web/');
 const example=JSON.parse(fs.readFileSync(path.join(fixtures,'example.json'),'utf8')).content.split('\n');
 const begin=JSON.parse(example[1]);const spec=parseWebUi(JSON.parse(example[2]).node.data);
 const {browserAutomationScript}=model('BrowserScripts');
-const html=webUiHost(fs.readFileSync(assets+'host.js','utf8'),fs.readFileSync(assets+'three.bundle.js','utf8'),browserAutomationScript());
+const { webAnnotationScript } = model('WebAnnotation');
+const html=webUiHost(fs.readFileSync(assets+'host.js','utf8'),fs.readFileSync(assets+'three.bundle.js','utf8'),
+  browserAutomationScript() + webAnnotationScript());
 assert.throws(()=>parseWebUi(JSON.stringify({...spec,library:'cdn'})));assert.throws(()=>parseWebUiMessage('{"type":"submit"}'));assert.throws(()=>parseWebUiMessage('{"type":"save","id":0,"values":{}}'));
 assert.throws(()=>parseWebUi(JSON.stringify({...spec,autoHeight:'yes'})));
 assert.throws(()=>parseWebUiMessage('{"type":"resize","height":-1}'));
 assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
+
+async function checkHtmlAnnotation(page) {
+  await page.goto('about:blank');
+  await page.setContent(html);
+  await page.evaluate(() => {
+    const channel = new MessageChannel();
+    window.annotationMessages = [];
+    window.annotationState = (selected) => channel.port1.postMessage(JSON.stringify({
+      type: 'annotationState', enabled: true, marks: [], selected,
+    }));
+    channel.port1.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'ready') { window.annotationReady = true; window.annotationState(''); }
+      if (message.type === 'annotationTarget') window.annotationMessages.push(message.target);
+    };
+    window.postMessage('tinybot-web-port', '*', [channel.port2]);
+    channel.port1.postMessage(JSON.stringify({ type: 'init', annotations: true, active: false, values: {}, spec: {
+      version: 1, library: 'none', height: 400, js: '', css: '',
+      html: '<button id="first"><strong>First</strong></button><p id="second">Second</p>',
+    } }));
+  });
+  await page.waitForFunction(() => window.annotationReady === true);
+  const frame = page.frames().find((item) => item.parentFrame());
+  const first = frame.locator('#first');
+  const second = frame.locator('#second');
+  const outline = frame.locator('body > [aria-hidden=true] > span');
+  await first.locator('strong').hover();
+  await outline.waitFor();
+  assert.equal(await outline.evaluate((node) => node.style.borderStyle), 'solid');
+  assert.deepEqual(await outline.boundingBox(), await first.boundingBox());
+  await first.locator('strong').click();
+  await page.waitForFunction(() => annotationMessages.length === 1);
+  await second.click();
+  assert.deepEqual(await page.evaluate(() => annotationMessages.map((target) => target.location)), ['#first']);
+
+  await page.evaluate(() => annotationState('#first'));
+  await outline.waitFor();
+  assert.equal(await outline.evaluate((node) => node.style.borderStyle), 'dashed');
+  await second.click();
+  assert.deepEqual(await outline.boundingBox(), await first.boundingBox());
+  assert.equal(await page.evaluate(() => annotationMessages.length), 1);
+
+  await page.evaluate(() => annotationState(''));
+  await outline.waitFor({ state: 'detached' });
+  await second.click();
+  await page.waitForFunction(() => annotationMessages.length === 2);
+  assert.equal(await page.evaluate(() => annotationMessages[1].location), '#second');
+}
+
 (async()=>{
  const browser=await chromium.launch({channel:'msedge',headless:true,args:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
  try{
@@ -341,5 +392,7 @@ assert.throws(()=>parseWebUiMessage('{"type":"resize","height":"200"}'));
   await mount({},{...bad,library:'none',js:'await tinybot.save({});'},'Save state only on user interaction',true);
   await mount({},{...bad,library:'none',js:'document.body.textContent="fixed";'},'',true);
   console.log('PASS constructor, syntax, rejection, animation and console failures reach the bridge; failed probes cannot save or become ready; next probe recovers');
+  await checkHtmlAnnotation(page);
+  console.log('PASS HTML mouse highlight uses the click target and an accepted target stays locked until cleared');
  }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

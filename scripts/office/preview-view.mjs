@@ -5,8 +5,11 @@ const toolbar = document.getElementById('toolbar');
 const viewport = document.getElementById('viewport');
 const form = document.getElementById('comment');
 const note = form.querySelector('textarea');
+const commentExcerpt = document.getElementById('comment-excerpt');
 const selectionAction = document.getElementById('text-action');
 const modeButton = document.getElementById('annotate');
+const visibleViewport = window.visualViewport;
+const overlayMargin = 8;
 let labels;
 let format;
 let data;
@@ -16,6 +19,7 @@ let colStart = 1;
 let sequence = 0;
 let mode = false;
 let pending;
+let commentAnchor;
 let marks = [];
 let loaded = [];
 let cellStart;
@@ -48,24 +52,53 @@ function report(type, detail) {
 }
 
 function position(node, x, y) {
-  node.style.left = Math.max(8, Math.min(x, window.innerWidth - node.offsetWidth - 8)) + 'px';
-  node.style.top = Math.max(8, Math.min(y, window.innerHeight - node.offsetHeight - 8)) + 'px';
+  const left = visibleViewport?.offsetLeft ?? 0;
+  const top = visibleViewport?.offsetTop ?? 0;
+  const width = visibleViewport?.width ?? window.innerWidth;
+  const height = visibleViewport?.height ?? window.innerHeight;
+  node.style.maxWidth = Math.max(0, width - 2 * overlayMargin) + 'px';
+  node.style.maxHeight = Math.max(0, height - 2 * overlayMargin) + 'px';
+  node.style.left = Math.max(left + overlayMargin, Math.min(x, left + width - node.offsetWidth - overlayMargin)) + 'px';
+  node.style.top = Math.max(top + overlayMargin, Math.min(y, top + height - node.offsetHeight - overlayMargin)) + 'px';
 }
+
+function positionComment() {
+  if (commentAnchor) position(form, commentAnchor.x, commentAnchor.y);
+}
+
+// The keyboard can change the visible bounds after focus without resizing the layout viewport.
+window.addEventListener('resize', positionComment);
+visibleViewport?.addEventListener('resize', positionComment);
+visibleViewport?.addEventListener('scroll', positionComment);
+new ResizeObserver(positionComment).observe(form);
 
 function clearTarget() {
   if (submitting) return;
   form.hidden = true;
   selectionAction.hidden = true;
   pending = undefined;
+  commentAnchor = undefined;
   cellStart = undefined;
+  CSS.highlights?.delete('office-annotation');
+  commentExcerpt.textContent = '';
+  commentExcerpt.hidden = true;
+  for (const cell of viewport.querySelectorAll('td.selected')) cell.classList.remove('selected');
+  const cellRange = document.getElementById('cell-range');
+  if (cellRange) cellRange.hidden = true;
 }
 
-function openComment(target, x, y) {
+function openComment(target, x, y, range) {
   pending = target;
+  commentAnchor = { x, y };
   selectionAction.hidden = true;
   form.hidden = false;
   note.value = '';
-  position(form, x, y);
+  if (range) {
+    CSS.highlights?.set('office-annotation', new Highlight(range));
+    commentExcerpt.textContent = target.excerpt;
+    commentExcerpt.hidden = false;
+  }
+  positionComment();
   note.focus({ preventScroll: true });
 }
 
@@ -165,7 +198,8 @@ document.addEventListener('selectionchange', () => {
     const bounds = range.getBoundingClientRect();
     selectionAction.hidden = false;
     position(selectionAction, bounds.left, bounds.bottom + 4);
-    selectionAction.onclick = () => openComment({ kind: 'text', location, excerpt: text.slice(0, 1000) }, bounds.left, bounds.bottom + 4);
+    selectionAction.onclick = () => openComment({ kind: 'text', location, excerpt: text.slice(0, 1000) },
+      bounds.left, bounds.bottom + 4, range.cloneRange());
   }, 160);
 });
 selectionAction.onpointerdown = (event) => event.preventDefault();
@@ -249,10 +283,28 @@ function scaleSlide(container, canvas, frame) {
 }
 
 function bindSlideAnnotations(canvas) {
+  // Draw above the artwork without changing the shapes' paint order or hit targets.
+  const hoverOutline = element('div', undefined, undefined, 'slide-hover');
+  hoverOutline.setAttribute('aria-hidden', 'true');
+  const shapeAt = (target) => target.closest('.shape');
+  let hoveredShape = null;
+  function highlight(shape) {
+    if (shape === hoveredShape) return;
+    hoveredShape = shape;
+    if (!shape) {
+      hoverOutline.remove();
+      return;
+    }
+    const { left, top, width, height, transform } = shape.style;
+    Object.assign(hoverOutline.style, { left, top, width, height, transform });
+    canvas.append(hoverOutline);
+  }
+
   canvas.onkeydown = (event) => {
     if (!mode || (event.key !== 'Enter' && event.key !== ' ')) return;
     const anchor = event.target.closest('[data-element]');
     if (!anchor) return;
+    highlight(null);
     event.preventDefault();
     const bounds = anchor.getBoundingClientRect();
     openComment({ kind: 'slide', slide: active + 1, elementId: anchor.dataset.element, location: anchor.dataset.location,
@@ -261,13 +313,18 @@ function bindSlideAnnotations(canvas) {
   let drag;
   canvas.onpointerdown = (event) => {
     if (!mode || submitting || event.button !== 0) return;
+    highlight(null);
     const bounds = canvas.getBoundingClientRect();
-    drag = { x: event.clientX, y: event.clientY, bounds, anchor: event.target.closest('[data-location]'),
+    drag = { x: event.clientX, y: event.clientY, bounds, anchor: shapeAt(event.target) || canvas,
       outline: element('div', undefined, canvas, 'slide-selection') };
     canvas.setPointerCapture(event.pointerId);
   };
   canvas.onpointermove = (event) => {
-    if (!drag) return;
+    if (!drag) {
+      const mouseHover = mode && form.hidden && event.pointerType === 'mouse' && event.buttons === 0;
+      highlight(mouseHover ? shapeAt(event.target) : null);
+      return;
+    }
     const { bounds } = drag;
     const x = (Math.min(drag.x, event.clientX) - bounds.left) / bounds.width;
     const y = (Math.min(drag.y, event.clientY) - bounds.top) / bounds.height;
@@ -275,6 +332,7 @@ function bindSlideAnnotations(canvas) {
       width: Math.abs(drag.x - event.clientX) / bounds.width * 100 + '%',
       height: Math.abs(drag.y - event.clientY) / bounds.height * 100 + '%' });
   };
+  canvas.onpointerleave = () => highlight(null);
   canvas.onpointercancel = () => { drag?.outline.remove(); drag = undefined; };
   canvas.onpointerup = (event) => {
     if (!drag) return;
@@ -470,6 +528,15 @@ function renderSheet() {
     }
   }
   const cellAt = (event) => document.elementFromPoint(event.clientX, event.clientY)?.closest('td');
+  let hoveredCell;
+  let lastCell;
+  let dragPointer;
+  function highlight(cell) {
+    if (cell === hoveredCell) return;
+    hoveredCell?.classList.remove('cell-hover');
+    hoveredCell = cell;
+    hoveredCell?.classList.add('cell-hover');
+  }
   function select(first, last) {
     const left = Math.min(+first.dataset.col, +last.dataset.col);
     const right = Math.max(+first.dataset.col, +last.dataset.col);
@@ -477,34 +544,63 @@ function renderSheet() {
     const bottom = Math.max(+first.dataset.row, +last.dataset.row);
     const start = columnName(left) + top;
     const end = columnName(right) + bottom;
+    const address = start === end ? start : start + ':' + end;
     for (const td of table.querySelectorAll('td')) {
-      td.classList.toggle('selected', td.dataset.col >= left && td.dataset.col <= right && td.dataset.row >= top && td.dataset.row <= bottom);
+      const col = +td.dataset.col;
+      const row = +td.dataset.row;
+      const selected = col >= left && col <= right && row >= top && row <= bottom;
+      td.classList.toggle('selected', selected);
+      if (selected) {
+        td.dataset.edges = (row === top ? 'top ' : '') + (row === bottom ? 'bottom ' : '') +
+          (col === left ? 'left ' : '') + (col === right ? 'right' : '');
+      }
     }
-    return { kind: 'cells', location: sheet.name + '!' + start + (start === end ? '' : ':' + end),
+    rangeLabel.textContent = address;
+    rangeLabel.hidden = false;
+    return { kind: 'cells', location: sheet.name + '!' + address,
       excerpt: sheet.cells.get(start)?.text?.slice(0, 1000) || '' };
   }
   table.onpointerdown = (event) => {
     if (!mode || submitting || event.button !== 0) return;
     const cell = cellAt(event);
     if (!cell) return;
+    highlight(undefined);
     if (!event.shiftKey || !cellStart) cellStart = cell;
+    dragPointer = event.pointerId;
+    lastCell = cell;
     cell.setPointerCapture(event.pointerId);
     select(cellStart, cell);
   };
   table.onpointermove = (event) => {
-    const cell = event.buttons && cellStart && cellAt(event);
-    if (cell) select(cellStart, cell);
+    if (dragPointer === event.pointerId && cellStart) {
+      const cell = cellAt(event);
+      if (cell && cell !== lastCell) { lastCell = cell; select(cellStart, cell); }
+      return;
+    }
+    const mouseHover = mode && form.hidden && event.pointerType === 'mouse' && event.buttons === 0;
+    highlight(mouseHover ? cellAt(event) : undefined);
   };
+  table.onpointerleave = () => highlight(undefined);
   table.onpointerup = (event) => {
+    if (dragPointer !== event.pointerId) return;
+    dragPointer = undefined;
     const cell = cellStart && cellAt(event);
     if (cell) openComment(select(cellStart, cell), event.clientX + 8, event.clientY + 8);
+    else clearTarget();
   };
-  table.onpointercancel = () => { cellStart = undefined; };
+  table.onpointercancel = (event) => {
+    if (dragPointer !== event.pointerId) return;
+    dragPointer = undefined;
+    clearTarget();
+  };
   button('↑', controls, () => { rowStart -= 100; render(); }, labels.previousRows).disabled = rowStart === 1;
   button('↓', controls, () => { rowStart += 100; render(); }, labels.nextRows).disabled = rowEnd >= maxRow;
   button('←', controls, () => { colStart -= 24; render(); }, labels.previousColumns).disabled = colStart === 1;
   button('→', controls, () => { colStart += 24; render(); }, labels.nextColumns).disabled = colEnd >= maxCol;
   element('span', columnName(colStart) + rowStart + ' – ' + columnName(colEnd) + rowEnd, controls);
+  const rangeLabel = element('span', undefined, controls, 'cell-range');
+  rangeLabel.id = 'cell-range';
+  rangeLabel.hidden = true;
 }
 
 function choose(index) {
