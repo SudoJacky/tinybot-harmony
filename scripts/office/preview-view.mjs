@@ -7,6 +7,8 @@ const form = document.getElementById('comment');
 const note = form.querySelector('textarea');
 const selectionAction = document.getElementById('text-action');
 const modeButton = document.getElementById('annotate');
+const visibleViewport = window.visualViewport;
+const overlayMargin = 8;
 let labels;
 let format;
 let data;
@@ -16,6 +18,7 @@ let colStart = 1;
 let sequence = 0;
 let mode = false;
 let pending;
+let commentAnchor;
 let marks = [];
 let loaded = [];
 let cellStart;
@@ -44,24 +47,42 @@ function report(type, detail) {
 }
 
 function position(node, x, y) {
-  node.style.left = Math.max(8, Math.min(x, window.innerWidth - node.offsetWidth - 8)) + 'px';
-  node.style.top = Math.max(8, Math.min(y, window.innerHeight - node.offsetHeight - 8)) + 'px';
+  const left = visibleViewport?.offsetLeft ?? 0;
+  const top = visibleViewport?.offsetTop ?? 0;
+  const width = visibleViewport?.width ?? window.innerWidth;
+  const height = visibleViewport?.height ?? window.innerHeight;
+  node.style.maxWidth = Math.max(0, width - 2 * overlayMargin) + 'px';
+  node.style.maxHeight = Math.max(0, height - 2 * overlayMargin) + 'px';
+  node.style.left = Math.max(left + overlayMargin, Math.min(x, left + width - node.offsetWidth - overlayMargin)) + 'px';
+  node.style.top = Math.max(top + overlayMargin, Math.min(y, top + height - node.offsetHeight - overlayMargin)) + 'px';
 }
+
+function positionComment() {
+  if (commentAnchor) position(form, commentAnchor.x, commentAnchor.y);
+}
+
+// The keyboard can change the visible bounds after focus without resizing the layout viewport.
+window.addEventListener('resize', positionComment);
+visibleViewport?.addEventListener('resize', positionComment);
+visibleViewport?.addEventListener('scroll', positionComment);
+new ResizeObserver(positionComment).observe(form);
 
 function clearTarget() {
   if (submitting) return;
   form.hidden = true;
   selectionAction.hidden = true;
   pending = undefined;
+  commentAnchor = undefined;
   cellStart = undefined;
 }
 
 function openComment(target, x, y) {
   pending = target;
+  commentAnchor = { x, y };
   selectionAction.hidden = true;
   form.hidden = false;
   note.value = '';
-  position(form, x, y);
+  positionComment();
   note.focus({ preventScroll: true });
 }
 

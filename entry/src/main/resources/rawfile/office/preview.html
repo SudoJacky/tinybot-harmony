@@ -66,10 +66,10 @@
     .grid-scroll td.selected { box-shadow: inset 0 0 0 2px #3770e4; }
     .pin { position: absolute; top: 1px; right: 1px; z-index: 1; min-width: 19px; padding: 2px; border: 1px solid white; border-radius: 100px; color: white; background: #2769d9; font: 600 11px/15px system-ui, sans-serif; text-align: center; user-select: none; }
     #comment, #text-action { position: fixed; z-index: 5; box-shadow: 0 8px 32px #14233c35; }
-    #comment { display: grid; gap: 8px; background: white; padding: 12px; width: min(310px, calc(100vw - 16px)); border: 1px solid #d9dfe8; border-radius: 16px; }
-    #comment textarea { width: 100%; min-height: 68px; resize: vertical; padding: 4px; border: 0; border-radius: 4px; }
+    #comment { display: flex; flex-direction: column; gap: 8px; overflow: auto; background: white; padding: 12px; width: 310px; border: 1px solid #d9dfe8; border-radius: 16px; }
+    #comment textarea { width: 100%; height: 68px; min-height: 36px; resize: vertical; padding: 4px; border: 0; border-radius: 4px; }
     #comment textarea:focus-visible { outline: 2px solid #b9ceff; }
-    #comment footer { display: flex; justify-content: flex-end; gap: 6px; }
+    #comment footer { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   </style>
 </head>
 <body>
