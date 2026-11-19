@@ -4,6 +4,10 @@
 
 - 创建 Git 分支时，按任务使用 `feat/`、`fix/`、`chore/`、`release/` 等前缀。
 - `DESIGN`、`CONTEXT`、`docs/local/` 下的文档及用户的其他非代码要求保留在本地，不推送到 GitHub。
+- Codex 或 Claude Code 实际参与提交中的改动时，在提交消息末尾空一行，按参与情况添加对应的共同作者署名。
+  - `Co-authored-by: Codex <codex@openai.com>`
+  - `Co-authored-by: Claude <noreply@anthropic.com>`
+- 使用 squash 合并 PR 时，将原提交中适用的 `Co-authored-by` 署名保留在最终提交消息末尾，每位共同作者保留一行。
 
 ## 代码编写原则
 
