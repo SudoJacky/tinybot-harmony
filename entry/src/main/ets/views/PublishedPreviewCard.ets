@@ -36,6 +36,7 @@ export struct PublishedPreviewCard {
   private fullscreenMotion?: PreviewFullscreenMotion;
   @State private inlineHeight: number = 0;
   @State private showCode: boolean = false;
+  @State private hoveredMode: boolean | undefined = undefined;
   @State private codeBlocks: MarkdownSpan[][] = [];
   @State private codeError: boolean = false;
   private highlightedContent?: string;
@@ -101,11 +102,19 @@ export struct PublishedPreviewCard {
   private modeButton(code: boolean) {
     Button({ type: ButtonType.Normal }) {
       AnimatedIcon({ iconName: code ? 'code' : 'preview', selected: this.showCode === code, iconSize: 21,
+        interacting: this.hoveredMode === code && (!code || this.inlineHeight > 0),
         tint: this.showCode === code ? this.appearance.accent : $r('app.color.text_secondary') })
     }.id((code ? 'preview-mode-code-' : 'preview-mode-live-') + this.preview.id)
       .width(MODE_TARGET).height(MODE_TARGET).padding(0).borderRadius(MODE_TARGET / 2).backgroundColor(Color.Transparent)
-      .accessibilityText((code ? t('代码') : t('预览')) + (this.showCode === code ? t('，已选中') : ''))
-      .enabled(!code || this.inlineHeight > 0).clickEffect(this.appearance.effectStrength > 0 ? Motion.pressSmall : null)
+      .accessibilityText(code ? t('代码') : t('预览')).accessibilitySelected(this.showCode === code)
+      .bindTips(code ? t('代码') : t('预览'), { appearingTime: 550 })
+      .enabled(!code || this.inlineHeight > 0)
+      .hoverEffect(!code || this.inlineHeight > 0 ? HoverEffect.Highlight : HoverEffect.None)
+      .clickEffect((!code || this.inlineHeight > 0) && this.appearance.effectStrength > 0 ? Motion.press : null)
+      .onHover((hovered: boolean) => {
+        if (hovered) { this.hoveredMode = code; }
+        else if (this.hoveredMode === code) { this.hoveredMode = undefined; }
+      })
       .onClick(() => this.selectMode(code))
   }
 
@@ -134,7 +143,7 @@ export struct PublishedPreviewCard {
       this.previewModeControl()
       Blank()
       if (this.desktop && this.inspectable) {
-        IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('在侧栏打开预览'),
+        IconButton({ animatedIcon: 'dockRight', label: t('在侧栏打开预览'),
           compId: 'dock-preview-' + this.preview.id, diameter: 40, iconSize: 17,
           fill: $r('app.color.surface_variant'), tint: $r('app.color.text_secondary'), onTap: this.onInspect })
       }
@@ -146,6 +155,8 @@ export struct PublishedPreviewCard {
         }
       }.id('fullscreen-preview-' + this.preview.id).height(44).padding({ left: 6, right: 6 })
         .backgroundColor(Color.Transparent).accessibilityText(t('全屏预览'))
+        .hoverEffect(this.fullscreenClosing ? HoverEffect.None : HoverEffect.Highlight)
+        .clickEffect(!this.fullscreenClosing && this.appearance.effectStrength > 0 ? Motion.press : null)
         .enabled(!this.fullscreenClosing).onClick(() => this.openFullscreen())
     }.width('100%').padding({ left: Space.sm, right: Space.sm }).backgroundColor($r('app.color.surface_variant'))
   }

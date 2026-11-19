@@ -54,7 +54,7 @@ const Text = new Proxy({}, { get: (_, method) => value => {
 } });
 const globals = { exports: {}, ViewPU, Button, Flex: noUi, Row: noUi, FlexWrap: {}, FlexAlign: {}, VerticalAlign: { Center: 'Center' }, FontWeight: { Bold: 'Bold' },
   SymbolGlyph, AnimatedIcon: class {}, Text, Image: noUi, If: noUi, ButtonType: {}, Color: {}, Motion: {}, ImageFit: {},
-  Context: { animation() {} }, HitTestMode: { None: 'none', Default: 'default' },
+  Context: { animation() {} }, HitTestMode: { None: 'none', Default: 'default' }, HoverEffect: { Highlight: 'highlight' },
   t: text => text };
 const probe = `class Probe extends ViewPU { ${methods.join('\n')} } exports.Probe = Probe;`;
 vm.runInNewContext(ts.transpileModule(probe, {

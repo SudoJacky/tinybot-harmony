@@ -185,7 +185,7 @@ export struct FeedbackPanel {
       ForEach(this.service.uploads.filter((file: FeedbackUpload) => file.kind === 'image'), (file: FeedbackUpload) => {
         Stack({ alignContent: Alignment.TopEnd }) {
           Image('file://' + file.path).width(76).height(76).objectFit(ImageFit.Cover).borderRadius(Radius.md)
-          IconButton({ icon: $r('sys.symbol.xmark'), label: t('移除图片'), diameter: 28, iconSize: 12, fill: $r('app.color.surface'),
+          IconButton({ icon: $r('sys.symbol.xmark'), label: t('移除图片'), iconSize: 12, fill: $r('app.color.surface'),
             disabled: this.draftLocked(), compId: 'feedback-remove-' + file.localId, onTap: () => this.service.removeUpload(file.localId) })
         }.margin({ right: Space.sm, bottom: Space.sm })
       }, (file: FeedbackUpload) => file.localId)

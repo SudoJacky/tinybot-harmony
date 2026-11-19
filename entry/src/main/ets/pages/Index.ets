@@ -754,7 +754,7 @@ struct Index {
           'browser'));
       } else if (tab.startsWith('side:')) {
         const thread = this.app.sideChats().find((item) => 'side:' + item.id === tab);
-        if (thread) { items.push(new DetailTabItem(tab, thread.messages.length ? thread.displayTitle : t('旁聊'), 'compose')); }
+        if (thread) { items.push(new DetailTabItem(tab, thread.messages.length ? thread.displayTitle : t('旁聊'), 'sideChat')); }
       }
     }
     return items;
@@ -1543,7 +1543,7 @@ struct Index {
           .onClick(() => { this.showToolScope = true; })
         MenuItem(() => this.moreMenuContent($r('sys.symbol.folder'), t('工作区文件')))
           .enabled(!this.app.busy).onClick(() => this.openFiles())
-        MenuItem(() => this.moreMenuContent($r('sys.symbol.connection'), t('应用内浏览器')))
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.worldclock'), t('应用内浏览器')))
           .id('open-browser').enabled(this.app.ready && !this.browser.permissionSaving && this.app.saveError.length === 0)
           .onClick(() => this.openBrowser())
         if (this.largeScreen) {
@@ -1554,7 +1554,7 @@ struct Index {
               this.setDetailPane(true);
             })
         }
-        MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), t('分支关系')))
+        MenuItem(() => this.moreMenuContent($r('app.media.message_branch'), t('分支关系'), true))
           .enabled(!this.app.busy).onClick(() => this.paths.pushPath({ name: 'branches' }))
         MenuItem(() => this.moreMenuContent($r('app.media.message_branch'), t('创建分支'), true))
           .enabled(!this.app.busy && this.app.saveError.length === 0 && this.app.active.messages.length > 0)
@@ -1795,8 +1795,9 @@ struct Index {
       // On the plain tablet title surface, API-26 light-sense material erases
       // the control fill; keep an opaque tint and reserve material for phones.
       Row({ space: 4 }) {
-        IconButton({ icon: this.workbench().expanded || this.drawerOpen ? $r('sys.symbol.open_sidebar') : $r('sys.symbol.close_sidebar'),
+        IconButton({ animatedIcon: 'panelLeft', animatedSelected: this.workbench().expanded || this.drawerOpen,
           label: this.workbench().expanded || this.drawerOpen ? t('收起会话栏') : t('展开会话列表'), compId: 'open-history',
+          tint: this.workbench().expanded || this.drawerOpen ? this.appearance.accent : $r('app.color.text_primary'),
           fill: $r('app.color.surface_variant'), disabled: !this.app.ready, onTap: () => this.toggleHistory() })
         Blank().layoutWeight(1)
         if (this.app.active.messages.length > 0) {
@@ -1804,10 +1805,12 @@ struct Index {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
           }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
             .backgroundColor($r('app.color.surface_variant'))
-            .accessibilityText(t('更多操作'))
+            .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+            .accessibilityText(t('会话操作')).bindTips(t('会话操作'), { appearingTime: 550 })
             .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
-          IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
+          IconButton({ animatedIcon: 'panelRight', animatedSelected: this.detailPaneOpen,
             label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+            tint: this.detailPaneOpen ? this.appearance.accent : $r('app.color.text_primary'),
             fill: $r('app.color.surface_variant'),
             disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
         }
@@ -1819,9 +1822,9 @@ struct Index {
   @Builder
   desktopHeader() {
     Row({ space: 4 }) {
-      // The system sidebar symbols point towards the right-hand panel by default.
-      IconButton({ icon: this.workbench().expanded || this.drawerOpen ? $r('sys.symbol.open_sidebar') : $r('sys.symbol.close_sidebar'),
+      IconButton({ animatedIcon: 'panelLeft', animatedSelected: this.workbench().expanded || this.drawerOpen,
         label: this.workbench().expanded || this.drawerOpen ? t('收起会话栏') : t('展开会话列表'), compId: 'open-history',
+        tint: this.workbench().expanded || this.drawerOpen ? this.appearance.accent : $r('app.color.text_primary'),
         diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
         disabled: !this.app.ready, onTap: () => this.toggleHistory() })
       Row({ space: 6 }) {
@@ -1836,8 +1839,8 @@ struct Index {
           .fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
       }.layoutWeight(1)
       if (this.workbench().historyWidth === 0) {
-        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'new-chat',
-          animatedIcon: 'compose', diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
+        IconButton({ label: t('新建对话'), compId: 'new-chat',
+          animatedIcon: 'newChat', diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(this.app.activeProject?.id); } })
       }
       if (this.desktop && this.workbench().chatWidth >= 620) {
@@ -1859,11 +1862,14 @@ struct Index {
       Button({ type: ButtonType.Normal }) {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
       }.id('pc-chat-more').width(this.desktop ? 36 : 44).height(this.desktop ? 36 : 44).padding(0).borderRadius(Radius.sm)
-        .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(this.app.ready)
+        .backgroundColor(Color.Transparent).accessibilityText(t('会话操作')).enabled(this.app.ready)
+        .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+        .bindTips(t('会话操作'), { appearingTime: 550 })
         .bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
       if (!this.detailCoversChat()) {
-        IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
+        IconButton({ animatedIcon: 'panelRight', animatedSelected: this.detailPaneOpen,
           label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+          tint: this.detailPaneOpen ? this.appearance.accent : $r('app.color.text_primary'),
           diameter: this.desktop ? 36 : 44, iconSize: 18, fill: this.detailPaneOpen ? $r('app.color.surface_variant') : $r('app.color.surface'),
           disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
       }
@@ -1883,13 +1889,16 @@ struct Index {
           SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
         }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
           .border({ width: this.appearance.materialEnabled ? 0 : 0.5, color: $r('app.color.divider') })
-          .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t("更多操作"))
+          .hoverEffect(HoverEffect.Highlight)
+          .clickEffect(!this.appearance.control && this.appearance.effectStrength > 0 ? Motion.press : null)
+          .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t('会话操作'))
+          .bindTips(t('会话操作'), { appearingTime: 550 })
           .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
-        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat', animatedIcon: 'compose',
+        IconButton({ label: t('新建对话'), compId: 'new-chat', animatedIcon: 'newChat',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(); } })
       } else {
-        IconButton({ icon: $r('sys.symbol.connection'), label: t('应用内浏览器'), compId: 'empty-open-browser',
+        IconButton({ animatedIcon: 'browser', label: t('应用内浏览器'), compId: 'empty-open-browser',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.ready || this.browser.permissionSaving, onTap: () => this.openBrowser() })
       }

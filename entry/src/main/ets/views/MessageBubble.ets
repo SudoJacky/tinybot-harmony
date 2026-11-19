@@ -1,5 +1,6 @@
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { filePreviewIcon } from '../common/FileArtwork';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { ToolExecution } from '../model/Agent';
 import { t } from '../model/I18n';
@@ -75,7 +76,7 @@ function toolIcon(name: string): Resource {
   if (name === 'generate_image' || name === 'image_gen' || name === 'view_image') { return $r('sys.symbol.picture'); }
   if (name === 'update_plan') { return $r('sys.symbol.list_bullet'); }
   if (name === 'request_user_input') { return $r('sys.symbol.questionmark_circle'); }
-  if (name === 'publish_data_view') { return $r('sys.symbol.text_alignleft'); }
+  if (name === 'publish_data_view') { return $r('sys.symbol.grid'); }
   return $r('sys.symbol.connection');
 }
 
@@ -401,7 +402,7 @@ export struct MessageBubble {
       if (this.message.content.length > 0) {
         MenuItem(() => materialMenuContent.bind(this)({ label: t("复制"), icon: $r('sys.symbol.rectangle_on_rectangle') }))
           .onClick(() => this.copy())
-        MenuItem(() => materialMenuContent.bind(this)({ label: t('选择文本'), icon: $r('sys.symbol.textformat') })).onClick(() => this.selectText())
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('选择文本'), icon: $r('sys.symbol.rectangle_line_2_right_viewfinder') })).onClick(() => this.selectText())
       }
       MenuItem(() => materialMenuContent.bind(this)({ label: this.message.role === 'user' ? t("从这里改写（新分支）") : t("从这里创建分支"),
         icon: $r('app.media.message_branch'), image: true }))
@@ -438,7 +439,8 @@ export struct MessageBubble {
           .fontSize(18).fontColor([$r('app.color.text_secondary')])
       }
     }.fontFamily(this.appearance.fontFamily).id(compId).width(36).height(this.desktop ? 34 : 44).padding(0).borderRadius(8).enabled(enabled())
-      .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall)
+      .backgroundColor(Color.Transparent).hoverEffect(HoverEffect.Highlight)
+      .clickEffect(this.appearance.effectStrength > 0 && enabled() ? Motion.press : null)
       .opacity(!this.desktop || this.actionsHovered || this.focusedAction === compId ? 1 : 0)
       .hitTestBehavior(!this.desktop || this.actionsHovered ? HitTestMode.Default : HitTestMode.None)
       .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
@@ -467,7 +469,7 @@ export struct MessageBubble {
       Flex({ wrap: FlexWrap.Wrap, justifyContent: this.message.role === 'user' ? FlexAlign.End : FlexAlign.Start }) {
         if (this.message.content.length > 0) {
           this.actionButton($r('sys.symbol.rectangle_on_rectangle'), t('复制'), 'copy-' + this.message.id, () => this.copy())
-          this.actionButton($r('sys.symbol.textformat'), t('选择文本'), 'select-text-' + this.message.id, () => this.selectText())
+          this.actionButton($r('sys.symbol.rectangle_line_2_right_viewfinder'), t('选择文本'), 'select-text-' + this.message.id, () => this.selectText())
         }
         if (this.message.role === 'assistant' && this.message.content.trim().length > 0) {
           this.actionButton($r('sys.symbol.speaker_wave_2'), t('朗读回答'), 'read-answer-' + this.message.id,
@@ -526,7 +528,7 @@ export struct MessageBubble {
       }
       ForEach(this.files(), (item: Attachment) => {
         Row({ space: Space.sm }) {
-          SymbolGlyph($r('sys.symbol.doc_text')).fontSize(20).fontColor([this.appearance.accent])
+          SymbolGlyph(filePreviewIcon(item.name)).fontSize(20).fontColor([this.appearance.accent]).accessibilityLevel('no')
           Column({ space: 1 }) {
             Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               .fontColor($r('app.color.text_primary'))
@@ -739,7 +741,8 @@ export struct MessageBubble {
         Button() {
           Column() {
             Row({ space: 12 }) {
-              SymbolGlyph(file.generatedImage ? $r('sys.symbol.picture') : $r('sys.symbol.doc')).fontSize(24).fontColor([this.appearance.accent])
+              SymbolGlyph(file.generatedImage ? $r('sys.symbol.picture') : filePreviewIcon(file.path)).fontSize(24)
+                .fontColor([this.appearance.accent]).accessibilityLevel('no')
               Column({ space: 4 }) {
                 Text(file.generatedImage ? t('生成图片') : file.path).fontFamily(this.appearance.fontFamily).fontSize(14)
                   .fontColor($r('app.color.text_primary')).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })

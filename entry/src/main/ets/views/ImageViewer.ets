@@ -47,9 +47,9 @@ export struct ImageViewer {
               if (this.zoom > 1) { this.offsetX = this.panBaseX + event.offsetX; this.offsetY = this.panBaseY + event.offsetY; }
             })))
       Button({ type: ButtonType.Circle }) {
-        SymbolGlyph($r('sys.symbol.xmark')).fontSize(20).fontColor([Color.White])
+        SymbolGlyph($r('sys.symbol.xmark')).fontSize(20).fontColor([Color.White]).accessibilityLevel('no')
       }.fontFamily(this.appearance.fontFamily).width(44).height(44).backgroundColor('#4D000000').margin({ top: this.insetTop + 8, right: 12 })
-      .accessibilityText(t("关闭")).onClick(() => this.onClose())
+        .accessibilityText(t('关闭')).bindTips(t('关闭'), { appearingTime: 550 }).onClick(() => this.onClose())
     }.width('100%').height('100%').backgroundColor(Color.Black)
   }
 }

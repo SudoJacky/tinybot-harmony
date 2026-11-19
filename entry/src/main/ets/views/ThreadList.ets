@@ -92,9 +92,11 @@ struct ThreadRow {
       if (!this.selecting && !this.locked()) {
         MenuItem(() => materialMenuContent.bind(this)({ label: t("重命名"), icon: $r('sys.symbol.square_and_pencil') }))
           .onClick(() => { this.name = this.thread.title; this.editing = true; })
-        MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.pinned ? t("取消置顶") : t("置顶"), icon: $r('sys.symbol.pin') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.pinned ? t('取消置顶') : t('置顶'),
+          icon: this.thread.pinned ? $r('sys.symbol.pin_slash') : $r('sys.symbol.pin') }))
           .onClick(() => this.app.pinThread(this.thread.id))
-        MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.archived ? t("恢复对话") : t("归档"), icon: $r('sys.symbol.archivebox') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.archived ? t('恢复对话') : t('归档'),
+          icon: this.thread.archived ? $r('sys.symbol.arrow_right_and_square') : $r('sys.symbol.archivebox') }))
           .enabled(!this.app.runningThreadIds.includes(this.thread.id))
           .onClick(() => this.app.archiveThread(this.thread.id))
         MenuItem(() => materialMenuContent.bind(this)({ label: t("删除"), icon: $r('sys.symbol.trash'), danger: true }))
@@ -174,6 +176,8 @@ struct ThreadRow {
             }.id('thread-actions-' + this.thread.id).fontFamily(this.appearance.fontFamily)
             .width(32).height(32).margin({ left: Space.xs })
             .backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
+            .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)
+            .clickEffect(!this.locked() && this.appearance.effectStrength > 0 ? Motion.press : null)
             .bindTips(t('对话管理') + ' · Shift+F10', { appearingTime: 550 })
             .opacity(!this.desktop || this.active() || this.hovered || this.focused || this.actionsFocused ? 1 : 0)
             .hitTestBehavior(!this.desktop || this.active() || this.hovered ? HitTestMode.Default : HitTestMode.None)
@@ -185,6 +189,7 @@ struct ThreadRow {
         .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: ROW_MENU_RIGHT_INSET,
           top: this.desktop ? 2 : 3, bottom: this.desktop ? 2 : 3 }).constraintSize({ minHeight: this.rowMinHeight() })
         .focusable(!this.locked())
+        .stateStyles({ pressed: { .opacity(this.locked() ? 1 : 0.75) }, normal: { .opacity(1) } })
         .accessibilitySelected(this.selecting ? this.selected : this.active())
         .focusOnTouch(false).focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
           margin: LengthMetrics.vp(-2) })
@@ -731,7 +736,7 @@ export struct ThreadList {
   projectActions(id: string) {
     Menu() {
       if (this.desktop && !this.archived) {
-        MenuItem(() => materialMenuContent.bind(this)({ label: t('在此项目中新建对话'), icon: $r('sys.symbol.square_and_pencil') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('在此项目中新建对话'), icon: $r('sys.symbol.wave_bubble_badge_plus') }))
           .enabled(!this.locked()).onClick(() => this.onNewChat(id))
       }
       MenuItem(() => materialMenuContent.bind(this)({ label: t('项目文件'), icon: $r('sys.symbol.folder') }))
@@ -828,7 +833,7 @@ export struct ThreadList {
             .backgroundColor(this.archived || this.projectFilter !== null ? this.appearance.accentContainer : Color.Transparent)
             .accessibilityText(t('筛选对话')).enabled(!this.locked())
             .bindMenu(this.scopeMenu, { systemMaterial: this.appearance.menu, mask: false })
-          IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'workbench-new-chat',
+          IconButton({ animatedIcon: 'newChat', label: t('新建对话'), compId: 'workbench-new-chat',
             diameter: this.searchHeight(), iconSize: 19, disabled: this.locked(), onTap: () => this.onNewChat(
               this.projectFilter === null && this.workbench ? this.app.activeProject?.id : this.projectFilter || undefined) })
         }.width('100%').height(this.searchHeight()).enabled(!this.searchOpen)
@@ -859,23 +864,30 @@ export struct ThreadList {
           }
         }.width('100%')
       }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height((this.desktop ? 36 : 38)).padding({ right: 4 })
-        .backgroundColor(Color.Transparent).borderRadius(10).onClick(() => this.toggleGroup(id))
+        .backgroundColor(Color.Transparent).borderRadius(10)
+        .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+        .onClick(() => this.toggleGroup(id))
         .accessibilityText(this.sectionTitle(id) + '，' + (this.groupOpen(id) ? t('收起') : t('展开')))
       if (!this.selecting) {
         if (this.desktop && id && !this.archived) {
           Button({ type: ButtonType.Normal }) {
-            SymbolGlyph($r('sys.symbol.plus')).fontSize(14).fontColor([$r('app.color.text_secondary')])
+            SymbolGlyph($r('sys.symbol.wave_bubble_badge_plus')).fontSize(16).fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
           }.id('pc-new-chat-in-' + id).width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).padding(0).borderRadius(8)
             .backgroundColor(Color.Transparent).enabled(!this.locked())
+            .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)
+            .clickEffect(!this.locked() && this.appearance.effectStrength > 0 ? Motion.press : null)
             .accessibilityText(t('在此项目中新建对话') + ' · ' + this.sectionTitle(id))
+            .bindTips(t('在此项目中新建对话'), { appearingTime: 550 })
             .onClick(() => this.onNewChat(id))
         }
         if (id) {
           Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')]).accessibilityLevel('no')
           }.fontFamily(this.appearance.fontFamily).id('project-actions-' + id)
             .width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).backgroundColor(Color.Transparent)
-            .accessibilityText(t('编辑项目') + ' · ' + this.sectionTitle(id)).enabled(!this.app.sharedBusy && !this.app.saveError)
+            .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+            .accessibilityText(t('项目操作') + ' · ' + this.sectionTitle(id)).enabled(!this.app.sharedBusy && !this.app.saveError)
+            .bindTips(t('项目操作'), { appearingTime: 550 })
             .bindMenu(this.projectActions(id), { systemMaterial: this.appearance.menu, mask: false })
         }
       }

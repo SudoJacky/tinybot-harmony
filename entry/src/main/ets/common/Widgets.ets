@@ -15,26 +15,65 @@ export struct IconButton {
   @Prop icon: Resource = $r('sys.symbol.plus');
   @Prop tint: ResourceColor = $r('app.color.text_primary');
   @Prop fill: ResourceColor = Color.Transparent;
-  @Prop disabled: boolean = false;
+  @Prop @Watch('disabledChanged') disabled: boolean = false;
   @Prop label: string = '';
   compId: string = '';
   @Prop diameter: number = 44;
   @Prop animatedSelected: boolean = false;
-  @State private iconInteracting: boolean = false;
+  @State private iconHovered: boolean = false;
+  @State private mousePressed: boolean = false;
+  @State private touchPressed: boolean = false;
   iconSize: number = 22;
-  animatedIcon?: AnimatedIconName;
+  @Prop animatedIcon: AnimatedIconName | undefined = undefined;
   // Native material is supported when the button lives in a navigation title bar.
   material?: uiMaterial.Material;
   onTap: () => void = () => {};
 
+  private pressed(): boolean { return !this.disabled && (this.mousePressed || this.touchPressed); }
+
+  private iconScale(): number {
+    if (this.disabled) { return 1; }
+    return 1 + (this.pressed() ? -0.08 : this.iconHovered ? 0.045 : 0) * this.appearance.effectStrength;
+  }
+
+  private disabledChanged(): void {
+    if (!this.disabled) { return; }
+    this.iconHovered = false;
+    this.mousePressed = false;
+    this.touchPressed = false;
+  }
+
+  private iconHover(hovered: boolean): void {
+    this.iconHovered = hovered && !this.disabled;
+    if (!hovered) { this.mousePressed = false; }
+  }
+
+  private iconMouse(event: MouseEvent): void {
+    if (event.button !== MouseButton.Left) { return; }
+    if (event.action === MouseAction.Press) { this.mousePressed = !this.disabled; }
+    else if (event.action === MouseAction.Release) { this.mousePressed = false; }
+  }
+
+  private iconTouch(event: TouchEvent): void {
+    if (event.source === SourceType.Mouse) { return; }
+    if (event.type === TouchType.Down) { this.touchPressed = !this.disabled; }
+    else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.touchPressed = false; }
+  }
+
   build() {
     Button({ type: ButtonType.Circle, stateEffect: true }) {
-      if (this.animatedIcon) {
-        AnimatedIcon({ iconName: this.animatedIcon, iconSize: this.iconSize, tint: this.tint,
-          interacting: this.iconInteracting && !this.disabled, selected: this.animatedSelected === true })
-      } else {
-        SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
+      Stack() {
+        if (this.animatedIcon) {
+          AnimatedIcon({ iconName: this.animatedIcon, iconSize: this.iconSize, tint: this.tint,
+            interacting: !this.disabled && this.iconHovered, pressed: this.pressed(), selected: !this.disabled && this.animatedSelected })
+        } else {
+          SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
+        }
       }
+      .width(this.iconSize).height(this.iconSize)
+      .scale({ x: this.iconScale(), y: this.iconScale() })
+      .animation(this.appearance.effectStrength > 0 ? { duration: Motion.desktop, curve: Motion.standard } : null)
+      .hitTestBehavior(HitTestMode.None).accessibilityLevel('no-hide-descendants')
     }.fontFamily(this.appearance.fontFamily)
     .id(this.compId).width(this.diameter).height(this.diameter)
     .backgroundColor(this.fill === Color.Transparent ? this.appearance.controlBackground : this.fill)
@@ -43,13 +82,11 @@ export struct IconButton {
     // API 20 resets the native button color during repaint. Apply plain fills immediately so
     // draft/message updates cannot interpolate through the system's green accent color.
     .animation(this.appearance.materialEnabled ? { duration: Motion.fast, curve: Motion.standard } : null)
-    .clickEffect(this.disabled || this.material ? null : Motion.pressSmall)
-    .onHover((hovered: boolean) => { if (this.animatedIcon) { this.iconInteracting = hovered; } })
-    .onTouch((event: TouchEvent) => {
-      if (!this.animatedIcon) { return; }
-      if (event.type === TouchType.Down) { this.iconInteracting = true; }
-      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.iconInteracting = false; }
-    })
+    .hoverEffect(this.disabled ? HoverEffect.None : HoverEffect.Highlight)
+    .clickEffect(this.disabled || this.material || this.appearance.effectStrength === 0 ? null : Motion.press)
+    .onHover((hovered: boolean) => this.iconHover(hovered))
+    .onMouse((event: MouseEvent) => this.iconMouse(event))
+    .onTouch((event: TouchEvent) => this.iconTouch(event))
     .enabled(!this.disabled).accessibilityText(this.label).onClick(() => this.onTap())
     .bindTips(this.label, { appearingTime: 550, disappearingTime: 80 })
     .borderRadius(this.diameter / 2)
@@ -111,6 +148,9 @@ export struct NavRow {
   // Selected for 'select', expanded for 'expand'.
   @Prop active: boolean = false;
   icon?: Resource;
+  animatedIcon?: AnimatedIconName;
+  @State private iconHovered: boolean = false;
+  @State private iconPressed: boolean = false;
   image?: Resource;
   tintImage: boolean = false;
   compId: string = '';
@@ -121,9 +161,12 @@ export struct NavRow {
 
   build() {
     Row({ space: Space.md }) {
-        if (this.image || this.icon) {
+        if (this.image || this.icon || this.animatedIcon) {
           Stack() {
-            if (this.image) {
+            if (this.animatedIcon) {
+              AnimatedIcon({ iconName: this.animatedIcon, iconSize: 20, tint: $r('app.color.text_secondary'),
+                interacting: !this.disabled && this.iconHovered, pressed: !this.disabled && this.iconPressed })
+            } else if (this.image) {
               if (this.tintImage) {
                 Image(this.image).width(28).height(28).objectFit(ImageFit.Contain)
                   .fillColor(this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_primary'))
@@ -166,6 +209,22 @@ export struct NavRow {
     }
     .id(this.compId).width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
     .opacity(this.disabled ? 0.4 : 1).enabled(!this.disabled)
+    .hoverEffect(this.disabled ? HoverEffect.None : HoverEffect.Highlight)
+    .onHover((hovered: boolean) => {
+      if (!this.animatedIcon) { return; }
+      this.iconHovered = hovered;
+      if (!hovered) { this.iconPressed = false; }
+    })
+    .onMouse((event: MouseEvent) => {
+      if (!this.animatedIcon || event.button !== MouseButton.Left) { return; }
+      if (event.action === MouseAction.Press) { this.iconPressed = !this.disabled; }
+      else if (event.action === MouseAction.Release) { this.iconPressed = false; }
+    })
+    .onTouch((event: TouchEvent) => {
+      if (!this.animatedIcon || event.source === SourceType.Mouse) { return; }
+      if (event.type === TouchType.Down) { this.iconPressed = !this.disabled; }
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.iconPressed = false; }
+    })
     .accessibilityText(this.trailing === 'select' && this.active ? this.title + t("，已选中") : '')
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .onClick(() => this.onTap())
@@ -267,10 +326,15 @@ export struct EmptyState {
   @Prop icon: Resource = $r('sys.symbol.doc_text');
   @Prop title: string = '';
   @Prop caption: string = '';
+  animatedIcon?: AnimatedIconName;
 
   build() {
     Column({ space: Space.md }) {
-      SymbolGlyph(this.icon).fontSize(40).fontColor([$r('app.color.text_tertiary')])
+      if (this.animatedIcon) {
+        AnimatedIcon({ iconName: this.animatedIcon, iconSize: 40, tint: $r('app.color.text_tertiary') })
+      } else {
+        SymbolGlyph(this.icon).fontSize(40).fontColor([$r('app.color.text_tertiary')]).accessibilityLevel('no')
+      }
       Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(15).fontColor($r('app.color.text_secondary'))
       if (this.caption.length > 0) {
         Text(this.caption).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).textAlign(TextAlign.Center).fontColor($r('app.color.text_tertiary'))
@@ -509,10 +573,15 @@ export struct IconBadge {
   @Prop tint?: ResourceColor;
   @Prop fill?: ResourceColor;
   diameter: number = 36;
+  animatedIcon?: AnimatedIconName;
 
   build() {
     Column() {
-      SymbolGlyph(this.icon).fontSize(Math.round(this.diameter * 0.55)).fontColor([this.tint || this.appearance.accent])
+      if (this.animatedIcon) {
+        AnimatedIcon({ iconName: this.animatedIcon, iconSize: Math.round(this.diameter * 0.55), tint: this.tint || this.appearance.accent })
+      } else {
+        SymbolGlyph(this.icon).fontSize(Math.round(this.diameter * 0.55)).fontColor([this.tint || this.appearance.accent]).accessibilityLevel('no')
+      }
     }.width(this.diameter).height(this.diameter).borderRadius(Math.round(this.diameter * 0.3))
     .justifyContent(FlexAlign.Center).backgroundColor(this.fill || this.appearance.accentContainer)
   }
