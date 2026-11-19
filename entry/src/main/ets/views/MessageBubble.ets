@@ -439,7 +439,8 @@ export struct MessageBubble {
           .fontSize(18).fontColor([$r('app.color.text_secondary')])
       }
     }.fontFamily(this.appearance.fontFamily).id(compId).width(36).height(this.desktop ? 34 : 44).padding(0).borderRadius(8).enabled(enabled())
-      .backgroundColor(Color.Transparent).clickEffect(Motion.pressSmall)
+      .backgroundColor(Color.Transparent).hoverEffect(HoverEffect.Highlight)
+      .clickEffect(this.appearance.effectStrength > 0 && enabled() ? Motion.press : null)
       .opacity(!this.desktop || this.actionsHovered || this.focusedAction === compId ? 1 : 0)
       .hitTestBehavior(!this.desktop || this.actionsHovered ? HitTestMode.Default : HitTestMode.None)
       .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })

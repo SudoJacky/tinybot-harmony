@@ -71,7 +71,8 @@ export struct ModelPickerPanel {
         .fontColor([this.isCurrent(choice) ? this.appearance.accent : Color.Transparent])
     }
     .id('choose-model-' + choice.providerId + '-' + choice.modelId)
-    .width('100%').height(46).padding({ left: 8, right: 4 })
+    .width('100%').height(46).padding({ left: 8, right: 4 }).borderRadius(Radius.sm)
+    .hoverEffect(this.app.busy || this.thread.archived || this.app.saveError ? HoverEffect.None : HoverEffect.Highlight)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) },
       normal: { .backgroundColor(Color.Transparent) } })
     .focusOnTouch(false).enabled(!this.app.busy && !this.thread.archived && !this.app.saveError)

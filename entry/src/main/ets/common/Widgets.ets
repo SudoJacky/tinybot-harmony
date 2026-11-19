@@ -20,7 +20,8 @@ export struct IconButton {
   compId: string = '';
   @Prop diameter: number = 44;
   @Prop animatedSelected: boolean = false;
-  @State private iconInteracting: boolean = false;
+  @State private iconHovered: boolean = false;
+  @State private iconPressed: boolean = false;
   iconSize: number = 22;
   animatedIcon?: AnimatedIconName;
   // Native material is supported when the button lives in a navigation title bar.
@@ -31,7 +32,7 @@ export struct IconButton {
     Button({ type: ButtonType.Circle, stateEffect: true }) {
       if (this.animatedIcon) {
         AnimatedIcon({ iconName: this.animatedIcon, iconSize: this.iconSize, tint: this.tint,
-          interacting: this.iconInteracting && !this.disabled, selected: this.animatedSelected === true })
+          interacting: !this.disabled && (this.iconHovered || this.iconPressed), selected: this.animatedSelected === true })
       } else {
         SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint]).accessibilityLevel('no')
       }
@@ -43,12 +44,13 @@ export struct IconButton {
     // API 20 resets the native button color during repaint. Apply plain fills immediately so
     // draft/message updates cannot interpolate through the system's green accent color.
     .animation(this.appearance.materialEnabled ? { duration: Motion.fast, curve: Motion.standard } : null)
-    .clickEffect(this.disabled || this.material ? null : Motion.pressSmall)
-    .onHover((hovered: boolean) => { if (this.animatedIcon) { this.iconInteracting = hovered; } })
+    .hoverEffect(this.disabled ? HoverEffect.None : HoverEffect.Highlight)
+    .clickEffect(this.disabled || this.material || this.appearance.effectStrength === 0 ? null : Motion.press)
+    .onHover((hovered: boolean) => { if (this.animatedIcon) { this.iconHovered = hovered; } })
     .onTouch((event: TouchEvent) => {
       if (!this.animatedIcon) { return; }
-      if (event.type === TouchType.Down) { this.iconInteracting = true; }
-      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.iconInteracting = false; }
+      if (event.type === TouchType.Down) { this.iconPressed = true; }
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.iconPressed = false; }
     })
     .enabled(!this.disabled).accessibilityText(this.label).onClick(() => this.onTap())
     .bindTips(this.label, { appearingTime: 550, disappearingTime: 80 })
@@ -166,6 +168,7 @@ export struct NavRow {
     }
     .id(this.compId).width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
     .opacity(this.disabled ? 0.4 : 1).enabled(!this.disabled)
+    .hoverEffect(this.disabled ? HoverEffect.None : HoverEffect.Highlight)
     .accessibilityText(this.trailing === 'select' && this.active ? this.title + t("，已选中") : '')
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .onClick(() => this.onTap())

@@ -1805,6 +1805,7 @@ struct Index {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
           }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
             .backgroundColor($r('app.color.surface_variant'))
+            .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
             .accessibilityText(t('会话操作')).bindTips(t('会话操作'), { appearingTime: 550 })
             .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
           IconButton({ icon: $r('sys.symbol.rectangle_righthalf_inset_filled'),
@@ -1862,6 +1863,7 @@ struct Index {
         SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
       }.id('pc-chat-more').width(this.desktop ? 36 : 44).height(this.desktop ? 36 : 44).padding(0).borderRadius(Radius.sm)
         .backgroundColor(Color.Transparent).accessibilityText(t('会话操作')).enabled(this.app.ready)
+        .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
         .bindTips(t('会话操作'), { appearingTime: 550 })
         .bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
       if (!this.detailCoversChat()) {
@@ -1887,6 +1889,8 @@ struct Index {
           SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
         }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
           .border({ width: this.appearance.materialEnabled ? 0 : 0.5, color: $r('app.color.divider') })
+          .hoverEffect(HoverEffect.Highlight)
+          .clickEffect(!this.appearance.control && this.appearance.effectStrength > 0 ? Motion.press : null)
           .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t('会话操作'))
           .bindTips(t('会话操作'), { appearingTime: 550 })
           .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })

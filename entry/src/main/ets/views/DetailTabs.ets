@@ -86,6 +86,7 @@ export struct DetailTabs {
         }.accessibilityLevel('no-hide-descendants')
       }.id('detail-tab-' + tab.id).height(this.touch ? 44 : 32).padding({ left: 10, right: this.active === tab.id ? 4 : 10 })
         .borderRadius(Radius.sm).backgroundColor(Color.Transparent).focusOnTouch(false).nextFocus(this.tabFocus(tab.id))
+        .hoverEffect(HoverEffect.None).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
         .focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
           margin: LengthMetrics.vp(-2) })
         .accessibilityText(tab.label).accessibilitySelected(this.active === tab.id)
@@ -94,6 +95,7 @@ export struct DetailTabs {
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.xmark')).fontSize(12).fontColor([$r('app.color.text_secondary')])
         }.id('detail-tab-close-' + tab.id).width(this.touch ? 40 : 26).height(this.touch ? 40 : 26).padding(0).backgroundColor(Color.Transparent)
+          .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
           .accessibilityText(t('关闭') + ' · ' + tab.label)
           .bindTips(t('关闭') + ' · ' + tab.label, { appearingTime: 550 })
           .onClick(() => this.onClose(tab.id))
@@ -102,6 +104,7 @@ export struct DetailTabs {
     .height(this.touch ? 44 : 32).padding({ right: this.active === tab.id ? 4 : 0 })
     .borderRadius(Radius.sm).backgroundColor(this.active === tab.id ? $r('app.color.surface') :
       this.hoveredTab === tab.id ? $r('app.color.surface_variant') : Color.Transparent)
+    .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
     .border({ width: this.active === tab.id ? 0.5 : 0, color: $r('app.color.divider') })
     .onHover((hovered: boolean) => {
       if (hovered) { this.hoveredTab = tab.id; }
@@ -133,6 +136,8 @@ export struct DetailTabs {
         }.width('100%')
       }.id('detail-switch-tab').height(40).layoutWeight(1).borderRadius(Radius.sm)
         .backgroundColor(Color.Transparent).enabled(this.tabs.length > 1)
+        .hoverEffect(this.tabs.length > 1 ? HoverEffect.Highlight : HoverEffect.None)
+        .clickEffect(this.tabs.length > 1 && this.appearance.effectStrength > 0 ? Motion.press : null)
         .accessibilityText(t('切换侧栏页签') + ' · ' + (this.tabs.find(tab => tab.id === this.active)?.label || t('详情')))
         .bindTips(t('切换侧栏页签'), { appearingTime: 550 })
         .bindMenu(this.switchMenu, { systemMaterial: this.appearance.menu, mask: false })
@@ -148,7 +153,8 @@ export struct DetailTabs {
     Button({ type: ButtonType.Circle }) {
       SymbolGlyph($r('sys.symbol.plus')).fontSize(16).fontColor([$r('app.color.text_secondary')])
     }.id('detail-add-tab').width(this.touch ? 44 : 32).height(this.touch ? 44 : 32).padding(0).backgroundColor(Color.Transparent)
-      .clickEffect(Motion.pressSmall).accessibilityText(t('添加侧栏面板'))
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+      .accessibilityText(t('添加侧栏面板'))
       .bindTips(t('添加侧栏面板'), { appearingTime: 550 })
       .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
     if (this.showMaximize) {

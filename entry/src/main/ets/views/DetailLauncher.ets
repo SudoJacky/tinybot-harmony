@@ -39,6 +39,8 @@ export struct DetailLauncher {
     }.id(compId).width('100%').height(this.workbench ? 44 : 64).padding({ left: Space.md, right: Space.md })
     .borderRadius(Radius.sm).backgroundColor(this.hovered === compId ? $r('app.color.surface_variant') : $r('app.color.page_background'))
     .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
+    .hoverEffect(HoverEffect.None)
+    .clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
     .focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
           margin: LengthMetrics.vp(-2) })
     .accessibilityText(label).onClick(action)

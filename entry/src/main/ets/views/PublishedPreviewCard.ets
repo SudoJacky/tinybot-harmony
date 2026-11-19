@@ -106,7 +106,9 @@ export struct PublishedPreviewCard {
       .width(MODE_TARGET).height(MODE_TARGET).padding(0).borderRadius(MODE_TARGET / 2).backgroundColor(Color.Transparent)
       .accessibilityText(code ? t('代码') : t('预览')).accessibilitySelected(this.showCode === code)
       .bindTips(code ? t('代码') : t('预览'), { appearingTime: 550 })
-      .enabled(!code || this.inlineHeight > 0).clickEffect(this.appearance.effectStrength > 0 ? Motion.pressSmall : null)
+      .enabled(!code || this.inlineHeight > 0)
+      .hoverEffect(!code || this.inlineHeight > 0 ? HoverEffect.Highlight : HoverEffect.None)
+      .clickEffect((!code || this.inlineHeight > 0) && this.appearance.effectStrength > 0 ? Motion.press : null)
       .onClick(() => this.selectMode(code))
   }
 
@@ -147,6 +149,8 @@ export struct PublishedPreviewCard {
         }
       }.id('fullscreen-preview-' + this.preview.id).height(44).padding({ left: 6, right: 6 })
         .backgroundColor(Color.Transparent).accessibilityText(t('全屏预览'))
+        .hoverEffect(this.fullscreenClosing ? HoverEffect.None : HoverEffect.Highlight)
+        .clickEffect(!this.fullscreenClosing && this.appearance.effectStrength > 0 ? Motion.press : null)
         .enabled(!this.fullscreenClosing).onClick(() => this.openFullscreen())
     }.width('100%').padding({ left: Space.sm, right: Space.sm }).backgroundColor($r('app.color.surface_variant'))
   }

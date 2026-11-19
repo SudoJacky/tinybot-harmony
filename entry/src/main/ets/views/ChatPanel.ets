@@ -1162,7 +1162,8 @@ export struct ChatPanel {
         .maxLines(2).textAlign(TextAlign.Center)
     }
     .id(compId).layoutWeight(1).opacity(enabled ? 1 : 0.4).enabled(enabled)
-    .clickEffect(enabled ? Motion.press : null)
+    .hoverEffect(enabled ? HoverEffect.Highlight : HoverEffect.None)
+    .clickEffect(enabled && this.appearance.effectStrength > 0 ? Motion.press : null)
     .onClick(action)
   }
 
@@ -1179,6 +1180,7 @@ export struct ChatPanel {
       }
     }
     .id(compId).width('100%').height(46).padding({ left: 10, right: 8 }).borderRadius(10)
+    .hoverEffect(enabled ? HoverEffect.Highlight : HoverEffect.None)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .opacity(enabled ? 1 : 0.45).enabled(enabled).onClick(action)
   }
@@ -1716,6 +1718,7 @@ export struct ChatPanel {
       .constraintSize({ minWidth: 64, maxWidth: Math.max(64, Math.min(220, this.panelWidth / 2)) })
       .padding({ left: 12, right: 12 }).backgroundColor(Color.Transparent)
       .border({ width: 0.5, color: $r('app.color.divider') }).focusOnTouch(false)
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .enabled(this.app.ready && !this.app.busy && !this.thread.archived && !this.app.saveError)
       .accessibilityText(this.thread.modelRef ? t('选择模型') + '：' + this.app.currentModelLabel : t('选择模型'))
       .onAreaChange((_previous: Area, current: Area) => { this.modelButtonTop = Number(current.globalPosition.y); })
@@ -1790,6 +1793,7 @@ export struct ChatPanel {
     }.id('composer-tool-approval').height(this.workbench ? 36 : 44).constraintSize({ minWidth: this.workbench ? 36 : 44 })
       .padding({ left: 8, right: 8 }).focusOnTouch(false)
       .backgroundColor(Color.Transparent)
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
       .accessibilityText(t('工具审批') + '：' + toolApprovalModeName(this.thread.toolApprovalMode))
       .bindTips(t('工具审批') + '：' + toolApprovalModeName(this.thread.toolApprovalMode), { appearingTime: 550 })
@@ -1820,6 +1824,7 @@ export struct ChatPanel {
       SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
     }.id('composer-options').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
       .backgroundColor(Color.Transparent).accessibilityText(t('输入选项'))
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .bindTips(t('输入选项'), { appearingTime: 550 })
       .bindMenu(this.composerOptions, { systemMaterial: this.appearance.menu, mask: false })
   }
@@ -1843,6 +1848,7 @@ export struct ChatPanel {
         .backgroundColor($r('app.color.divider')).accessibilityLevel('no')
     }.id('context-usage').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
       .padding(0).backgroundColor(Color.Transparent)
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .focusOnTouch(false).accessibilityText(this.app.contextLabel)
       .onClick(() => { this.showContext = true; })
       .bindSheet($$this.showContext, this.contextSheet(), { radius: Radius.sheet,

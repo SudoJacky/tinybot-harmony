@@ -305,6 +305,7 @@ export struct BrowserPanel {
     Button({ type: ButtonType.Circle }) {
       SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_primary')])
     }.id('browser-more').width(size).height(size).padding(0).backgroundColor(Color.Transparent)
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .accessibilityText(t('浏览器操作')).bindTips(t('浏览器操作'), { appearingTime: 550 })
       .bindMenu(this.browserMenu, { systemMaterial: this.appearance.menu, mask: false })
   }

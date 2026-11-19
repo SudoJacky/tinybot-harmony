@@ -25,7 +25,7 @@ import { parseDelimited } from '../model/RichArtifacts';
 import { FileBaseline, WorkspaceEntry } from '../services/WorkspaceFiles';
 import { ToolFailure } from '../model/ToolFailure';
 import { Diagnostics } from '../model/Diagnostics';
-import { Btn, Font, Radius, Space, systemInsets } from '../common/Theme';
+import { Btn, Font, Motion, Radius, Space, systemInsets } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, IconButton } from '../common/Widgets';
 
 const IMAGE_FILE: RegExp = /\.(png|jpe?g|webp|gif|bmp)$/i;
@@ -389,6 +389,7 @@ export struct WorkspacePanel {
     }
     .width('100%').height(64).padding({ left: Space.page, right: Space.lg }).backgroundColor($r('app.color.surface'))
     .opacity(entry.kind === 'symlink' ? 0.5 : 1)
+    .hoverEffect(entry.kind === 'symlink' ? HoverEffect.None : HoverEffect.Highlight)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor($r('app.color.surface')) } })
     .onClick(() => this.open(entry))
   }
@@ -420,6 +421,7 @@ export struct WorkspacePanel {
       Text(label).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor(danger ? $r('app.color.danger') : $r('app.color.text_secondary'))
     }.id(compId).layoutWeight(1).height(56).justifyContent(FlexAlign.Center).enabled(!this.locked())
     .opacity(this.locked() ? 0.4 : 1)
+    .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .onClick(action)
   }
@@ -441,6 +443,7 @@ export struct WorkspacePanel {
         Button({ type: ButtonType.Circle }) {
           SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([$r('app.color.text_primary')]).accessibilityLevel('no')
         }.id('workspace-preview-back').fontFamily(this.appearance.fontFamily).width(44).height(44).backgroundColor(Color.Transparent)
+          .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
           .accessibilityText(t('返回')).bindTips(t('返回'), { appearingTime: 550 }).onClick(() => this.closePreview())
         Column({ space: 1 }) {
           Text(this.fileName(this.selected)).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
@@ -463,6 +466,8 @@ export struct WorkspacePanel {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(22).fontColor([$r('app.color.text_primary')]).accessibilityLevel('no')
           }.fontFamily(this.appearance.fontFamily).id('workspace-backup-menu').width(40).height(40)
             .backgroundColor(Color.Transparent).accessibilityText(t('文件操作')).bindTips(t('文件操作'), { appearingTime: 550 })
+            .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)
+            .clickEffect(!this.locked() && this.appearance.effectStrength > 0 ? Motion.press : null)
             .enabled(!this.locked())
             .bindMenu(this.backupMenu, { systemMaterial: this.appearance.menu, mask: false })
         }

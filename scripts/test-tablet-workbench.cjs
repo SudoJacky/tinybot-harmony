@@ -12,6 +12,7 @@ function sourceModule(file, globals = {}) {
 }
 const { WorkbenchLayout } = sourceModule('entry/src/main/ets/model/WorkbenchLayout.ets');
 const { iconPath } = sourceModule('entry/src/main/ets/common/IconArtwork.ets');
+const HoverEffect = { None: 'none', Highlight: 'highlight' };
 function emitted(file, name) {
   const original = path.join(root, 'entry/src/main/ets', file + '.ets');
   const compiled = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets', file + '.ts');
@@ -382,7 +383,7 @@ class ModelListStub { constructor(_, params) { modelControls.push({ type: 'model
 const { reasoningEfforts } = sourceModule('entry/src/main/ets/model/ReasoningEffort.ets');
 const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleModelMenu', 'modelMenu', 'modelMenuHeight', 'popupHeightLimit', 'selectedProvider'], {
   Button: modelButton, Row: gesture, Text: gesture, SymbolGlyph: gesture, Column: gesture, If: gesture, __Common__: gesture,
-  ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
+  ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, HoverEffect, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
   Placement: { TopRight: 'top-right' }, $r: value => value, t: value => value, reasoningEfforts,
   ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
 });
@@ -423,7 +424,7 @@ class HeaderIcon { constructor(_, params) { headerControls.push(params.compId); 
 const Header = probe('pages/Index', 'Index', ['phoneHeader'], {
   Row: gesture, If: gesture, Blank: gesture, SymbolGlyph: gesture,
   Button: new Proxy({}, { get: (_, name) => name === 'id' ? id => headerControls.push(id) : () => {} }),
-  IconButton: HeaderIcon, ViewPU: { create() {} }, CHAT_HEADER_HEIGHT: 56, HitTestMode: {}, ButtonType: {},
+  IconButton: HeaderIcon, ViewPU: { create() {} }, CHAT_HEADER_HEIGHT: 56, HoverEffect, Motion: {}, HitTestMode: {}, ButtonType: {},
   systemMaterialAttribute() {}, t: value => value
 });
 const header = Object.assign(new Header(), { appearance: {}, moreMenu() {}, drawerReveal: 0,
@@ -688,9 +689,12 @@ const cardGlobals = { Column: new Proxy({}, { get: (_, name) => ({
     onClick: onClick => captureButton({ onClick }),
     accessibilityText: text => captureButton({ text }),
     accessibilitySelected: selected => captureButton({ selected }),
-    enabled: enabled => captureButton({ enabled })
+    enabled: enabled => captureButton({ enabled }),
+    hoverEffect: hover => captureButton({ hover }),
+    clickEffect: press => captureButton({ press })
   })[name] || (() => {}) }),
-  Btn: {}, Font: {}, Space: { md: 12 }, Motion: { fast: 160 }, MODE_TARGET: 44, Radius: {}, HorizontalAlign: {}, ButtonType: {}, Color: {}, ModalTransition: { NONE: 1 }, $r: value => value,
+  Btn: {}, Font: {}, Space: { md: 12 }, Motion: { fast: 160, press: 'scale on press' }, HoverEffect, MODE_TARGET: 44,
+  Radius: {}, HorizontalAlign: {}, ButtonType: {}, Color: {}, ModalTransition: { NONE: 1 }, $r: value => value,
   Alignment: {}, HitTestMode: { None: 'no hit', Default: 'hit' }, EdgeEffect: {}, BarState: {}, WordBreak: {}, CopyOptions: {},
   NestedScrollMode: { SELF_FIRST: 'self first' },
   t: value => value,
@@ -718,6 +722,10 @@ card.initialRender(); assert.equal(surfaces, 1);
 const codeModeId = 'preview-mode-code-preview', liveModeId = 'preview-mode-live-preview';
 assert.deepEqual([...toolbarButtons.keys()], [codeModeId, liveModeId, 'fullscreen-preview-preview']);
 assert.equal(toolbarButtons.get(codeModeId).enabled, false);
+assert.equal(toolbarButtons.get(codeModeId).hover, HoverEffect.None);
+assert.equal(toolbarButtons.get(codeModeId).press, null);
+assert.equal(toolbarButtons.get(liveModeId).hover, HoverEffect.Highlight);
+assert.equal(toolbarButtons.get(liveModeId).press, 'scale on press');
 assert.equal(toolbarButtons.get(liveModeId).text, '预览');
 assert.equal(toolbarButtons.get(liveModeId).selected, true);
 assert.equal(toolbarButtons.get(codeModeId).selected, false);
@@ -746,6 +754,8 @@ toolbarButtons.get(liveModeId).onClick();
 card.appearance.effectStrength = 0;
 assert.equal(card.showCode, false); card.initialRender(); assert.equal(previewHitTest, 'hit');
 assert.equal(modeOffset, 44); assert.equal(modeDuration, 0);
+assert.equal(toolbarButtons.get(liveModeId).hover, HoverEffect.Highlight);
+assert.equal(toolbarButtons.get(liveModeId).press, null);
 for (const icon of ['code', 'preview']) {
   const rest = iconPath(icon, 1, 1);
   assert.notEqual(iconPath(icon, 0.45, 1), rest);

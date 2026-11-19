@@ -176,6 +176,8 @@ struct ThreadRow {
             }.id('thread-actions-' + this.thread.id).fontFamily(this.appearance.fontFamily)
             .width(32).height(32).margin({ left: Space.xs })
             .backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
+            .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)
+            .clickEffect(!this.locked() && this.appearance.effectStrength > 0 ? Motion.press : null)
             .bindTips(t('对话管理') + ' · Shift+F10', { appearingTime: 550 })
             .opacity(!this.desktop || this.active() || this.hovered || this.focused || this.actionsFocused ? 1 : 0)
             .hitTestBehavior(!this.desktop || this.active() || this.hovered ? HitTestMode.Default : HitTestMode.None)
@@ -187,6 +189,7 @@ struct ThreadRow {
         .width('100%').padding({ left: this.workbench && !this.thread.parentThreadId ? 28 : Space.md, right: ROW_MENU_RIGHT_INSET,
           top: this.desktop ? 2 : 3, bottom: this.desktop ? 2 : 3 }).constraintSize({ minHeight: this.rowMinHeight() })
         .focusable(!this.locked())
+        .stateStyles({ pressed: { .opacity(this.locked() ? 1 : 0.75) }, normal: { .opacity(1) } })
         .accessibilitySelected(this.selecting ? this.selected : this.active())
         .focusOnTouch(false).focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
           margin: LengthMetrics.vp(-2) })
@@ -861,7 +864,9 @@ export struct ThreadList {
           }
         }.width('100%')
       }.fontFamily(this.appearance.fontFamily).id('project-group-' + (id || 'ordinary')).layoutWeight(1).height((this.desktop ? 36 : 38)).padding({ right: 4 })
-        .backgroundColor(Color.Transparent).borderRadius(10).onClick(() => this.toggleGroup(id))
+        .backgroundColor(Color.Transparent).borderRadius(10)
+        .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+        .onClick(() => this.toggleGroup(id))
         .accessibilityText(this.sectionTitle(id) + '，' + (this.groupOpen(id) ? t('收起') : t('展开')))
       if (!this.selecting) {
         if (this.desktop && id && !this.archived) {
@@ -869,6 +874,8 @@ export struct ThreadList {
             SymbolGlyph($r('sys.symbol.wave_bubble_badge_plus')).fontSize(16).fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
           }.id('pc-new-chat-in-' + id).width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).padding(0).borderRadius(8)
             .backgroundColor(Color.Transparent).enabled(!this.locked())
+            .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)
+            .clickEffect(!this.locked() && this.appearance.effectStrength > 0 ? Motion.press : null)
             .accessibilityText(t('在此项目中新建对话') + ' · ' + this.sectionTitle(id))
             .bindTips(t('在此项目中新建对话'), { appearingTime: 550 })
             .onClick(() => this.onNewChat(id))
@@ -878,6 +885,7 @@ export struct ThreadList {
             SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')]).accessibilityLevel('no')
           }.fontFamily(this.appearance.fontFamily).id('project-actions-' + id)
             .width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).backgroundColor(Color.Transparent)
+            .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
             .accessibilityText(t('项目操作') + ' · ' + this.sectionTitle(id)).enabled(!this.app.sharedBusy && !this.app.saveError)
             .bindTips(t('项目操作'), { appearingTime: 550 })
             .bindMenu(this.projectActions(id), { systemMaterial: this.appearance.menu, mask: false })

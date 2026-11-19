@@ -28,7 +28,7 @@ export struct AnimatedIcon {
   private play(): void {
     if (!this.mounted || !this.foreground || this.appearance.effectStrength === 0 || this.animator) { return; }
     const animator = this.getUIContext().createAnimator({
-      duration: 300, easing: 'linear', delay: 0, fill: 'forwards',
+      duration: 220, easing: 'linear', delay: 0, fill: 'forwards',
       direction: 'normal', iterations: 1, begin: 0, end: 1
     });
     animator.onFrame = (progress: number): void => {
