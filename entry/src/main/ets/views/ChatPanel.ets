@@ -1710,12 +1710,8 @@ export struct ChatPanel {
   @Builder
   modelButton() {
     Button({ type: ButtonType.Capsule }) {
-      Row({ space: 6 }) {
-        Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
-          .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
-        Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') }).flexShrink(0)
-          .rotate({ angle: this.showModelMenu ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
-      }
+      Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
+        .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.id('composer-model-picker').height(this.workbench ? 36 : 44)
       .constraintSize({ minWidth: 64, maxWidth: Math.max(64, Math.min(220, this.panelWidth / 2)) })
       .padding({ left: 12, right: 12 }).backgroundColor(Color.Transparent)
