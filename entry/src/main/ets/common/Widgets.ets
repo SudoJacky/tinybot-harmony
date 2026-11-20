@@ -348,6 +348,8 @@ export struct EmptyState {
   }
 }
 
+const SEGMENT_TRACK_INSET: number = 3;
+
 // iOS/HarmonyOS-style segmented control. Options are short labels; onSelect receives the index.
 // Shared rubber motion; each surface keeps its existing dimensions and styling.
 @Component
@@ -361,7 +363,6 @@ export struct Segmented {
   controlHeight: number = 36;
   labelSize: number = 14;
   trackRadius: number = Radius.sm;
-  thumbRadius: number = Radius.sm - 2;
   gap: number = 0;
   thumbShadow: boolean = true;
   optionIds: string[] = [];
@@ -428,7 +429,8 @@ export struct Segmented {
   build() {
     Stack({ alignContent: Alignment.Start }) {
       if (this.segmentWidth > 0) {
-        Column().width(this.thumbRight - this.thumbLeft).height('100%').borderRadius(this.thumbRadius)
+        Column().width(this.thumbRight - this.thumbLeft).height('100%')
+          .borderRadius(this.trackRadius - SEGMENT_TRACK_INSET)
           .backgroundColor($r('app.color.surface'))
           .shadow({ radius: this.thumbShadow ? 4 : 0, color: this.thumbShadow ? '#14000000' : '#00000000', offsetY: 1 })
           .translate({ x: this.thumbLeft }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
@@ -451,7 +453,7 @@ export struct Segmented {
           this.resetGeometry();
         }
       })
-    }.width('100%').height(this.controlHeight).padding(3).borderRadius(this.trackRadius)
+    }.width('100%').height(this.controlHeight).padding(SEGMENT_TRACK_INSET).borderRadius(this.trackRadius)
     .backgroundColor($r('app.color.surface_variant'))
   }
 }

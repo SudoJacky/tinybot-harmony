@@ -75,6 +75,7 @@ class ChatLayoutFrame extends FrameCallback {
 
 interface PendingComposerAction { owner: number; threadId: string; run: () => void; }
 
+const PHONE_COMPOSER_ACTION_SIZE: number = 44;
 const ATTACHMENT_FOLDER_WIDTH: number = 104;
 const ATTACHMENT_FOLDER_HEIGHT: number = 66;
 const ATTACHMENT_FLAP_SPRING: ICurve = curves.interpolatingSpring(0, 1, 420, 33);
@@ -1709,12 +1710,8 @@ export struct ChatPanel {
   @Builder
   modelButton() {
     Button({ type: ButtonType.Capsule }) {
-      Row({ space: 6 }) {
-        Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
-          .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
-        Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') }).flexShrink(0)
-          .rotate({ angle: this.showModelMenu ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
-      }
+      Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
+        .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.id('composer-model-picker').height(this.workbench ? 36 : 44)
       .constraintSize({ minWidth: 64, maxWidth: Math.max(64, Math.min(220, this.panelWidth / 2)) })
       .padding({ left: 12, right: 12 }).backgroundColor(Color.Transparent)
@@ -1823,7 +1820,8 @@ export struct ChatPanel {
   composerOptionsButton() {
     Button({ type: ButtonType.Circle }) {
       SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(18).fontColor([$r('app.color.text_secondary')])
-    }.id('composer-options').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
+    }.id('composer-options').width(this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE)
+      .height(this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE)
       .backgroundColor(Color.Transparent).accessibilityText(t('输入选项'))
       .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .bindTips(t('输入选项'), { appearingTime: 550 })
@@ -1861,7 +1859,8 @@ export struct ChatPanel {
 
   @Builder
   composerAddButton() {
-    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板或文件'), compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
+    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板或文件'), compId: 'add-attachment',
+      diameter: this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE,
       iconSize: 18, fill: '#00000000', animatedIcon: 'plus', animatedSelected: this.showPlus || this.showPlusMenu,
       disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => {
@@ -1937,6 +1936,23 @@ export struct ChatPanel {
         .onFocus(() => { this.composerFocused = true; this.inspectingOutput = false; this.followOutput = true; this.follow(); })
         .onBlur(() => { this.composerHasPreview = false; this.composerFocused = false; })
         .onEditChange((editing: boolean) => { this.composerFocused = editing; })
+  }
+
+  private composerToolbarHeight(): number {
+    if (this.speechActive()) { return this.workbench ? 48 : 56; }
+    if (this.composerExpanded()) { return this.workbench ? 44 : 52; }
+    return this.workbench ? 46 : 54;
+  }
+
+  private composerBorderWidth(): number {
+    return this.composerActiveInLayout() ? 1 : 0.5;
+  }
+
+  private composerCorners(): BorderRadiuses {
+    const top = this.desktop ? Radius.lg : this.composerExpanded() ? Radius.xl : 28;
+    const bottom = this.workbench || this.voiceMode ? top :
+      PHONE_COMPOSER_ACTION_SIZE / 2 + Space.sm + this.composerBorderWidth();
+    return { topLeft: top, topRight: top, bottomLeft: bottom, bottomRight: bottom };
   }
 
   @Builder
@@ -2019,8 +2035,8 @@ export struct ChatPanel {
           .accessibilityLevel(this.composerExpanded() ? 'auto' : 'no-hide-descendants')
           .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.None)
         }
-        IconButton({ icon: $r('sys.symbol.mic'), label: t('切换到语音输入'), compId: 'start-speech', diameter: this.workbench ? 36 : 44,
-          iconSize: 19, fill: $r('app.color.surface_variant'), disabled: !this.canRecordSpeech(),
+        IconButton({ icon: $r('sys.symbol.mic'), label: t('切换到语音输入'), compId: 'start-speech',
+          diameter: this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE, iconSize: 19, fill: $r('app.color.surface_variant'), disabled: !this.canRecordSpeech(),
           onTap: () => this.enterVoiceMode() })
           .margin({ left: 4 })
         if (this.app.generating) {
@@ -2040,8 +2056,8 @@ export struct ChatPanel {
                 .onClick(() => this.app.enqueueInput('followUp'))
             }
           }
-          IconButton({ icon: $r('sys.symbol.square_fill'), label: t('停止生成'), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
-            iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
+          IconButton({ icon: $r('sys.symbol.square_fill'), label: t('停止生成'), compId: 'stop-generation',
+            diameter: this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE, iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
             onTap: () => { this.app.stop(); } })
             .margin({ left: 4 })
             .transition(Motion.pop())
@@ -2052,28 +2068,32 @@ export struct ChatPanel {
               .enabled(this.app.canQueueInput).onClick(() => this.app.enqueueInput('followUp'))
           }
           Row() {
-          IconButton({ animatedIcon: 'send', label: t('发送'), compId: 'send-message', diameter: this.workbench ? 36 : 44, iconSize: 18,
+          IconButton({ animatedIcon: 'send', label: t('发送'), compId: 'send-message',
+            diameter: this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE, iconSize: 18,
             fill: this.canSend() ? this.appearance.accent : $r('app.color.surface_variant'),
             tint: this.canSend() ? this.appearance.onAccent : $r('app.color.text_tertiary'),
             disabled: !this.canSend(), onTap: () => this.send() })
             .bindContextMenu(this.sendMenu, ResponseType.LongPress, {
               systemMaterial: this.appearance.menu, mask: false })
-          }.width((this.workbench || this.hasDraft()) && !this.speechActive() ? this.workbench ? 40 : 48 : 0).height(this.workbench ? 36 : 44)
+          }.width((this.workbench || this.hasDraft()) && !this.speechActive() ? this.workbench ? 40 : PHONE_COMPOSER_ACTION_SIZE + 4 : 0)
+            .height(this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE)
             .padding({ left: (this.workbench || this.hasDraft()) && !this.speechActive() ? 4 : 0 }).clip(true)
             .opacity((this.workbench || this.hasDraft()) && !this.speechActive() ? 1 : 0)
             .animation({ duration: Motion.fast, curve: Motion.standard })
             .hitTestBehavior((this.workbench || this.hasDraft()) && !this.speechActive() ? HitTestMode.Default : HitTestMode.None)
             .accessibilityLevel((this.workbench || this.hasDraft()) && !this.speechActive() ? 'auto' : 'no-hide-descendants')
         }
-      }.width('100%').height(this.speechActive() ? this.workbench ? 48 : 56 : this.composerExpanded() ? this.workbench ? 44 : 52 : this.workbench ? 46 : 54)
-        .padding({ left: 8, right: 8, bottom: this.composerExpanded() ? 8 : 10 })
+      }.width('100%').height(this.composerToolbarHeight())
+        .padding({ left: Space.sm, right: Space.sm,
+          top: this.workbench ? 0 : this.composerToolbarHeight() - PHONE_COMPOSER_ACTION_SIZE - Space.sm,
+          bottom: this.workbench && !this.composerExpanded() ? 10 : Space.sm })
         .animation({ duration: Motion.medium, curve: Motion.standard })
         .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.Transparent)
       }
-    }.id('composer-shell').width('100%').borderRadius(this.desktop ? Radius.lg : this.composerExpanded() ? Radius.xl : 28).clip(true)
+    }.id('composer-shell').width('100%').borderRadius(this.composerCorners()).clip(true)
     .onAreaChange((_previous: Area, current: Area) => { this.composerWindowTop = Number(current.globalPosition.y); })
     .backgroundColor($r('app.color.surface'))
-    .border({ width: this.composerActiveInLayout() ? 1 : 0.5,
+    .border({ width: this.composerBorderWidth(),
       color: this.composerActiveInLayout() ? this.appearance.accentOutline : $r('app.color.divider') })
     .shadow(this.desktop ? { radius: 8, color: '#0A000000', offsetY: 2 }
       : this.composerActiveInLayout() ? { radius: 28, color: this.appearance.accentGlow, offsetY: 4 }

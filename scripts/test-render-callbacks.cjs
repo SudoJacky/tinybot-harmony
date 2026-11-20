@@ -136,7 +136,9 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   console.log('PASS emitted icon button: retained instances accept diameter and animated icon updates');
 
   let addButton, updateAddButton;
-  const AddButton = compile(methods('views/ChatPanel', ['composerAddButton']), {
+  const AddButton = compile(methods('views/ChatPanel',
+    ['composerAddButton', 'composerToolbarHeight', 'composerBorderWidth', 'composerCorners']), {
+    PHONE_COMPOSER_ACTION_SIZE: 44, Radius: { lg: 18, xl: 24 }, Space: { sm: 8 },
     IconButton: class extends ResponsiveIcon {
       constructor(_parent, params) {
         super(); addButton = this; this.diameter = params.diameter;
@@ -168,7 +170,19 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     composer[state] = true; updateAddButton(); assert.equal(addButton.animatedSelected, true);
     composer[state] = false; updateAddButton(); assert.equal(addButton.animatedSelected, false);
   }
-  console.log('PASS emitted composer button: layout and attachment menu update the retained icon');
+  composer.workbench = false; updateAddButton();
+  for (const expanded of [false, true]) {
+    composer.composerExpanded = () => expanded;
+    composer.composerActiveInLayout = () => expanded;
+    const corners = composer.composerCorners();
+    assert.equal(composer.composerToolbarHeight(), expanded ? 52 : 54);
+    assert.equal(corners.topRight, expanded ? 24 : 28);
+    assert.equal(corners.bottomRight, addButton.diameter / 2 + 8 + composer.composerBorderWidth());
+    assert.equal(corners.bottomLeft, corners.bottomRight);
+  }
+  composer.voiceMode = true;
+  assert.equal(composer.composerCorners().bottomRight, 24);
+  console.log('PASS emitted composer: retained icon updates and concentric phone toolbar corners');
 
   let settingsParams, settingsUpdate, settingsSwipe;
   const Settings = compile(methods('pages/Index', ['settingsContent']), {

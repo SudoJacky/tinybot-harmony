@@ -117,6 +117,19 @@ async (page, host, definitions, outputDirectory, balanceMotion) => {
   check((await page.evaluate(()=>messages)).every(message=>message.type!=='storageLoad'&&message.type!=='storageSave'),'Balance has no privacy storage dependency');
   await frame.evaluate(balanceMotion);
   check((await page.evaluate(()=>messages.filter(message=>message.type==='panelRefresh').length))===2,'Both refreshes cross the native port');
+  await frame.locator('#account').click();
+  await frame.waitForFunction(() => document.getElementById('account-panel').getAnimations({ subtree: true }).length === 0);
+  const pickerIsConcentric = await frame.evaluate(() => {
+    const surface = document.querySelector('.panel-surface');
+    const lastOption = document.querySelector('.account-option:last-child');
+    const outer = surface.getBoundingClientRect();
+    const inner = lastOption.getBoundingClientRect();
+    const radiusDifference = parseFloat(getComputedStyle(surface).borderBottomRightRadius) -
+      parseFloat(getComputedStyle(lastOption).borderBottomRightRadius);
+    return [inner.left - outer.left, outer.right - inner.right, outer.bottom - inner.bottom]
+      .every(inset => Math.abs(inset - radiusDifference) < 0.1);
+  });
+  check(pickerIsConcentric, 'The balance account picker has concentric bottom corners');
   frame=await mount({...balance,data:{...balance.data,amounts:[{currency:'CNY',label:'账户余额',kind:'account',total:'94.63'}],checkedAt:1}},{width:344});
   check(await frame.locator('#amount').getAttribute('aria-label')==='￥94.63','CNY balance includes the requested yuan symbol');
   await capture(frame,'balance-currency');

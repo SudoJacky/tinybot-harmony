@@ -15,6 +15,8 @@ import { PreviewSurface, PreviewSurfaceOptions } from './PreviewSurface';
 import { IconButton } from '../common/Widgets';
 
 const MODE_TARGET: number = 44;
+const MODE_TRACK_RADIUS: number = 17;
+const MODE_INSET: number = 3;
 
 @Component
 export struct PublishedPreviewCard {
@@ -121,15 +123,16 @@ export struct PublishedPreviewCard {
   @Builder
   private previewModeControl() {
     Stack() {
-      Row().width(MODE_TARGET * 2).height(34).borderRadius(17).backgroundColor($r('app.color.divider'))
+      Row().width(MODE_TARGET * 2).height(MODE_TRACK_RADIUS * 2).borderRadius(MODE_TRACK_RADIUS).backgroundColor($r('app.color.divider'))
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       Divider().vertical(true).height(14).color($r('app.color.surface_variant'))
         .hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       Row() {
-        Row().width(MODE_TARGET - 4).height(28).borderRadius(14).backgroundColor($r('app.color.surface'))
+        Row().width(MODE_TARGET - MODE_INSET * 2).height((MODE_TRACK_RADIUS - MODE_INSET) * 2)
+          .borderRadius(MODE_TRACK_RADIUS - MODE_INSET).backgroundColor($r('app.color.surface'))
           .translate({ x: this.showCode ? 0 : MODE_TARGET })
           .animation({ duration: this.appearance.effectStrength > 0 ? Motion.fast : 0, curve: Motion.standard })
-      }.width(MODE_TARGET * 2).padding({ left: 2 }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
+      }.width(MODE_TARGET * 2).padding({ left: MODE_INSET }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       Row() {
         this.modeButton(true)
         this.modeButton(false)
