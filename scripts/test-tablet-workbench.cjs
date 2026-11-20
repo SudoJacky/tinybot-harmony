@@ -707,10 +707,15 @@ const modeIcons = [];
 const toolbarButtons = new Map();
 const noopUi = new Proxy({}, { get: () => () => {} });
 const captureButton = (props) => Object.assign(toolbarButtons.get(buttonId), props);
+const modeRows = [];
 const cardGlobals = { Column: new Proxy({}, { get: (_, name) => ({
     bindContentCover: (...args) => { fullscreenCover = args; }, padding: value => { previewPadding = value; }
   })[name] || (() => {}) }),
-  Row: new Proxy({}, { get: (_, name) => name === 'translate' ? value => { modeOffset = value.x; } : () => {} }),
+  Row: new Proxy({}, { get: (_, name) => value => {
+    if (name === 'create') { modeRows.push({}); return; }
+    if (name === 'translate') { modeOffset = value.x; }
+    if (['width', 'height', 'borderRadius', 'padding', 'translate'].includes(name)) { modeRows.at(-1)[name] = value; }
+  } }),
   Context: { animation(value) { if (value) { modeDuration = value.duration; } } },
   Text: noopUi, Blank: noopUi, SymbolGlyph: noopUi, ForEach: noopUi, Span: noopUi, Stack: noopUi, ListItem: noopUi, Divider: noopUi,
   AnimatedIcon: class { constructor(_parent, props) { modeIcons.push(props); } },
@@ -739,7 +744,7 @@ const cardGlobals = { Column: new Proxy({}, { get: (_, name) => ({
     hoverEffect: hover => captureButton({ hover }),
     clickEffect: press => captureButton({ press })
   })[name] || (() => {}) }),
-  Btn: {}, Font: {}, Space: { md: 12 }, Motion: { fast: 160, press: 'scale on press' }, HoverEffect, MODE_TARGET: 44,
+  Btn: {}, Font: {}, Space: { md: 12 }, Motion: { fast: 160, press: 'scale on press' }, HoverEffect, MODE_TARGET: 44, MODE_TRACK_RADIUS: 17, MODE_INSET: 3,
   Radius: {}, HorizontalAlign: {}, ButtonType: {}, Color: {}, ModalTransition: { NONE: 1 }, $r: value => value,
   Alignment: {}, HitTestMode: { None: 'no hit', Default: 'hit' }, EdgeEffect: {}, BarState: {}, WordBreak: {}, CopyOptions: {},
   NestedScrollMode: { SELF_FIRST: 'self first' },
@@ -777,6 +782,14 @@ assert.equal(toolbarButtons.get(liveModeId).selected, true);
 assert.equal(toolbarButtons.get(codeModeId).selected, false);
 assert.deepEqual(modeIcons.slice(-2).map(icon => [icon.iconName, icon.selected]), [['code', false], ['preview', true]]);
 assert.equal(modeOffset, 44); assert.equal(modeDuration, 160);
+const track = modeRows.find(row => row.borderRadius === 17);
+const thumb = modeRows.find(row => row.translate?.x === modeOffset);
+const inset = modeRows.find(row => row.padding?.left === 3).padding.left;
+assert.equal(track.borderRadius, thumb.borderRadius + inset);
+assert.equal(track.height, thumb.height + inset * 2);
+assert.equal(track.width / 2, thumb.width + inset * 2);
+assert.equal(track.width - inset - modeOffset - thumb.width, inset);
+assert.equal(modeOffset, track.width / 2);
 fullscreenBounds({}, { height: 420 }); assert.equal(card.inlineHeight, 420);
 card.initialRender();
 assert.equal(toolbarButtons.get(codeModeId).text, '代码');

@@ -3,6 +3,10 @@ import { Btn, gradientColor } from '../common/Theme';
 import { BuiltinWidget, builtinWidgets } from '../model/BuiltinWidgets';
 import { t } from '../model/I18n';
 
+const CARD_INSET: number = 12;
+const CARD_BORDER_WIDTH: number = 0.5;
+const CARD_CONTENT_RADIUS: number = 12;
+
 @Component
 export struct BuiltinWidgetGallery {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
@@ -49,7 +53,7 @@ export struct BuiltinWidgetGallery {
         Text(t('每一个\n值得期待的日子')).fontSize(18).fontWeight(FontWeight.Medium).fontColor(widget.color)
           .lineHeight(26).width('100%').margin({ top: 10 })
       }
-    }.alignItems(HorizontalAlign.Center).width('100%').height(132).padding(14).borderRadius(18)
+    }.alignItems(HorizontalAlign.Center).width('100%').height(132).padding(14).borderRadius(CARD_CONTENT_RADIUS)
       .backgroundColor(gradientColor(widget.color, 0.09)).accessibilityText(widget.title)
   }
   @Builder private item(widget: BuiltinWidget) {
@@ -63,8 +67,8 @@ export struct BuiltinWidgetGallery {
         .id('builtin-widget-add-' + widget.id).accessibilityText(t('添加「{0}」', [widget.title]))
         .enabled(this.available && !this.adding && (widget.id !== 'balance' || this.balanceAvailable))
         .onClick(() => this.onAdd(widget.id))
-    }.width('100%').padding(12).borderRadius(24).backgroundColor($r('app.color.surface'))
-      .border({ width: 0.5, color: $r('app.color.divider') })
+    }.width('100%').padding(CARD_INSET).borderRadius(CARD_CONTENT_RADIUS + CARD_INSET + CARD_BORDER_WIDTH)
+      .backgroundColor($r('app.color.surface')).border({ width: CARD_BORDER_WIDTH, color: $r('app.color.divider') })
   }
   build() {
     Column({ space: 14 }) {

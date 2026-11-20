@@ -11,6 +11,10 @@ import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Btn, Font, Radius, Space, compactNumber } from '../common/Theme';
 import { Banner, EmptyState, GroupCard, NavRow, RowDivider, SectionHeader, Segmented, StatTile, Tag } from '../common/Widgets';
 
+const CONTRIBUTION_CELL_SIZE: number = 16;
+const CONTRIBUTION_CELL_RADIUS: number = 3;
+const CONTRIBUTION_OUTLINE_INSET: number = 2;
+
 @Component
 struct UsageFilterChip {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
@@ -380,15 +384,19 @@ export struct UsagePanel {
   @Builder
   contributionCell(cell: ContributionCell) {
     Stack() {
-      Rect().width(16).height(16).radius(3).fill($r('app.color.surface_variant'))
+      Rect().width(CONTRIBUTION_CELL_SIZE).height(CONTRIBUTION_CELL_SIZE)
+        .radius(CONTRIBUTION_CELL_RADIUS).fill($r('app.color.surface_variant'))
       if (cell.level > 0) {
-        Rect().width(16).height(16).radius(3).fill(this.appearance.accent).opacity(cell.level / 4)
+        Rect().width(CONTRIBUTION_CELL_SIZE).height(CONTRIBUTION_CELL_SIZE)
+          .radius(CONTRIBUTION_CELL_RADIUS).fill(this.appearance.accent).opacity(cell.level / 4)
       }
       if (cell.day && cell.day.missing > 0) {
         Circle().width(4).height(4).fill($r('app.color.text_secondary'))
       }
-    }.width(20).height(20).opacity(cell.day ? 1 : 0.25)
-      .border({ width: cell.day && cell.date === this.selectedDay().date ? 1 : 0, color: this.appearance.accent, radius: 4 })
+    }.width(CONTRIBUTION_CELL_SIZE + CONTRIBUTION_OUTLINE_INSET * 2)
+      .height(CONTRIBUTION_CELL_SIZE + CONTRIBUTION_OUTLINE_INSET * 2).opacity(cell.day ? 1 : 0.25)
+      .border({ width: cell.day && cell.date === this.selectedDay().date ? 1 : 0,
+        color: this.appearance.accent, radius: CONTRIBUTION_CELL_RADIUS + CONTRIBUTION_OUTLINE_INSET })
       .id('usage-day-' + cell.date).accessibilityText(this.cellDescription(cell)).accessibilityLevel(cell.day ? 'yes' : 'no')
       .enabled(!!cell.day).onClick(() => { this.day = cell.date; })
   }
