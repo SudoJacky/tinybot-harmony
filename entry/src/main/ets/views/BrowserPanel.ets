@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { BrowserActionFeedback, BrowserSession } from '../services/BrowserSession';
@@ -303,7 +304,7 @@ export struct BrowserPanel {
   @Builder
   moreButton(size: number) {
     Button({ type: ButtonType.Circle }) {
-      SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_primary')])
+      SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(19).fontColor([$r('app.color.text_primary')])
     }.id('browser-more').width(size).height(size).padding(0).backgroundColor(Color.Transparent)
       .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .accessibilityText(t('浏览器操作')).bindTips(t('浏览器操作'), { appearingTime: 550 })
@@ -325,8 +326,8 @@ export struct BrowserPanel {
   @Builder
   phoneHeader() {
     Row({ space: 4 }) {
-      IconButton({ icon: $r('sys.symbol.chevron_down'), label: t('收起浏览器'), compId: 'browser-collapse',
-        iconSize: 18, fill: '#00000000', onTap: this.onDismiss })
+      IconButton({ chevron: 'down', label: t('收起浏览器'), compId: 'browser-collapse',
+        fill: '#00000000', onTap: this.onDismiss })
       Column({ space: 1 }) {
         Text(this.browser.url && this.browser.title ? this.browser.title : t('应用内浏览器'))
           .fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium)
@@ -362,8 +363,8 @@ export struct BrowserPanel {
         })
         .onSubmit(() => this.navigate())
       if (this.addressDirty && this.address.trim().length > 0) {
-        IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('打开'), compId: 'browser-go', diameter: 36,
-          fill: '#00000000', tint: this.appearance.accent, iconSize: 15, onTap: () => this.navigate() })
+        IconButton({ chevron: 'right', label: t('打开'), compId: 'browser-go', diameter: 36,
+          fill: '#00000000', tint: this.appearance.accent, onTap: () => this.navigate() })
       }
     }.layoutWeight(1).backgroundColor($r('app.color.surface_variant')).borderRadius(Radius.lg)
   }
@@ -371,12 +372,12 @@ export struct BrowserPanel {
   @Builder
   navigationToolbar() {
     Row({ space: 2 }) {
-      IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back',
-        diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000', disabled: !this.browser.canGoBack,
+      IconButton({ chevron: 'left', label: t('上一页'), compId: 'browser-back',
+        diameter: this.tabbed ? 36 : 44, fill: '#00000000', disabled: !this.browser.canGoBack,
         onTap: () => this.driver?.userBack() })
       if (this.tabbed && this.webWidth >= 360) {
-        IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('下一页'), compId: 'browser-forward',
-          diameter: 36, iconSize: 18, fill: '#00000000', disabled: !this.browser.canGoForward,
+        IconButton({ chevron: 'right', label: t('下一页'), compId: 'browser-forward',
+          diameter: 36, fill: '#00000000', disabled: !this.browser.canGoForward,
           onTap: () => this.driver?.userForward() })
       }
       IconButton({ icon: this.browser.loading ? $r('sys.symbol.stop_circle') : $r('sys.symbol.arrow_clockwise'),
@@ -641,7 +642,7 @@ export struct BrowserStatusCard {
               Text(this.browser.handoffReason || this.browser.title || this.browser.url).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
             }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+            Chevron({ pointing: 'right', tint: $r('app.color.text_secondary') })
           }.width('100%')
         }.fontFamily(this.appearance.fontFamily).id('open-agent-browser').attributeModifier(Btn.plainSmall).width('100%').onClick(this.onOpen)
       }

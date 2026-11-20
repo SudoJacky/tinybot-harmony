@@ -55,6 +55,8 @@ if (!process.argv.includes('--model-only')) {
   class ViewPU{
     constructor(){this.effects=new Map();this.nodes=new Map();this.branches=new Map();this.lists=new Map();this.scopes=[];}
     finalizeConstruction(){}
+    static create(){}
+    updateStateVarsOfChildByElmtId(){}
     createStorageProp(_key,value){return new Property(value);}
     getUIContext(){return{animateTo:(_options,change)=>change()};}
     observeComponentCreation2(callback){const id=++serial;for(const scope of this.scopes)scope.add(id);this.effects.set(id,{callback,owners:[...this.scopes]});this.run(id,true);}
@@ -68,8 +70,8 @@ if (!process.argv.includes('--model-only')) {
   }
   const globals={exports:{},ViewPU,SynchedPropertyNesedObjectPU:Property,
     makeBuilderParameterProxy:(_name,getters)=>new Proxy({},{get:(_,key)=>getters[key]()}),
-    require:id=>{if(id.includes('AppearanceStyle&'))return {AppearanceStyle:class {fontFamily='sans-serif';}};if(id.includes('I18n&'))return {t:text=>text};if(id.includes('Theme&'))return {Font:{},Motion:{},Radius:{},Space:{}};if(id.includes('MaterialAttributes&'))return {systemMaterialAttribute:()=>({}),menuMaterialAttribute:()=>({})};if(id.includes('ApiLevel&'))return {ApiLevel:{material:false,drawingTools:false,redirectLimit:false,pdfTextContent:false,sdk:20}};throw Error('Unexpected dependency '+id);}};
-  for(const type of ['If','Column','Row','Button','SymbolGlyph','Text','LoadingProgress','Scroll','ForEach'])globals[type]=new Proxy({},{get:(_,property)=>(...args)=>{
+    require:id=>{if(id.includes('Chevron&'))return {Chevron:class {}};if(id.includes('AppearanceStyle&'))return {AppearanceStyle:class {fontFamily='sans-serif';}};if(id.includes('I18n&'))return {t:text=>text};if(id.includes('Theme&'))return {Font:{},Motion:{},Radius:{},Space:{}};if(id.includes('MaterialAttributes&'))return {systemMaterialAttribute:()=>({}),menuMaterialAttribute:()=>({})};if(id.includes('ApiLevel&'))return {ApiLevel:{material:false,drawingTools:false,redirectLimit:false,pdfTextContent:false,sdk:20}};throw Error('Unexpected dependency '+id);}};
+  for(const type of ['If','Column','Row','Button','SymbolGlyph','Text','LoadingProgress','Scroll','ForEach','__Common__'])globals[type]=new Proxy({},{get:(_,property)=>(...args)=>{
     if(property==='pop')return;const id=currentView.current;let node=currentView.nodes.get(id);if(!node){node={type,elementId:id};currentView.nodes.set(id,node);}node[property==='create'?'value':property]=args[0];
   }});
   for(const name of ['ButtonType','Color','HorizontalAlign','VerticalAlign','FontWeight','TextOverflow','TextDecorationType','CopyOptions','BarState','Alignment'])globals[name]={};

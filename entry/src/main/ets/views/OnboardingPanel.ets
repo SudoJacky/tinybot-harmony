@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { FrameCallback, KeyboardAvoidMode } from '@kit.ArkUI';
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -622,7 +623,7 @@ export struct OnboardingPanel {
       if (this.step > 0) {
         // Toggle supports native material in the content area. This is a momentary navigation action.
         Toggle({ type: ToggleType.Button, isOn: false }) {
-          SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(20).fontColor([this.ink()])
+          Chevron({ pointing: 'left', tint: this.ink() })
         }
         .id('onboarding-back').width(44).height(44).backgroundColor(this.appearance.controlBackground)
         .padding(0).borderRadius(22).selectedColor(this.appearance.controlBackground)

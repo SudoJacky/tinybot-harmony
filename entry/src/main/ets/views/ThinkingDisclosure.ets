@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { thoughtTail } from '../model/ProcessPresentation';
@@ -53,7 +54,7 @@ export struct ThinkingDisclosure {
           Blank()
         }
         Stack({ alignContent: Alignment.Center }) {
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+          Chevron({ pointing: 'down' })
         }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
           .animation({ duration: Motion.medium, curve: Motion.standard })
       }.id('thinking-toggle-' + this.identity).width('100%').height(PROCESS_ROW_HEIGHT)

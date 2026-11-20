@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { Diagnostics } from '../model/Diagnostics';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -229,7 +230,7 @@ export struct MarkdownChunkView {
         Text(this.model.blocks[index].rows[0][0] || 'code').fontSize(12).fontFamily('monospace').layoutWeight(1).maxLines(1)
           .fontColor($r('app.color.text_secondary'))
         Row({ space: 4 }) {
-          SymbolGlyph(this.copied === index ? $r('sys.symbol.checkmark') : $r('sys.symbol.rectangle_on_rectangle')).fontSize(14)
+          SymbolGlyph(this.copied === index ? $r('sys.symbol.checkmark') : $r('sys.symbol.rectangle_on_rectangle')).fontSize(18)
             .fontColor([this.copied === index ? this.appearance.accent : $r('app.color.text_secondary')])
           Text(this.copied === index ? t("已复制") : t("复制")).fontFamily(this.appearance.fontFamily).fontSize(12)
             .fontColor(this.copied === index ? this.appearance.accent : $r('app.color.text_secondary'))
@@ -265,8 +266,7 @@ export struct MarkdownChunkView {
         Row({ space: 4 }) {
           Text(this.expanded.includes(index) ? t("收起") : t("展开全部 {0} 行", [this.codeLines(this.model.blocks[index])])).fontFamily(this.appearance.fontFamily).fontSize(13)
             .fontColor(this.appearance.accent)
-          SymbolGlyph(this.expanded.includes(index) ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-            .fontSize(13).fontColor([this.appearance.accent])
+          Chevron({ pointing: this.expanded.includes(index) ? 'up' : 'down', tint: this.appearance.accent })
         }.width('100%').height(40).justifyContent(FlexAlign.Center)
         .border({ width: { top: 0.5 }, color: $r('app.color.divider') })
         .onClick(() => {

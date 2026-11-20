@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { PageStyles } from '../common/PageStyles';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -171,7 +172,7 @@ struct ModelChoiceRow {
         .fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(2).textAlign(TextAlign.End).layoutWeight(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .fontColor(this.selected < 0 ? $r('app.color.danger') : this.selected > 0 ? this.appearance.accent : $r('app.color.text_tertiary'))
-      SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+      Chevron({ pointing: 'down' })
     }
     .width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
     .opacity(this.selectable ? 1 : 0.4).enabled(this.selectable)

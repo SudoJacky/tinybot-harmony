@@ -1,3 +1,4 @@
+import { Chevron } from '../../common/Chevron';
 // Keep this static card independent of app services and AppStorage. Native
 // resources follow the desktop's language/theme, including before first launch.
 const storage = new LocalStorage();
@@ -70,8 +71,7 @@ struct WidgetCard {
                 Text($r('app.string.widget_continue')).fontSize(13).minFontSize(11).maxFontSize(13)
                   .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   .fontColor($r('app.color.text_secondary')).flexShrink(1)
-                SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12)
-                  .fontColor([$r('app.color.text_secondary')])
+                Chevron({ pointing: 'right', tint: $r('app.color.text_secondary') })
               }.width('100%').height(44)
             }.id('widget-continue-chat').width('100%').height(44)
               .accessibilityText($r('app.string.widget_continue')).accessibilityLevel('yes')

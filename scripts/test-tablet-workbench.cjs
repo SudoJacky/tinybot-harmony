@@ -431,7 +431,7 @@ const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleMode
   Button: modelButton, Row: gesture, Text: gesture, SymbolGlyph: gesture, Column: gesture, If: gesture, __Common__: gesture,
   ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, HoverEffect, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
   Placement: { TopRight: 'top-right' }, $r: value => value, t: value => value, reasoningEfforts,
-  ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
+  Chevron: class {}, ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
 });
 const picker = Object.assign(new Picker(), { showModelMenu: false, appearance: {}, panelWidth: 360, panelTop: 0, modelButtonTop: 420,
   thread: { id: 'chat', modelRef: { providerId: 'openai', modelId: 'gpt-5.4' }, reasoningEffort: 'high' },

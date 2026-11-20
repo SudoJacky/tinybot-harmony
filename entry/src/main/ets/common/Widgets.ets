@@ -1,3 +1,4 @@
+import { Chevron, CHEVRON_SIZE, ChevronDirection } from './Chevron';
 import { AppearanceStyle } from './AppearanceStyle';
 import { systemMaterialAttribute } from './MaterialAttributes';
 import { t } from '../model/I18n';
@@ -13,6 +14,7 @@ import { AnimatedIconName } from './IconArtwork';
 export struct IconButton {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop icon: Resource = $r('sys.symbol.plus');
+  @Prop chevron: ChevronDirection | undefined = undefined;
   @Prop tint: ResourceColor = $r('app.color.text_primary');
   @Prop fill: ResourceColor = Color.Transparent;
   @Prop @Watch('disabledChanged') disabled: boolean = false;
@@ -66,11 +68,14 @@ export struct IconButton {
         if (this.animatedIcon) {
           AnimatedIcon({ iconName: this.animatedIcon, iconSize: this.iconSize, tint: this.tint,
             interacting: !this.disabled && this.iconHovered, pressed: this.pressed(), selected: !this.disabled && this.animatedSelected })
+        } else if (this.chevron) {
+          Chevron({ pointing: this.chevron, tint: this.tint })
         } else {
           SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
         }
       }
-      .width(this.iconSize).height(this.iconSize)
+      .width(this.chevron ? CHEVRON_SIZE : this.iconSize)
+      .height(this.chevron ? CHEVRON_SIZE : this.iconSize)
       .scale({ x: this.iconScale(), y: this.iconScale() })
       .animation(this.appearance.effectStrength > 0 ? { duration: Motion.desktop, curve: Motion.standard } : null)
       .hitTestBehavior(HitTestMode.None).accessibilityLevel('no-hide-descendants')
@@ -201,10 +206,10 @@ export struct NavRow {
       if (this.trailing === 'select') {
         SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).fontColor([this.appearance.accent]).opacity(this.active ? 1 : 0)
       } else if (this.trailing === 'expand') {
-        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'down' })
           .rotate({ angle: this.active ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
       } else if (!this.accent) {
-        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'right' })
       }
     }
     .id(this.compId).width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })

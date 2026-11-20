@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -172,7 +173,7 @@ struct ThreadRow {
           }.layoutWeight(1)
           if (!this.selecting) {
             Button({ type: ButtonType.Circle }) {
-              SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+              SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
             }.id('thread-actions-' + this.thread.id).fontFamily(this.appearance.fontFamily)
             .width(32).height(32).margin({ left: Space.xs })
             .backgroundColor(Color.Transparent).accessibilityText(t("对话管理"))
@@ -572,7 +573,7 @@ export struct ThreadList {
   cloudConnectionPicker() {
     Column() {
       Row({ space: Space.md }) {
-        IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('返回项目'), compId: 'project-cloud-connection-back',
+        IconButton({ chevron: 'left', label: t('返回项目'), compId: 'project-cloud-connection-back',
           onTap: () => this.closeCloudPicker() })
       }.width('100%').padding({ left: Space.md, right: Space.lg, bottom: Space.sm })
       Scroll() {
@@ -597,7 +598,7 @@ export struct ThreadList {
   cloudFolderPicker() {
     Column() {
       Row({ space: Space.md }) {
-        IconButton({ icon: $r('sys.symbol.chevron_left'), compId: 'project-cloud-back',
+        IconButton({ chevron: 'left', compId: 'project-cloud-back',
           label: this.cloudPath.length > 1 ? t('上一级') : this.webDavConnections.length > 1 ? t('返回连接列表') : t('返回项目'),
           onTap: () => this.cloudBack() })
         Column({ space: 3 }) {
@@ -850,8 +851,11 @@ export struct ThreadList {
       Button({ type: ButtonType.Normal }) {
         Row({ space: 7 }) {
           Stack({ alignContent: Alignment.Center }) {
-            SymbolGlyph(this.workbench ? $r('sys.symbol.folder') : $r('sys.symbol.chevron_down')).fontSize(this.workbench ? 18 : 12)
-              .fontColor([$r('app.color.text_tertiary')])
+            if (this.workbench) {
+              SymbolGlyph($r('sys.symbol.folder')).fontSize(18).fontColor([$r('app.color.text_tertiary')])
+            } else {
+              Chevron({ pointing: 'down' })
+            }
           }.width(24).height(24)
             .rotate({ angle: this.workbench || this.groupOpen(id) ? 0 : -90, centerX: '50%', centerY: '50%' })
             .animation({ duration: Motion.medium, curve: Motion.standard })
@@ -859,7 +863,7 @@ export struct ThreadList {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontColor((this.app.active.projectId || '') === id ? this.appearance.accent : $r('app.color.text_secondary'))
           if (this.desktop) {
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_tertiary')])
+            Chevron({ pointing: 'down' })
               .rotate({ angle: this.groupOpen(id) ? 0 : -90 }).accessibilityLevel('no')
           }
         }.width('100%')
@@ -882,7 +886,7 @@ export struct ThreadList {
         }
         if (id) {
           Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_tertiary')]).accessibilityLevel('no')
+            SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(16).fontColor([$r('app.color.text_tertiary')]).accessibilityLevel('no')
           }.fontFamily(this.appearance.fontFamily).id('project-actions-' + id)
             .width(ROW_MENU_SIZE).height(ROW_MENU_SIZE).backgroundColor(Color.Transparent)
             .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
@@ -980,7 +984,7 @@ export struct ThreadList {
           if (!this.workbench) {
             Text(t('已配置 {0} 个模型服务', [this.app.providerProfiles.length])).fontFamily(this.appearance.fontFamily)
               .fontSize(Font.caption).fontColor($r('app.color.text_tertiary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+            Chevron({ pointing: 'right' })
           }
         }.id('open-settings').width('100%').height(this.desktop ? 36 : 48).padding({ left: Space.sm, right: Space.sm }).borderRadius(Radius.md)
           .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })

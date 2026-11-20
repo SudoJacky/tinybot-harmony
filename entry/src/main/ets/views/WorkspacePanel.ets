@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AnimatedPage } from '../common/AnimatedPage';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -384,7 +385,7 @@ export struct WorkspacePanel {
         Text(this.kindLabel(entry)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (entry.kind === 'directory') {
-        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'right' })
       }
     }
     .width('100%').height(64).padding({ left: Space.page, right: Space.lg }).backgroundColor($r('app.color.surface'))
@@ -403,7 +404,7 @@ export struct WorkspacePanel {
           .fontWeight(this.directory ? FontWeight.Normal : FontWeight.Medium)
           .onClick(() => { if (this.directory) { this.go(''); } })
         ForEach(this.crumbs(), (part: string, index: number) => {
-          SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
+          Chevron({ pointing: 'right' })
           Text(part).fontFamily(this.appearance.fontFamily).fontSize(14).padding({ left: 8, right: 8 }).height(32).borderRadius(16).maxLines(1)
             .fontColor(index === this.crumbs().length - 1 ? $r('app.color.text_primary') : this.appearance.accent)
             .fontWeight(index === this.crumbs().length - 1 ? FontWeight.Medium : FontWeight.Normal)
@@ -441,7 +442,7 @@ export struct WorkspacePanel {
     Column() {
       Row({ space: 4 }) {
         Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([$r('app.color.text_primary')]).accessibilityLevel('no')
+          Chevron({ pointing: 'left', tint: $r('app.color.text_primary') }).accessibilityLevel('no')
         }.id('workspace-preview-back').fontFamily(this.appearance.fontFamily).width(44).height(44).backgroundColor(Color.Transparent)
           .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
           .accessibilityText(t('返回')).bindTips(t('返回'), { appearingTime: 550 }).onClick(() => this.closePreview())
@@ -463,7 +464,7 @@ export struct WorkspacePanel {
         }
         if (!this.editing && this.baseline?.existed) {
           Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(22).fontColor([$r('app.color.text_primary')]).accessibilityLevel('no')
+            SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(22).fontColor([$r('app.color.text_primary')]).accessibilityLevel('no')
           }.fontFamily(this.appearance.fontFamily).id('workspace-backup-menu').width(40).height(40)
             .backgroundColor(Color.Transparent).accessibilityText(t('文件操作')).bindTips(t('文件操作'), { appearingTime: 550 })
             .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)

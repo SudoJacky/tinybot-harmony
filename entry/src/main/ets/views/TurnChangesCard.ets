@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { FileDiff } from '../model/FileDiff';
 import { t } from '../model/I18n';
@@ -18,7 +19,8 @@ export struct TurnChangesCard {
       Button({ type: ButtonType.Normal }) {
         Row({ space: 8 }) {
           Text(t('本轮修改 · {0} 个文件', [this.changes.length])).fontFamily(this.appearance.fontFamily).fontSize(13).layoutWeight(1).fontColor($r('app.color.text_primary'))
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).rotate({ angle: this.expanded ? 180 : 0 }).fontColor([$r('app.color.text_secondary')])
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
+            .rotate({ angle: this.expanded ? 180 : 0 })
         }.width('100%')
       }.id('turn-changes-toggle').fontFamily(this.appearance.fontFamily).height(32).backgroundColor(Color.Transparent).onClick(() => { this.expanded = !this.expanded; })
       if (this.expanded) {

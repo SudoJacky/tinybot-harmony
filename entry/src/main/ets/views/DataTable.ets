@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Font, Radius } from '../common/Theme';
 
@@ -30,8 +31,7 @@ export struct DataTable {
         .textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(this.cellAlign(column))
         .fontColor($r('app.color.text_secondary'))
       if (this.sortColumn === column) {
-        SymbolGlyph(this.ascending ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-          .fontSize(11).fontColor([this.appearance.accent])
+        Chevron({ pointing: this.ascending ? 'up' : 'down', tint: this.appearance.accent })
       }
     }.width(CELL_WIDTH).padding({ left: 10, right: 10, top: 9, bottom: 9 })
     .onClick(() => { if (this.onHeaderTap) { this.onHeaderTap(column); } })

@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { ColorMetrics, LengthMetrics } from '@kit.ArkUI';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -93,7 +94,7 @@ export struct DetailTabs {
         .bindTips(tab.label, { appearingTime: 550 }).onClick(() => this.onSelect(tab.id))
       if (this.active === tab.id) {
         Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.xmark')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+          SymbolGlyph($r('sys.symbol.xmark')).fontSize(16).fontColor([$r('app.color.text_secondary')])
         }.id('detail-tab-close-' + tab.id).width(this.touch ? 40 : 26).height(this.touch ? 40 : 26).padding(0).backgroundColor(Color.Transparent)
           .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
           .accessibilityText(t('关闭') + ' · ' + tab.label)
@@ -131,7 +132,7 @@ export struct DetailTabs {
             .fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary')).layoutWeight(1)
           if (this.tabs.length > 1) {
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+            Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
           }
         }.width('100%')
       }.id('detail-switch-tab').height(40).layoutWeight(1).borderRadius(Radius.sm)

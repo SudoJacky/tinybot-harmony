@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { filePreviewIcon } from '../common/FileArtwork';
@@ -165,7 +166,7 @@ struct ToolRow {
           }
         }.translate({ y: this.glyphShift }).opacity(this.glyphOpacity)
         Stack({ alignContent: Alignment.Center }) {
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+          Chevron({ pointing: 'down' })
         }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
       }.id('tool-' + this.execution.call.id).width('100%').height(PROCESS_ROW_HEIGHT)
       .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + toolTitle(this.name()) + ' ' + toolStatusLabel(this.execution.status))
@@ -490,7 +491,7 @@ export struct MessageBubble {
         }
         if (this.desktop) {
           Button({ type: ButtonType.Normal }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_secondary')])
+            SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(16).fontColor([$r('app.color.text_secondary')])
           }.id('message-actions-' + this.message.id).width(36).height(36).padding(0).borderRadius(8)
             .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).bindTips(t('更多操作'), { appearingTime: 550 })
             .bindMenu(this.actions, { systemMaterial: this.appearance.menu, mask: false })
@@ -630,7 +631,7 @@ export struct MessageBubble {
           }
           if (this.timeline().length > 0 && (this.message.status === 'generating' || this.foldable())) {
             Stack({ alignContent: Alignment.Center }) {
-              SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+              Chevron({ pointing: 'down' })
             }.width(16).height(16).rotate({ angle: this.folded() ? 0 : 180 })
               .animation({ duration: 280, curve: Motion.standard })
           }
@@ -749,7 +750,7 @@ export struct MessageBubble {
                 if (file.description) { Text(file.description).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary')).maxLines(3) }
                 Text(t('打开文件 · 分享与导出')).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_tertiary'))
               }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-              SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+              Chevron({ pointing: 'right', tint: $r('app.color.text_secondary') })
             }.width('100%').padding(14)
           }.width('100%')
         }.fontFamily(this.appearance.fontFamily).width('100%').type(ButtonType.Normal).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
