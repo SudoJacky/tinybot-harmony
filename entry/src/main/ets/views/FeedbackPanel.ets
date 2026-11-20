@@ -149,7 +149,7 @@ export struct FeedbackPanel {
   @Builder
   header() {
     Row({ space: Space.sm }) {
-      IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('返回'), fill: $r('app.color.surface'), compId: 'feedback-nav-back', onTap: () => this.back() })
+      IconButton({ chevron: 'left', label: t('返回'), fill: $r('app.color.surface'), compId: 'feedback-nav-back', onTap: () => this.back() })
       Text(this.history ? t('我的反馈') : t('反馈与建议')).fontFamily(this.appearance.fontFamily).fontSize(19).fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary')).layoutWeight(1).maxLines(1)
       IconButton({ icon: $r('sys.symbol.clock'), label: t('我的反馈'), fill: $r('app.color.surface'), compId: 'feedback-history-tab', disabled: this.locked(), onTap: () => this.showHistory() })

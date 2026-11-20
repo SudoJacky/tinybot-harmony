@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { AnimatedIconName } from '../common/IconArtwork';
@@ -48,7 +49,7 @@ export struct HelpTutorialScreen {
   @Builder
   pageTitle(title: string) {
     Row({ space: 8 }) {
-      Stack() { this.glyph($r('sys.symbol.chevron_left'), 22) }
+      Stack() { Chevron({ pointing: 'left', tint: $r('app.color.text_secondary') }) }
         .width(40).height(40).borderRadius(20).border({ width: 0.5, color: $r('app.color.divider') })
       Text(title).fontFamily(this.appearance.fontFamily).fontSize(22).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
     }.width(344).height(56).position({ x: 16, y: 24 })
@@ -88,10 +89,10 @@ export struct HelpTutorialScreen {
         Row({ space: 4 }) {
           Image(providerLogo('deepseek')).width(14).height(14)
           Text(this.screen === 'chat-v4' ? '· deepseek-v4-pro' : '· deepseek-flash').fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-          this.glyph($r('sys.symbol.chevron_down'), 12)
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
         }
       }.width(202).height(44).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).position({ x: 54, y: 28 })
-      Stack() { this.glyph($r('sys.symbol.dot_grid_1x2')) }.width(44).height(44).position({ x: 264, y: 28 })
+      Stack() { this.glyph($r('sys.symbol.ellipsis_circle')) }.width(44).height(44).position({ x: 264, y: 28 })
       Stack() { AnimatedIcon({ iconName: 'newChat', tint: $r('app.color.text_primary'), iconSize: 20 }) }
         .width(40).height(44).position({ x: 310, y: 28 })
     if (this.screen === 'answer' || this.screen === 'running' || this.screen === 'error') {
@@ -128,7 +129,7 @@ export struct HelpTutorialScreen {
       Row({ space: 8 }) {
         this.glyph($r('sys.symbol.picture'), 18)
         Text('image.jpg').fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_primary'))
-        this.glyph($r('sys.symbol.xmark'), 12)
+        this.glyph($r('sys.symbol.xmark'), 16)
       }.padding(12).borderRadius(12).backgroundColor($r('app.color.surface')).position({ x: 20, y: 588 })
     }
     if (this.screen === 'team') {

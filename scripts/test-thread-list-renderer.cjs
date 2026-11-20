@@ -52,7 +52,7 @@ class ViewPU {
 }
 const noop = new Proxy({}, { get: () => () => {} });
 const globals = { exports: {}, ViewPU, ObservedObject: { GetRawObject: value => value }, t: key => key, Motion: {}, Space: {}, Btn: {}, AppMaterials: {}, IS_PC: false,
-  IconButton: class {}, SymbolGlyphModifier: class { fontColor() { return this; } }, Context: noop,
+  IconButton: class {}, Chevron: class {}, SymbolGlyphModifier: class { fontColor() { return this; } }, Context: noop,
   HoverEffect: { None: 'none', Highlight: 'highlight' }, HitTestMode: { None: 'none' },
   TransitionEffect: { OPACITY: { animation() { return this; } } },
   ListItemGroup: { create(options) { if (initial) { groups.add(current); options.header(); } }, pop() {} },
@@ -60,7 +60,7 @@ const globals = { exports: {}, ViewPU, ObservedObject: { GetRawObject: value => 
     texts.set(current, value);
     if (activeMenu !== undefined) menuItems.get(activeMenu).content = value;
   } : () => {} }) };
-for (const name of ['ForEach','If','ListItem','Row','Stack','SymbolGlyph','Image','Button','Menu','MenuItem']) globals[name] = noop;
+for (const name of ['ForEach','If','ListItem','Row','Stack','SymbolGlyph','Image','Button','Menu','MenuItem','__Common__']) globals[name] = noop;
 globals.MenuItem = new Proxy({}, { get: (_, key) => key === 'create' ? value => {
   menuItems.set(current, typeof value === 'function' ? {} : value);
   if (typeof value === 'function') {

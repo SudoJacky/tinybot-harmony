@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { PageStyles } from '../common/PageStyles';
 import { common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
@@ -62,7 +63,7 @@ export struct LegalDocumentPanel {
             Text(t('目录')).fontSize(14).fontColor(this.appearance.accent)
             Text(this.sections[this.selected]?.title || '').fontSize(13).layoutWeight(1).maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([this.appearance.accent])
+            Chevron({ pointing: 'down', tint: this.appearance.accent })
           }.width('100%')
         }.id('legal-open-contents').height(44).width('100%').padding({ left: Space.page, right: Space.page })
           .backgroundColor($r('app.color.page_background')).onClick(() => { this.showContents = true; })

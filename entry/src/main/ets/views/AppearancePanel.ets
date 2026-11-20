@@ -228,7 +228,7 @@ export struct AppearancePanel {
         Text(t('今天的计划')).fontFamily(this.appearance.fontFamily).fontSize(Font.body)
           .fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary')).layoutWeight(1)
           .textAlign(TextAlign.Center).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+        SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(18).fontColor([$r('app.color.text_secondary')])
           .width(28).height(32).accessibilityLevel('no')
         Stack() { AnimatedIcon({ iconName: 'newChat', tint: this.appearance.accent, iconSize: 18 }) }
           .width(28).height(32).accessibilityLevel('no-hide-descendants')

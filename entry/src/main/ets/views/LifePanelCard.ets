@@ -297,8 +297,8 @@ export struct LifePanelCard {
             .backgroundColor(Color.Transparent).borderRadius(8).width(36).height(40).padding(0)
             .clickEffect(Motion.pressSmall).bindMenu(this.menu()).accessibilityText(t('卡片选项'))
         } else if (!this.interactive) {
-          IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('打开卡片「{0}」', [this.panel.definition.title]),
-            diameter: 36, iconSize: 14, onTap: this.onOpen })
+          IconButton({ chevron: 'right', label: t('打开卡片「{0}」', [this.panel.definition.title]),
+            diameter: 36, onTap: this.onOpen })
         }
       }.width('100%').padding(this.panel.definition.view ? { left: 12, right: 12, top: 4, bottom: 4 } : 0)
       }

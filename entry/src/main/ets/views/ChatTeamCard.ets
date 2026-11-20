@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { LengthMetrics } from '@kit.ArkUI';
@@ -188,7 +189,7 @@ struct ChatTeamRun {
       if (this.toolCount(input.attempt) > 0) {
         Row({ space: 4 }) {
           Text(t("执行记录 · ") + this.toolCount(input.attempt) + t(" 次工具调用")).fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
+          Chevron({ pointing: 'down' })
             .rotate({ angle: this.expandedLogs.includes(input.attempt.id) ? 180 : 0 })
         }.id('team-log-' + input.attempt.id).height(32)
         .onClick(() => this.animate(() => { this.expandedLogs = this.toggleList(this.expandedLogs, input.attempt.id); }))
@@ -219,7 +220,7 @@ struct ChatTeamRun {
             .fontColor(input.record.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_secondary'))
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         this.taskGlyph({ status: input.record.status })
-        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'down' })
           .rotate({ angle: this.expandedTasks.includes(input.record.task.id) ? 180 : 0 })
       }.id('team-task-' + input.run.id + '-' + input.record.task.id).width('100%').constraintSize({ minHeight: 52 })
       .accessibilityText(input.record.task.title + '，' + this.memberName(input.run, input.record.task.memberId) + '，' + teamStatus(input.record.status))
@@ -259,7 +260,7 @@ struct ChatTeamRun {
             Text(input.run.ownerMessageId ? t("Agent 团队") : t("历史团队")).fontFamily(this.appearance.fontFamily).fontSize(15).fontWeight(FontWeight.Medium)
               .fontColor($r('app.color.text_primary')).layoutWeight(1)
             this.statusPill({ status: input.run.status })
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+            Chevron({ pointing: 'down' })
               .rotate({ angle: this.expanded ? 180 : 0 })
           }.width('100%')
           if (input.run.goal) {

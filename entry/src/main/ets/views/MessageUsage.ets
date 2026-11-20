@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { MessageUsageSummary, summarizeUsage } from '../model/MessageUsage';
@@ -70,7 +71,7 @@ export struct MessageUsage {
                   .fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
               }
             }.layoutWeight(1)
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+            Chevron({ pointing: 'down' })
               .rotate({ angle: this.message.usageOpen ? 180 : 0 }).accessibilityLevel('no')
           }.width('100%').padding({ top: 8, bottom: 8 })
         }.fontFamily(this.appearance.fontFamily).id('usage-' + this.message.id).width('100%').backgroundColor(Color.Transparent)

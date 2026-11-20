@@ -1802,7 +1802,7 @@ struct Index {
         Blank().layoutWeight(1)
         if (this.app.active.messages.length > 0) {
           Button({ type: ButtonType.Circle, stateEffect: true }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
+            SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(19).fontColor([$r('app.color.text_secondary')])
           }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
             .backgroundColor($r('app.color.surface_variant'))
             .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
@@ -1860,7 +1860,7 @@ struct Index {
           onTap: () => this.showDesktopCommands() })
       }
       Button({ type: ButtonType.Normal }) {
-        SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+        SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(18).fontColor([$r('app.color.text_secondary')])
       }.id('pc-chat-more').width(this.desktop ? 36 : 44).height(this.desktop ? 36 : 44).padding(0).borderRadius(Radius.sm)
         .backgroundColor(Color.Transparent).accessibilityText(t('会话操作')).enabled(this.app.ready)
         .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
@@ -1886,7 +1886,7 @@ struct Index {
       Blank().layoutWeight(1)
       if (this.app.active.messages.length > 0) {
         Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
+          SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(20).fontColor([$r('sys.color.font_primary')])
         }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
           .border({ width: this.appearance.materialEnabled ? 0 : 0.5, color: $r('app.color.divider') })
           .hoverEffect(HoverEffect.Highlight)

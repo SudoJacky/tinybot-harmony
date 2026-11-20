@@ -251,7 +251,8 @@ const rowUi = new Proxy({}, { get: (_target, name) => value => {
 const transition = { combine() { return this; }, animation() { return this; } };
 const themeSource = fs.readFileSync(path.join(root, 'common/Theme.ets'), 'utf8');
 const processRowHeight = Number(themeSource.match(/export const PROCESS_ROW_HEIGHT: number = (\d+);/)[1]);
-Object.assign(context, { Row: rowUi, Blank: noUi, Stack: noUi, SymbolGlyph: noUi, TextOverflow: {}, Alignment: {},
+Object.assign(context, { Row: rowUi, Blank: noUi, Stack: noUi, SymbolGlyph: noUi, Chevron: Child, __Common__: noUi,
+  TextOverflow: {}, Alignment: {},
   Context: noUi, ThinkingLine: class extends Child {}, TransitionEffect: { OPACITY: transition, translate() {} },
   PROCESS_ROW_HEIGHT: processRowHeight });
 const thoughtMethods = ['initialRender', 'lineText', 'scrollLineEnd'].map(name =>

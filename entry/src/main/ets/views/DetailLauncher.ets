@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { ColorMetrics, LengthMetrics } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -34,7 +35,7 @@ export struct DetailLauncher {
       Text(label).fontFamily(this.appearance.fontFamily).fontSize(this.compact ? 14 : 15).fontWeight(FontWeight.Medium)
         .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         .fontColor($r('app.color.text_primary'))
-      SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+      Chevron({ pointing: 'right' })
     }.width('100%').accessibilityLevel('no-hide-descendants')
     }.id(compId).width('100%').height(this.workbench ? 44 : 64).padding({ left: Space.md, right: Space.md })
     .borderRadius(Radius.sm).backgroundColor(this.hovered === compId ? $r('app.color.surface_variant') : $r('app.color.page_background'))

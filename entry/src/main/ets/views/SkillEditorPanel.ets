@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -62,8 +63,7 @@ export struct SkillEditorPanel {
                   SymbolGlyph($r('sys.symbol.doc_text')).fontSize(18).fontColor([$r('app.color.text_secondary')])
                   Text(file.path).fontFamily(this.appearance.fontFamily).fontSize(Font.small).maxLines(1).layoutWeight(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
-                  SymbolGlyph(this.expandedPath === file.path ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-                    .fontSize(14).fontColor([$r('app.color.text_tertiary')])
+                  Chevron({ pointing: this.expandedPath === file.path ? 'up' : 'down' })
                   Button({ type: ButtonType.Circle }) {
                     SymbolGlyph($r('sys.symbol.xmark')).fontSize(16).fontColor([$r('app.color.text_secondary')])
                   }.fontFamily(this.appearance.fontFamily).width(32).height(32).backgroundColor(Color.Transparent).accessibilityText(t("移除"))

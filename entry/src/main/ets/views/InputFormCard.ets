@@ -22,7 +22,7 @@ export struct InputFormCard {
   optionChip(field: FormField, index: number, option: string) {
     Row({ space: 4 }) {
       if (this.chosen(index).includes(option)) {
-        SymbolGlyph($r('sys.symbol.checkmark')).fontSize(13).fontColor([this.appearance.onAccentContainer])
+        SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).fontColor([this.appearance.onAccentContainer])
       }
       Text(option).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         .fontColor(this.chosen(index).includes(option) ? this.appearance.onAccentContainer : $r('app.color.text_primary'))

@@ -186,7 +186,7 @@ export struct ProviderEditorPanel {
   @Builder
   modelRow(id: string) {
     Row({ space: 8 }) {
-      SymbolGlyph($r('sys.symbol.checkmark')).fontSize(14).fontColor([this.appearance.accent])
+      SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).fontColor([this.appearance.accent])
       Text(id).fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1).fontColor($r('app.color.text_primary')).copyOption(CopyOptions.LocalDevice)
       IconButton({ icon: $r('sys.symbol.xmark'), label: t('移除模型 {0}', [id]), compId: 'remove-model-' + id,

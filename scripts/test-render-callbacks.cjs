@@ -120,16 +120,18 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   console.log('PASS emitted chat positioning: cold start, lazy tail, history, team card, touch, search, stale callbacks, empty chat and manual jump');
 
   const ResponsiveIcon = compile(methods('common/Widgets', ['updateStateVars'], 'IconButton'));
-  let diameter = 44, animatedIcon;
+  let diameter = 44, animatedIcon, chevron;
   const icon = Object.assign(new ResponsiveIcon(), {
     __diameter: { reset(value) { diameter = value; } },
+    __chevron: { reset(value) { chevron = value; } },
     __animatedIcon: { reset(value) { animatedIcon = value; } }
   });
   for (const key of ['icon', 'tint', 'fill', 'disabled', 'label', 'animatedSelected']) { icon['__' + key] = { reset() {} }; }
-  for (const [nextDiameter, nextIcon] of [[36, 'plus'], [44, undefined], [36, 'newChat'], [36, 'browser']]) {
-    icon.updateStateVars({ diameter: nextDiameter, animatedIcon: nextIcon });
+  for (const [nextDiameter, nextIcon, nextChevron] of [[36, 'plus'], [44, undefined, 'right'], [36, 'newChat'], [36, 'browser']]) {
+    icon.updateStateVars({ diameter: nextDiameter, animatedIcon: nextIcon, chevron: nextChevron });
     assert.equal(diameter, nextDiameter, 'A retained icon button must follow phone/tablet sizing updates');
     assert.equal(animatedIcon, nextIcon, 'A retained icon button must accept icon changes and removal');
+    assert.equal(chevron, nextChevron, 'A retained icon button must accept and clear chevron directions');
   }
   console.log('PASS emitted icon button: retained instances accept diameter and animated icon updates');
 
@@ -142,7 +144,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
         this.__diameter = { reset: value => { this.diameter = value; } };
         this.__animatedIcon = { reset: value => { this.animatedIcon = value; } };
         this.__animatedSelected = { reset: value => { this.animatedSelected = value; } };
-        for (const key of ['icon', 'tint', 'fill', 'disabled', 'label']) { this['__' + key] = { reset() {} }; }
+        for (const key of ['icon', 'chevron', 'tint', 'fill', 'disabled', 'label']) { this['__' + key] = { reset() {} }; }
       }
     },
     __Common__: { create() {}, bindPopup() {}, pop() {} }, ViewPU: { create() {} },

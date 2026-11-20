@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t, getLocale } from '../model/I18n';
@@ -23,7 +24,7 @@ struct UsageFilterChip {
         Text(this.label).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
           .fontColor(this.active ? this.appearance.accent : $r('app.color.text_secondary'))
-        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'down' })
       }.width('100%')
     }.id('usage-' + this.kind).layoutWeight(1).height(36).borderRadius(10)
       .padding({ left: 10, right: 10 }).backgroundColor(this.active ? this.appearance.accentTint : $r('app.color.surface'))

@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { image } from '@kit.ImageKit';
 import { KeyCode } from '@kit.InputKit';
 import { PathShape } from '@kit.ArkUI';
@@ -89,9 +90,9 @@ export struct ImageCompare {
           .onClick((event: ClickEvent) => this.openAt(event), 8)
         Stack() {
           Row({ space: 2 }) {
-            SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(11).fontColor([$r('app.color.text_primary')])
-            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(11).fontColor([$r('app.color.text_primary')])
-          }.width(35).height(35).justifyContent(FlexAlign.Center).borderRadius(18).backgroundColor($r('app.color.surface'))
+            Chevron({ pointing: 'left', tint: $r('app.color.text_primary') })
+            Chevron({ pointing: 'right', tint: $r('app.color.text_primary') })
+          }.width(38).height(38).justifyContent(FlexAlign.Center).borderRadius(18).backgroundColor($r('app.color.surface'))
             .border({ width: this.focused ? 2 : 0, color: this.appearance.accent })
             .shadow({ radius: 8, color: '#44000000', offsetY: 2 })
             .scale({ x: this.dragging ? 0.94 : 1, y: this.dragging ? 0.94 : 1 })

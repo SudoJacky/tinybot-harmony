@@ -135,7 +135,7 @@ export struct SwipeRow {
         Column() { this.content() }.layoutWeight(1)
         if (IS_PC) {
           Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(16).fontColor([$r('app.color.text_secondary')])
+            SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(16).fontColor([$r('app.color.text_secondary')])
           }.id('swipe-row-actions-' + this.rowKey).width(36).height(36).padding(0)
             .margin({ right: 4 }).backgroundColor(Color.Transparent).enabled(!this.disabled)
             .accessibilityText(t('更多操作') + ' · ' + this.label)

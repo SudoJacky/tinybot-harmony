@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { FileAnnotationList } from './FileAnnotationList';
 import { filePreviewIcon } from '../common/FileArtwork';
 import { KeyCode } from '@kit.InputKit';
@@ -947,7 +948,7 @@ export struct ChatPanel {
         Row({ space: 6 }) {
           SymbolGlyph($r('sys.symbol.folder')).fontSize(17).fontColor([$r('app.color.text_primary')])
           Text(this.app.activeProject?.name || t('普通聊天')).fontSize(14).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')])
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
         }.constraintSize({ maxWidth: 240 })
       }.id('workbench-project-picker').height(40).padding({ left: 10, right: 10 }).borderRadius(10)
         .backgroundColor(Color.Transparent).fontColor($r('app.color.text_primary')).enabled(!this.app.busy && !this.app.saveError)
@@ -956,7 +957,7 @@ export struct ChatPanel {
         Row({ space: 6 }) {
           SymbolGlyph($r('sys.symbol.person_2')).fontSize(17).fontColor([$r('app.color.text_secondary')])
           Text(this.thread.teamEnabled ? t('团队模式') : t('标准模式')).fontSize(14)
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')])
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
         }
       }.id('workbench-team-mode').height(40).padding({ left: 10, right: 10 }).borderRadius(10)
         .backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary'))
@@ -1176,7 +1177,7 @@ export struct ChatPanel {
         .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
         .fontColor(enabled ? $r('app.color.text_primary') : $r('app.color.text_tertiary'))
       if (withChevron) {
-        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'right' })
       }
     }
     .id(compId).width('100%').height(46).padding({ left: 10, right: 8 }).borderRadius(10)
@@ -1284,7 +1285,7 @@ export struct ChatPanel {
         Row({ space: Space.xs }) {
           Text(t('{0} 条网页批注', [items.length])).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.small).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')])
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
             .rotate({ angle: this.showBrowserAnnotations ? 0 : 180 }).accessibilityLevel('no')
         }
       }.id('draft-browser-annotations').attributeModifier(Btn.tonalSmall)
@@ -1315,8 +1316,8 @@ export struct ChatPanel {
           .alignItems(HorizontalAlign.Start).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
       }
       Button({ type: ButtonType.Circle }) {
-        SymbolGlyph($r('sys.symbol.xmark')).fontSize(10).fontColor([Color.White]).accessibilityLevel('no')
-      }.id('remove-attachment-' + item.id).width(20).height(20).backgroundColor('#99000000')
+        SymbolGlyph($r('sys.symbol.xmark')).fontSize(16).fontColor([Color.White]).accessibilityLevel('no')
+      }.id('remove-attachment-' + item.id).width(20).height(20).padding(0).backgroundColor('#99000000')
         .margin({ top: 4, right: 4 }).accessibilityText(t('移除 ') + item.name)
         .bindTips(t('移除 ') + item.name, { appearingTime: 550 })
         .hitTestBehavior(HitTestMode.Block).responseRegion({ x: -20, y: -4, width: 44, height: 44 })
@@ -1647,7 +1648,7 @@ export struct ChatPanel {
         Text(t("主 Agent 自主招募员工、并行分工并汇总结果")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-      SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+      Chevron({ pointing: 'right' })
     }
     .id('slash-team').width('100%').padding({ left: Space.md, right: Space.md, top: 10, bottom: 10 })
     .borderRadius(Radius.lg).backgroundColor(this.commandSearch && this.completionIndex === 0 ? $r('app.color.selection') : $r('app.color.surface'))
@@ -1711,7 +1712,7 @@ export struct ChatPanel {
       Row({ space: 6 }) {
         Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
           .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
-        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')]).flexShrink(0)
+        Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') }).flexShrink(0)
           .rotate({ angle: this.showModelMenu ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
       }
     }.id('composer-model-picker').height(this.workbench ? 36 : 44)
@@ -1821,7 +1822,7 @@ export struct ChatPanel {
   @Builder
   composerOptionsButton() {
     Button({ type: ButtonType.Circle }) {
-      SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+      SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(18).fontColor([$r('app.color.text_secondary')])
     }.id('composer-options').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
       .backgroundColor(Color.Transparent).accessibilityText(t('输入选项'))
       .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
