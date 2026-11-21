@@ -84,6 +84,14 @@ assert.equal(readingMaterial, Material.empty, 'Reading sheets keep a solid backg
 preferences.refresh(); assert.equal(currentAppearanceStyle().control, defaultMaterial, 'Do not recreate unchanged materials');
 assert.equal(currentAppearanceStyle().readingSurface, readingMaterial, 'Reuse the long-sheet material');
 assert.equal(currentAppearanceStyle().menu, menuMaterial, 'Reuse unchanged adaptive menu material');
+const modeStart = events.length;
+preferences.select({ ...model.defaultAppearance(), mode: 'dark' });
+assert.deepEqual(events.slice(modeStart), [['mode', colorModes.COLOR_MODE_DARK]], 'A mode-only switch leaves native font and theme setup alone');
+const darkStyle = currentAppearanceStyle();
+preferences.refresh({ colorMode: colorModes.COLOR_MODE_DARK });
+assert.equal(currentAppearanceStyle(), darkStyle, 'The native configuration callback preserves the published style');
+assert.equal(events.length, modeStart + 1);
+preferences.select(model.defaultAppearance());
 const selected = { ...model.defaultAppearance(), mode: 'dark', accent: 'custom', customColor: '#FAF8EE',
   fontScale: 1.3, fontFamily: 'Noto Serif', lightEffect: 'off' };
 preferences.select(selected);
@@ -119,7 +127,7 @@ assert.ok(events.some(([type, value]) => type === 'fontScale' && value === 1.3))
 assert.deepEqual(JSON.parse(disk.get('appearance')), selected);
 for (const failure of ['flush', 'apply']) {
   if (failure === 'flush') failFlush = true; else failApply = true;
-  assert.throws(() => preferences.select({ ...selected, accent: 'blue' }), /failed/);
+  assert.throws(() => preferences.select({ ...selected, accent: 'blue', fontScale: 1 }), /failed/);
   assert.deepEqual(JSON.parse(disk.get('appearance')), selected, 'Failed changes must restore the saved preferences');
   assert.equal(storage.get('tinybot.appearance.options').accent, 'custom');
   assert.ok(logs.some(data => data.level === 'error' && data.module === 'appearance' && data.event === 'save_failed'));

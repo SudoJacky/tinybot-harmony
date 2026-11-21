@@ -214,7 +214,7 @@ export struct SupportPanel {
   @Builder
   help() {
     GroupCard() {
-      NavRow({ title: t('首次使用指引'), subtitle: t('大约一分钟，认识一个新伙伴'), image: $r('app.media.tinybot'),
+      NavRow({ title: t('首次使用指引'), subtitle: t('配置模型服务'), image: $r('app.media.tinybot'),
         compId: 'help-startup-guide', onTap: () => this.onOpen('guide') })
     }
     this.article(t('开始对话'), t('先在“设置 → 添加模型服务”选择服务商，填写自己的 API Key 和模型。保存后，点击聊天顶部的模型名称选择模型，再输入问题并发送。'), 'chat')

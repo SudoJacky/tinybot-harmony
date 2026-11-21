@@ -93,7 +93,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-help-demo.cjs` | 帮助演示动画生命周期 | 是 |
 | `test-hosted-privacy.cjs` | 系统签署版本、拒绝/重签、状态无法确认时的启动放行与后续复查、撤回授权、事件重新查询和 EntryAbility 同意前业务隔离 | 否 |
 | `test-legal-documents.cjs` | 本地用户协议的实际编译读取路径、完整正文、错误展示与不再携带隐私正文 | 是 |
-| `test-onboarding.cjs` | 首次使用判断、持久化、旧草稿保护、五步引导的账号同意/登录/稍后登录、唤醒与暂停恢复 | 是 |
+| `test-onboarding.cjs` | 首次使用和旧版升级判断、四步进度与失败回滚、账号门禁、偏好选择、模型保存及重试、暂离和完成 | 是 |
 
 ## 需要单独运行的验证
 

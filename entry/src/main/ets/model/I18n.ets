@@ -15,8 +15,8 @@ export function getLocale(): string { return currentLocale; }
 
 // Translate only application-owned message IDs. Never pass user text or model responses here.
 // A replacement callback keeps '$&', braces and other characters in arguments literal.
-export function t(message: string, values: (string | number)[] = []): string {
-  const catalog = currentLocale === 'zh-CN' ? ZH_MESSAGES : EN_MESSAGES;
+export function t(message: string, values: (string | number)[] = [], locale: string = currentLocale): string {
+  const catalog = locale === 'zh-CN' ? ZH_MESSAGES : EN_MESSAGES;
   const text = catalog[message] !== undefined ? catalog[message] : ZH_MESSAGES[message] !== undefined ? ZH_MESSAGES[message] : message;
   return text.replace(/\{(\d+)\}/g, (match: string, index: string): string => {
     const value = values[Number(index)];
