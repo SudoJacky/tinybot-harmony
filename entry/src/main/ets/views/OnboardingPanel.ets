@@ -11,6 +11,7 @@ import { HuaweiAccount } from '../services/HuaweiAccount';
 import { LanguagePreferences } from '../services/LanguagePreferences';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { languageName } from './LanguagePanel';
+import { ConfettiPoint, OnboardingConfetti } from './OnboardingConfetti';
 import { OnboardingProviderForm } from './OnboardingProviderForm';
 
 const LANGUAGES: AppLanguage[] = ['system', 'zh-CN', 'en'];
@@ -45,6 +46,8 @@ export struct OnboardingPanel {
   @State private trackWidth: number = 0;
   @State private viewportHeight: number = 0;
   @State private bodyHeight: number = 0;
+  @State private cardHeight: number = 0;
+  @State private confettiTap: ConfettiPoint = { x: 0, y: 0 };
   private scroller: Scroller = new Scroller();
   private mounted: boolean = false;
 
@@ -63,6 +66,14 @@ export struct OnboardingPanel {
   private visibleStep(): number {
     if (!this.account.signedIn) { return 1; }
     return this.step === 4 && !this.app.configured ? 3 : this.step;
+  }
+
+  private celebrateTap(event: GestureEvent): void {
+    if (this.visibleStep() !== 4 || !this.active || !this.foreground || this.appearance.effectStrength === 0) {
+      return;
+    }
+    const finger = event.fingerList[0];
+    if (finger) { this.confettiTap = { x: finger.localX, y: finger.localY }; }
   }
 
   private stepLabel(step: number): string {
@@ -282,15 +293,6 @@ export struct OnboardingPanel {
   }
 
   @Builder
-  wordmark() {
-    Row({ space: 8 }) {
-      Image($r('app.media.tinybot_icon')).width(22).height(22).borderRadius(6).accessibilityLevel('no')
-      Text('Tinybot').fontFamily(this.appearance.fontFamily).fontSize(17).fontWeight(FontWeight.Bold)
-        .fontColor($r('app.color.text_primary'))
-    }.width('100%').padding({ left: 4, top: 2, bottom: 8 })
-  }
-
-  @Builder
   stepBadge(step: number) {
     Column({ space: 5 }) {
       Stack() {
@@ -488,21 +490,29 @@ export struct OnboardingPanel {
   build() {
     Column() {
       Column() {
-        this.wordmark()
-        this.progress()
-        Scroll(this.scroller) {
-          Stack({ alignContent: Alignment.TopStart }) {
-            ForEach([this.visibleStep()], (step: number) => { this.pane(step) }, (step: number) => String(step))
-          }.width('100%')
-        }.width('100%').height(this.bodyHeight > 0 ? Math.min(this.bodyHeight, this.maxBodyHeight()) : undefined)
-          .constraintSize({ maxHeight: this.maxBodyHeight() }).align(Alignment.Top).clip(true)
-          .scrollBar(BarState.Auto).edgeEffect(EdgeEffect.None)
-        if (this.error) { Banner({ text: this.error, compId: 'onboarding-error' }) }
-        this.footer()
+        Column() {
+          this.progress()
+          Scroll(this.scroller) {
+            Stack({ alignContent: Alignment.TopStart }) {
+              ForEach([this.visibleStep()], (step: number) => { this.pane(step) }, (step: number) => String(step))
+            }.width('100%')
+          }.width('100%').height(this.bodyHeight > 0 ? Math.min(this.bodyHeight, this.maxBodyHeight()) : undefined)
+            .constraintSize({ maxHeight: this.maxBodyHeight() }).align(Alignment.Top).clip(true)
+            .scrollBar(BarState.Auto).edgeEffect(EdgeEffect.None)
+          if (this.error) { Banner({ text: this.error, compId: 'onboarding-error' }) }
+          this.footer()
+        }.width('100%').padding({ left: 16, right: 16, top: 16, bottom: 6 }).borderRadius(Radius.xl)
+          .backgroundColor($r('app.color.onboarding_surface')).border({ width: 1, color: $r('app.color.onboarding_outline') })
+          .shadow({ radius: 20, color: '#18212922', offsetY: 7 })
+          .onAreaChange((_old: Area, area: Area) => { this.cardHeight = Number(area.height); })
+        if (this.visibleStep() === 4) {
+          Stack() {
+            OnboardingConfetti({ active: this.active, tap: this.confettiTap })
+          }.width('100%').height(this.cardHeight).position({ x: 0, y: 0 })
+            .borderRadius(Radius.xl).clip(true).hitTestBehavior(HitTestMode.None)
+        }
       }.id('onboarding-window').width('100%').constraintSize({ maxWidth: 500 })
-        .padding({ left: 16, right: 16, top: 16, bottom: 6 }).borderRadius(Radius.xl)
-        .backgroundColor($r('app.color.onboarding_surface')).border({ width: 1, color: $r('app.color.onboarding_outline') })
-        .shadow({ radius: 20, color: '#18212922', offsetY: 7 })
+        .parallelGesture(TapGesture({ distanceThreshold: 8 }).onAction((event: GestureEvent) => this.celebrateTap(event)))
     }.id('onboarding-stepper').width('100%').height('100%').padding({ top: 12, bottom: 12, left: 16, right: 16 })
       .justifyContent(FlexAlign.Center).backgroundColor($r('app.color.page_background'))
       .onAreaChange((_old: Area, area: Area) => { this.viewportHeight = Number(area.height); })

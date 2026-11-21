@@ -441,8 +441,90 @@ function testPreferenceMotion() {
   console.log('PASS preference selection motion survives relabeling, rapid retargeting and effects-off mode');
 }
 
+function testCelebration() {
+  const fixture = (effectStrength = 1) => {
+    const animators = [];
+    const draws = [];
+    let now = 0;
+    const math = Object.create(Math);
+    math.random = () => 0.5;
+    const view = Object.assign(probe('views/OnboardingConfetti', 'OnboardingConfetti', [
+      'aboutToDisappear', 'clear', 'stop', 'syncPlayback', 'makeRibbons', 'draw', 'onTap', 'drawTapBursts', 'paint'
+    ], { RIBBON_COUNT: 108, BURST_COUNT: 36, FRAME_INTERVAL_MS: 32, PALETTE: ['#FFD572', '#95DFB8'],
+      TAP_RIBBON_COUNT: 24, MAX_TAP_BURSTS: 6, TAP_BURST_DURATION_MS: 1350,
+      Math: math, Date: { now: () => now } }), {
+      ready: true, visible: true, active: true, foreground: true, appearance: { effectStrength }, tapBursts: [],
+      canvas: { width: 300, height: 440, clearRect: () => draws.push('clear'), save() {}, restore() {},
+        translate: (x, y) => draws.push([x, y]), rotate() {}, fillRect() {} },
+      getUIContext: () => ({ createAnimator(options) {
+        const animator = { options, play() {}, cancel() { this.cancelled = true; } };
+        animators.push(animator);
+        return animator;
+      } })
+    });
+    return { view, animators, draws, tap(x, y) {
+      view.tap = { x, y };
+      view.onTap();
+    }, advance(ms) {
+      now += ms;
+      const start = draws.length;
+      animators.at(-1).onFrame();
+      return draws.slice(start).filter(Array.isArray);
+    } };
+  };
+
+  const visit = fixture();
+  visit.view.visible = false;
+  visit.view.syncPlayback(); assert.equal(visit.animators.length, 0);
+  visit.view.visible = true;
+  visit.view.syncPlayback(); visit.view.syncPlayback();
+  assert.equal(visit.animators.length, 1);
+  assert.equal(visit.animators[0].options.iterations, -1);
+  assert.ok(visit.advance(350).length > 108, 'A welcome burst overlaps the falling ribbons');
+  const steady = visit.advance(17000);
+  assert.equal(steady.length, 108, 'The shower continues after the original burst and a full falling cycle');
+  assert.equal(visit.advance(10).length, 0, 'Draws are paced independently of display refresh rate');
+  const next = visit.advance(90);
+  const falling = next.filter((point, index) => point[1] > steady[index][1] && point[1] - steady[index][1] < 5);
+  assert.ok(falling.length > 95, 'Ribbons drift downward slowly between frames');
+
+  visit.tap(65, 65);
+  visit.tap(230, 107);
+  const tapped = visit.advance(32).slice(108);
+  assert.equal(tapped.length, 48, 'Both taps add ribbons to the live shower');
+  assert.ok(tapped.slice(0, 24).every(([x, y]) => Math.hypot(x - 65, y - 65) < 10));
+  assert.ok(tapped.slice(24).every(([x, y]) => Math.hypot(x - 230, y - 107) < 10));
+  const expanded = visit.advance(200).slice(108, 132);
+  assert.ok(expanded.some(([x]) => x < 45) && expanded.some(([x]) => x > 85), 'Ribbons fan out from the tap');
+  assert.equal(visit.advance(1200).length, 108, 'Tap ribbons expire while the shower continues');
+  for (let x = 50; x < 60; x++) { visit.tap(x, 65); }
+  assert.deepEqual(visit.view.tapBursts.map(burst => burst.point.x), [54, 55, 56, 57, 58, 59]);
+
+  const interrupted = fixture();
+  interrupted.view.syncPlayback();
+  const inFlight = interrupted.animators[0]; interrupted.advance(350);
+  interrupted.tap(120, 70);
+  interrupted.view.foreground = false;
+  interrupted.view.syncPlayback(); assert.equal(inFlight.cancelled, true);
+  assert.equal(interrupted.view.tapBursts.length, 0);
+  assert.equal(interrupted.draws.at(-1), 'clear');
+  const drawCount = interrupted.draws.length;
+  inFlight.onFrame(); assert.equal(interrupted.draws.length, drawCount, 'Ignore stale drawing callbacks');
+  interrupted.view.foreground = true;
+  interrupted.view.syncPlayback(); assert.equal(interrupted.animators.length, 2);
+  interrupted.view.aboutToDisappear(); assert.equal(interrupted.animators[1].cancelled, true);
+
+  const effectsOff = fixture(0);
+  effectsOff.view.syncPlayback(); assert.equal(effectsOff.animators.length, 0);
+  effectsOff.tap(120, 70); assert.equal(effectsOff.view.tapBursts.length, 0);
+  visit.view.appearance.effectStrength = 0;
+  visit.view.syncPlayback(); assert.equal(visit.animators[0].cancelled, true);
+  console.log('PASS completion shower, tap origins, overlapping bursts, expiry, interruption, and effects-off gating');
+}
+
 testIndex();
 testPreferenceMotion();
+testCelebration();
 testPanel().then(() => {
   console.log('PASS compiled setup flow, consent, preferences, provider retry, completion, and pause');
 }).catch(error => { console.error(error); process.exitCode = 1; });
