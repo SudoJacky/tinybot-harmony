@@ -256,6 +256,31 @@ export async function readBackup(context: common.UIAbilityContext, local: AppDat
   if (!uris.length) { return undefined; }
   return readBackupFile(context, uris[0], local, openID, 'copy');
 }
+async function readBackupKeys(envelope: BackupEnvelope, openID: string): Promise<BackupKeyPayload | undefined> {
+  if (envelope?.protectedKeys === undefined) { return undefined; }
+  if (!envelope.protectedKeys || envelope.protectedKeys.version !== 2) { throw new Error(t('备份密钥格式无效。')); }
+  return decryptBackupKeys(envelope.protectedKeys, openID, envelope.data);
+}
+
+function readConfigurationData(envelope: BackupEnvelope, fileCount: number, keys?: BackupKeyPayload): AppData {
+  if (envelope?.format !== 'tinybot-harmony.config.v1' || !Array.isArray(envelope.files) ||
+    !Array.isArray(envelope.attachments) || fileCount || envelope.files.length || envelope.attachments.length ||
+    !envelope.data?.config || !Array.isArray(envelope.data.threads) || envelope.data.threads.length ||
+    envelope.data.projects?.length || envelope.deviceState?.usage.length ||
+    keys?.connections?.panels?.length) { throw new Error(t('备份格式无效。')); }
+  return parseAppData(JSON.stringify(cloudConfiguration(envelope.data)));
+}
+
+export async function verifyConfigurationBackup(context: common.UIAbilityContext, path: string, openID: string): Promise<void> {
+  const archive = await openBackupArchive(path, context.cacheDir, async (metadata: string, fileCount: number) => {
+    const envelope = JSON.parse(metadata) as BackupEnvelope;
+    if (envelope?.deviceState !== undefined) { validateBackupDeviceState(envelope.deviceState); }
+    readConfigurationData(envelope, fileCount, await readBackupKeys(envelope, openID));
+  });
+  if (!archive) { throw new Error(t('备份格式无效。')); }
+  await cleanupBackupArchive(archive.directory);
+}
+
 export async function readBackupFile(context: common.UIAbilityContext, path: string, local: AppData, authorizedOpenID?: string,
   conflicts: BackupConflictMode = 'skip'): Promise<AppData> {
   const openID = authorizedOpenID ?? await huaweiAccount.backupOpenID(context);
@@ -264,15 +289,8 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
   const preparedFiles: PreparedFile[] = [];
   try {
     let keys: BackupKeyPayload | undefined;
-    const unlock = async (envelope: BackupEnvelope): Promise<void> => {
-      if (envelope?.protectedKeys !== undefined) {
-        if (!envelope.protectedKeys || envelope.protectedKeys.version !== 2) { throw new Error(t('备份密钥格式无效。')); }
-        keys = await decryptBackupKeys(envelope.protectedKeys, openID, envelope.data);
-      }
-    };
     archive = await openBackupArchive(path, context.cacheDir, async (metadata: string) => {
-      const envelope = JSON.parse(metadata) as BackupEnvelope;
-      await unlock(envelope);
+      keys = await readBackupKeys(JSON.parse(metadata) as BackupEnvelope, openID);
     });
     let text = archive?.metadata || '';
     if (!archive) {
@@ -283,17 +301,13 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
     const envelope = JSON.parse(text) as BackupEnvelope;
     const formats = archive ? ['tinybot-harmony.backup.v3', 'tinybot-harmony.backup.v4', 'tinybot-harmony.config.v1'] : ['tinybot-harmony.backup.v1', 'tinybot-harmony.backup.v2'];
     if (!envelope || !formats.includes(envelope.format) || !Array.isArray(envelope.attachments) || !Array.isArray(envelope.files)) { throw new Error(t('备份格式无效。')); }
-    if (!archive) { await unlock(envelope); }
+    if (!archive) { keys = await readBackupKeys(envelope, openID); }
     if (envelope.deviceState !== undefined) { validateBackupDeviceState(envelope.deviceState); }
     const importedPanels: RestoredPanelFile[] = [], importedWorkspaces = new Map<string, string>();
     const report: BackupRestoreReport = { added: 0, skipped: 0, copied: 0 };
     let result: AppData;
     if (envelope.format === 'tinybot-harmony.config.v1') {
-      if (archive?.files.length || envelope.files.length || envelope.attachments.length || envelope.data.threads.length ||
-        envelope.data.projects?.length || envelope.deviceState?.usage.length || keys?.connections?.panels?.length) {
-        throw new Error(t('备份格式无效。'));
-      }
-      result = parseAppData(JSON.stringify(cloudConfiguration(envelope.data)));
+      result = readConfigurationData(envelope, archive?.files.length ?? 0, keys);
       report.configurationOnly = true;
     } else {
       result = await restoreEnvelope(context, local, envelope, archive, importedPanels, importedWorkspaces, preparedFiles, conflicts, report);
