@@ -124,6 +124,12 @@ function fixture() {
   await f.leave();assert.equal(f.service.state,'failed');assert.equal(f.writes,1);
   f.cloud.create=create;f.location=3;await f.leave();assert.equal(f.service.state,'uploaded');
   assert.equal(f.writes,1,'Failed uploads retry the already staged snapshot instead of creating repeated archives');assert.equal(f.uploads,1);f.service.dispose();
+  f = fixture(); const stage = f.cloud.create.bind(f.cloud);
+  f.cloud.create = async () => 'blocked';
+  await f.leave(); assert.equal(f.service.state, 'pending'); assert.equal(f.writes, 0);
+  f.cloud.create = stage; f.location = 3;
+  await f.leave(); assert.equal(f.writes, 1, 'A blocked backup must still stage the current settings later');
+  assert.equal(f.service.state, 'uploaded'); f.service.dispose();
   f = fixture(); let finish; f.pending = new Promise(resolve => finish = resolve); await f.leave();
   f.service.onBackground(); assert.equal(f.leases.length, 1, 'One in-flight archive owns one short task');
   f.leases[0](); assert.equal(f.calls[0].options.cancellation.cancelled, true); assert.deepEqual(f.released, [1]);
@@ -144,6 +150,8 @@ function fixture() {
   f.service.confirmUploaded([{ name: automaticName, location: 3, createdAt: 3000 }]);
   assert.equal(f.service.state, 'uploaded'); assert.equal(f.service.lastUploadedAt, 3000);
   assert.equal(f.writes, 1); assert.equal(f.leases.length, 1, 'A metadata refresh cannot start another archive or background task');
+  f.location = 3; await f.leave(); assert.equal(f.uploads, 1); assert.equal(f.writes, 1);
+  await f.leave(); assert.equal(f.uploads, 1, 'Maintenance for an upload confirmed in the foreground runs once');
   f.service.setEnabled(false); f.service.confirmUploaded([{ name: automaticName, location: 3, createdAt: 4000 }]);
   assert.equal(f.service.state, 'disabled'); f.service.dispose();
   f = fixture(); f.failure = Error('network unavailable'); await f.leave();

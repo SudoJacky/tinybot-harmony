@@ -2969,6 +2969,7 @@
   "正在备份到云端…": "Backing up to the cloud…",
   "备份已恢复，已保留本机已有数据。": "Backup restored. Existing local data was kept.",
   "备份已上传到云端。": "Backup uploaded to the cloud.",
+  "已有配置备份等待上传。上传完成后，再创建新版本。": "A configuration backup is waiting to upload. Create a new version after it finishes.",
   "备份已保存在本机，等待上传。请联网后再次备份。": "Backup saved locally and waiting to upload. Connect to the internet and back up again.",
   "将当前数据保存到云端，替换上一份备份": "Save current data to the cloud, replacing the previous backup",
   "自动从云端获取最新备份并合并恢复": "Automatically fetch and merge the latest cloud backup",

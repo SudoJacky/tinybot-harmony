@@ -18,19 +18,39 @@ const panelCode = compile('export class Probe {\n' + panelSource.slice(
 const tick = () => new Promise(setImmediate);
 const t = (key, args = []) => key.replace(/\{(\d+)\}/g, (_, i) => args[i]);
 class BackupLoginRequired extends Error {}
+const deviceId = '11111111-1111-4111-8111-111111111111';
+const otherDevice = '22222222-2222-4222-8222-222222222222';
+const configName = (timestamp, owner = deviceId) => `tinybot-config-${owner}-${timestamp}-${deviceId}.tinybot`;
 
 function setup() {
   const timers = new Map(), instances = [], logs = [], state = new Map([['startupBackupState', 'pending']]);
   let timerId = 0;
-  const control = { ready: true, accesses: 0, starts: 0, snapshot: { state: 4, error: 0 }, start: async () => {}, files: new Map(), restores: [] };
-  const fileIo = { access: async () => { control.accesses++; return control.ready; }, listFile: async () => [...control.files.keys()], accessSync: () => false,
+  const control = { ready: true, accesses: 0, starts: 0, snapshot: { state: 4, error: 0 }, start: async () => {}, files: new Map(),
+    restores: [], archives: 0, staged: [], unlinked: [], released: [], releaseError: undefined };
+  const fileIo = { access: async file => { control.accesses++; return control.ready &&
+    (!/\.(tinybot|partial)$/.test(file) || control.files.has(path.basename(file))); }, listFile: async () => [...control.files.keys()], accessSync: () => false,
     lstat: async file => ({ ...control.files.get(path.basename(file)), isFile: () => true, isSymbolicLink: () => false }),
-    stat: async file => control.files.get(path.basename(file)) };
+    stat: async file => control.files.get(path.basename(file)),
+    async rename(source, target) {
+      const name = path.basename(target);
+      control.files.set(name, control.files.get(path.basename(source)));
+      control.files.delete(path.basename(source));
+      control.staged.push(name);
+    },
+    async unlink(file) { control.unlinked.push(file); control.files.delete(path.basename(file)); } };
   const cloudSync = {
     SyncState: { UPLOADING: 0, UPLOAD_FAILED: 1, DOWNLOADING: 2, DOWNLOAD_FAILED: 3, COMPLETED: 4, STOPPED: 5 },
     ErrorType: { NO_ERROR: 0, NETWORK_UNAVAILABLE: 1, WIFI_UNAVAILABLE: 2, BATTERY_LEVEL_LOW: 3,
       BATTERY_LEVEL_WARNING: 4, CLOUD_STORAGE_FULL: 5, LOCAL_STORAGE_FULL: 6, DEVICE_TEMPERATURE_TOO_HIGH: 7 },
-    FileSync: class {
+    CloudFileCache: class {
+      cleanFileCache(file) {
+        const name = path.basename(file), entry = control.files.get(name);
+        assert.equal(entry.location, 3, 'The system must confirm a cloud copy before releasing its local cache');
+        if (control.releaseError) throw control.releaseError;
+        entry.location = 2;
+        control.released.push(name);
+      }
+    }, FileSync: class {
       constructor() { instances.push(this); }
       on(_event, callback) { this.callback = callback; queueMicrotask(() => this.callback?.(control.snapshot)); }
       off(_event, callback) { assert.equal(callback, this.callback); this.callback = undefined; }
@@ -41,9 +61,10 @@ function setup() {
   let operating = false;
   const imports = {
     '../model/BackupSnapshots': snapshots,
-    './BackupSnapshotNames': { backupDeviceId: () => '11111111-1111-4111-8111-111111111111', newBackupSnapshot: () => 'unused' },
+    './BackupSnapshotNames': { backupDeviceId: () => deviceId, newBackupSnapshot: () => configName(1800000000000) },
     '../model/Diagnostics': { Diagnostics: { log: (...args) => logs.push(args) } },
-    '@kit.CoreFileKit': { cloudSync, fileIo }, '@kit.ArkTS': {},
+    '@kit.CoreFileKit': { cloudSync, fileIo, fileUri: { getUriFromPath: file => file } },
+    '@kit.ArkTS': { util: { generateRandomUUID: () => deviceId } },
     '../model/I18n': { t }, './Backup': {
       backupBusy: () => operating,
       async withBackupOperation(action) {
@@ -51,8 +72,11 @@ function setup() {
         operating = true;
         try { return await action(); } finally { operating = false; }
       },
+      async createConfigurationFile() { control.archives++; return '/cache/configuration.tinybot'; },
       readBackupFile: async (_context, file, local) => { control.restores.push(file); return { ...local, restored: true }; }
-    }, './FileBytes': {},
+    }, './FileBytes': { async copyFileBytes(_source, target) {
+      control.files.set(path.basename(target), { size: 100, mtime: 1, location: 1 });
+    } },
     './HuaweiAccount': { huaweiAccount: { async backupOpenID() {
       if (control.signedOut) throw new BackupLoginRequired('请先登录华为账号');
       return 'fixture-openid';
@@ -197,9 +221,11 @@ test('restore downloads the latest cloud backup and imports it without a file pi
   p.app.importSnapshot = async () => false; p.app.error = 'merge failed'; await p.cloud(true); assert.equal(p.error, 'merge failed'); assert.equal(p.status, '');
 });
 test('backup reports uploaded only after the cloud service confirms its location', async () => {
-  let uploaded = false;
-  const p = panel({ list: async () => [], create: async () => uploaded });
-  await p.cloud(false); assert.match(p.status, /等待上传/); uploaded = true; await p.cloud(false); assert.match(p.status, /已上传到云端/);
+  let result = 'pending';
+  const p = panel({ list: async () => [], create: async () => result });
+  await p.cloud(false); assert.match(p.status, /备份已保存在本机/);
+  result = 'blocked'; await p.cloud(false); assert.match(p.status, /已有配置备份等待上传/);
+  result = 'uploaded'; await p.cloud(false); assert.match(p.status, /已上传到云端/);
 });
 test('restore failures do not import data and busy or running sessions cannot start another action', async () => {
   let calls = 0, imports = 0;
@@ -225,10 +251,77 @@ test('restoreLatest synchronizes before choosing a remote file and never restore
   assert.equal(h.control.accesses, 0); assert.equal(h.control.restores.length, 0);
   h.control.files.set(name, { mtime: 1000, size: 100, location: 3 }); h.emit(4);
   const value = await pending; assert.equal(value.kept, true); assert.equal(value.restored, true); assert.equal(h.control.restores[0], '/cloud/tinybot-backups/' + name);
+  assert.equal(h.control.files.get(name).location, 2, 'Restoring a cached archive frees its local copy after reading');
 });
 test('restoreLatest stops on incomplete sync and explains a genuinely empty cloud', async () => {
   const h = setup(); let pending = h.CloudBackup.restoreLatest({ cloudFileDir: '/cloud' }, {}); const rejected = assert.rejects(pending, /同步尚未完成/);
   await tick(); await h.timer(30000); await rejected; assert.equal(h.control.restores.length, 0);
   h.control.start = async sync => sync.callback({ state: 4, error: 0 });
   await assert.rejects(h.CloudBackup.restoreLatest({ cloudFileDir: '/cloud' }, {}), /暂无可恢复/);
+});
+
+test('a local-only configuration blocks new archives until the previous upload finishes', async () => {
+  const h = setup(), context = { cloudFileDir: '/cloud' };
+  const pending = configName(1790000000000), next = configName(1800000000000);
+  const other = configName(1790000000001, otherDevice);
+  h.control.files.set(pending, { location: 1, size: 100 });
+  h.control.files.set(other, { location: 1, size: 100 });
+  h.control.start = async sync => sync.callback({ state: 5, error: 0 });
+  let staged = 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    assert.equal(await h.CloudBackup.create(context, {}, { onStaged: () => staged++ }), 'blocked');
+  }
+  assert.equal(h.control.archives, 0);
+  assert.equal(staged, 0);
+  assert.deepEqual(h.control.unlinked, []);
+  assert.deepEqual(h.control.released, []);
+  h.control.start = async sync => {
+    for (const name of [pending, next]) { if (h.control.files.has(name)) h.control.files.get(name).location = 3; }
+    sync.callback({ state: 4, error: 0 });
+  };
+  assert.equal(await h.CloudBackup.create(context, {}, { onStaged: () => staged++ }), 'uploaded');
+  assert.deepEqual(h.control.staged, [next]);
+  assert.equal(staged, 1);
+  assert.equal(h.control.files.get(pending).location, 2);
+  assert.equal(h.control.files.get(next).location, 2);
+  assert.equal(h.control.files.get(other).location, 1);
+});
+
+test('successful backup releases legacy local copies and keeps the existing cloud retention policy', async () => {
+  const h = setup(), context = { cloudFileDir: '/cloud' };
+  const legacy = `tinybot-device-${deviceId}-1700000000000-${deviceId}.tinybot`;
+  const conflict = 'tinybot-latest(1).tinybot';
+  const pendingConflict = 'tinybot-latest(2).tinybot';
+  const other = configName(1780000000000, otherDevice);
+  const expired = configName(1740000000000);
+  const retained = [configName(1750000000000), configName(1760000000000)];
+  for (const name of [legacy, conflict, other, expired, ...retained]) h.control.files.set(name, { location: 3, size: 100 });
+  h.control.files.set(pendingConflict, { location: 1, size: 100 });
+  assert.ok(!(await h.CloudBackup.list(context)).some(item => item.name === conflict));
+  h.control.start = async sync => {
+    for (const name of h.control.staged) {
+      const item = h.control.files.get(name);
+      if (item.location === 1) item.location = 3;
+    }
+    sync.callback({ state: 4, error: 0 });
+  };
+  assert.equal(await h.CloudBackup.create(context, {}), 'uploaded');
+  assert.equal(h.control.files.has(expired), false);
+  for (const name of [legacy, conflict, other, ...retained, ...h.control.staged]) {
+    assert.equal(h.control.files.get(name).location, 2, `${name} still has a cloud copy`);
+  }
+  assert.equal(h.control.files.get(pendingConflict).location, 1);
+  assert.deepEqual(h.control.unlinked.filter(file => file.startsWith('/cloud/')).map(file => path.basename(file)), [expired]);
+});
+
+test('a local cache release error is reported separately from a confirmed upload', async () => {
+  const h = setup();
+  const name = configName(1790000000000);
+  h.control.files.set(name, { location: 3, size: 100 });
+  h.control.releaseError = Error('cache busy');
+  h.control.start = async sync => sync.callback({ state: 4, error: 0 });
+  assert.equal(await h.CloudBackup.retryUpload({ cloudFileDir: '/cloud' }, { name }), true);
+  assert.equal(h.control.files.get(name).location, 3);
+  assert.ok(h.logs.some(entry => entry[2] === 'cache_release_failed'));
+  assert.deepEqual(h.control.unlinked, []);
 });

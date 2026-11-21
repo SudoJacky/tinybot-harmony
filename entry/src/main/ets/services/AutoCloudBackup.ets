@@ -5,7 +5,7 @@ import { AppData } from '../model/Conversation';
 import { BackupChanges } from '../model/BackupChanges';
 import { Diagnostics } from '../model/Diagnostics';
 import { getLocale, t } from '../model/I18n';
-import { CloudBackup, CloudBackupItem, cloudBackupError, CLOUD_BACKUP_NAME } from './CloudBackup';
+import { CloudBackup, CloudBackupItem, cloudBackupError } from './CloudBackup';
 import { Cancellation } from './Cancellation';
 import { hostedPrivacy } from './HostedPrivacy';
 import { BackupLoginRequired, huaweiAccount } from './HuaweiAccount';
@@ -28,6 +28,7 @@ export class AutoCloudBackup {
   private generation: number = 0;
   private savedChanges: string = '';
   private name: string = '';
+  private maintenancePending: boolean = false;
   private task?: BackupTask;
 
   initialize(context: common.UIAbilityContext, snapshot: () => AppData, ready: () => boolean): void {
@@ -36,7 +37,7 @@ export class AutoCloudBackup {
     const store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
     this.enabled = store.getSync('autoCloudBackupEnabled', true) as boolean;
     this.context = context; this.store = store; this.snapshot = snapshot; this.ready = ready;
-    this.savedChanges = ''; this.name = CLOUD_BACKUP_NAME; this.error = ''; this.lastUploadedAt = 0;
+    this.savedChanges = ''; this.name = ''; this.maintenancePending = false; this.error = ''; this.lastUploadedAt = 0;
     this.state = this.enabled ? 'waiting' : 'disabled';
   }
 
@@ -61,7 +62,7 @@ export class AutoCloudBackup {
   confirmUploaded(items: CloudBackupItem[]): void {
     if (!this.context || !this.enabled || this.state !== 'pending' || !this.name) { return; }
     const item = items.find((entry) => entry.name === this.name && (entry.location === 2 || entry.location === 3));
-    if (item) { this.state = 'uploaded'; this.lastUploadedAt = item.createdAt; }
+    if (item) { this.state = 'uploaded'; this.lastUploadedAt = item.createdAt; this.maintenancePending = true; }
   }
 
   setForeground(value: boolean): void {
@@ -82,7 +83,7 @@ export class AutoCloudBackup {
         this.store?.getSync('onboardingComplete', false) === true;
       if (!this.ready() || !startupComplete || CloudBackup.busy) { return; }
       const data = this.snapshot(), changes = this.changes(data);
-      if (changes === this.savedChanges && this.state === 'uploaded') { return; }
+      if (changes === this.savedChanges && this.state === 'uploaded' && !this.maintenancePending) { return; }
       const task: BackupTask = { requestId: -1, generation: this.generation, cancellation: new Cancellation(), running: true };
       // Must remain synchronous: a page watcher can run too late to request this lease.
       const info = backgroundTaskManager.requestSuspendDelay(t('自动云备份'), () => this.expire(task));
@@ -122,22 +123,21 @@ export class AutoCloudBackup {
       if (task.generation !== this.generation || !this.enabled || !hostedPrivacy.allowed || !this.ready()) { return; }
       if (changes !== this.savedChanges) {
         this.state = 'creating'; this.error = '';
-        this.name = newBackupSnapshot(context);
-        await CloudBackup.create(context, data, { openID: openID, cancellation: task.cancellation, name: this.name,
+        const name = newBackupSnapshot(context);
+        await CloudBackup.create(context, data, { openID: openID, cancellation: task.cancellation, name: name,
           onStaged: () => {
             if (task.generation !== this.generation) { return; }
+            this.name = name;
             this.savedChanges = changes;
           } });
-        if (task.generation !== this.generation) { return; }
-        this.savedChanges = changes;
       } else { await CloudBackup.retryUpload(context, { openID: openID, cancellation: task.cancellation, name: this.name }); }
       task.cancellation.check();
       const items = await CloudBackup.list(context);
       if (task.generation !== this.generation || !this.enabled || !hostedPrivacy.allowed) { return; }
       const item = items.find((entry) => entry.name === this.name);
-      const uploaded = item !== undefined && (item.location === 2 || item.location === 3);
+      const uploaded = changes === this.savedChanges && item !== undefined && (item.location === 2 || item.location === 3);
       this.state = uploaded ? 'uploaded' : 'pending';
-      if (uploaded && item) { this.lastUploadedAt = item.createdAt; }
+      if (uploaded && item) { this.lastUploadedAt = item.createdAt; this.maintenancePending = false; }
     } catch (error) {
       if (task.generation === this.generation && this.enabled) {
         if (error instanceof BackupLoginRequired && !task.cancellation.cancelled) {

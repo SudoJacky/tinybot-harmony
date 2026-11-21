@@ -110,9 +110,12 @@ export struct BackupPanel {
         this.recoveryPending = false;
         if (this.visible) { this.status = t('备份已恢复，已保留本机已有数据。'); }
       } else {
-        const completed = await CloudBackup.create(context, this.app.configurationSnapshot());
-        if (completed) { NativeData.forFilesDir(context.filesDir)?.allowAutoBackup(); this.recoveryPending = false; }
-        if (this.visible) { this.status = completed ? t('备份已上传到云端。') : t('备份已保存在本机，等待上传。请联网后再次备份。'); }
+        const result = await CloudBackup.create(context, this.app.configurationSnapshot());
+        if (result === 'uploaded') { NativeData.forFilesDir(context.filesDir)?.allowAutoBackup(); this.recoveryPending = false; }
+        if (this.visible) {
+          this.status = result === 'uploaded' ? t('备份已上传到云端。') : result === 'blocked' ?
+            t('已有配置备份等待上传。上传完成后，再创建新版本。') : t('备份已保存在本机，等待上传。请联网后再次备份。');
+        }
       }
     } catch (error) {
       if (this.visible) {

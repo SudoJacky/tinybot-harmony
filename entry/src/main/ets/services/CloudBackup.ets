@@ -24,8 +24,10 @@ const SNAPSHOT_NAME = /^tinybot-(\d{13})-[0-9a-f-]{36}\.(?:json|tinybot)$/;
 export const CLOUD_BACKUP_NAME: string = 'tinybot-latest.tinybot';
 const LATEST_BACKUP = CLOUD_BACKUP_NAME;
 const AUTO_BACKUP = /^tinybot-auto-[0-9a-f-]{36}\.tinybot$/;
+const LEGACY_CONFLICT_BACKUP = /^tinybot-latest\([1-9]\d*\)\.tinybot$/;
 function validBackupName(name: string): boolean { return !!backupSnapshot(name) || name === LATEST_BACKUP || SNAPSHOT_NAME.test(name) || AUTO_BACKUP.test(name); }
 export interface CloudBackupOptions { openID?: string; cancellation?: Cancellation; name?: string; onStaged?: () => void; }
+export type CloudBackupCreateResult = 'uploaded' | 'pending' | 'blocked';
 export function latestCloudBackup(items: CloudBackupItem[]): CloudBackupItem | undefined {
   return items.filter((item) => item.location === 2 || item.location === 3)
     .sort((a, b) => b.createdAt - a.createdAt || (a.name === LATEST_BACKUP ? -1 : b.name === LATEST_BACKUP ? 1 : 0))[0];
@@ -194,8 +196,19 @@ async function restoreCloudFile(context: common.UIAbilityContext, name: string, 
   const path = await backupDirectory(context) + '/' + name;
   const stat = await fs.lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
-  if ((await fs.stat(path)).location === 2) { await download(path); }
-  return readBackupFile(context, path, local, openID, conflicts);
+  try {
+    if ((await fs.stat(path)).location === 2) { await download(path); }
+    return await readBackupFile(context, path, local, openID, conflicts);
+  } finally { await releaseUploadedCache(path); }
+}
+
+async function releaseUploadedCache(path: string): Promise<void> {
+  try {
+    // A cloud-only snapshot remains restorable, and location 1 is the only copy.
+    if ((await fs.stat(path)).location === 3) {
+      new cloudSync.CloudFileCache().cleanFileCache(fileUri.getUriFromPath(path));
+    }
+  } catch (error) { Diagnostics.log('warn', 'backup', 'cache_release_failed', undefined, error as Error); }
 }
 
 // Retire old snapshots only after the replacement has actually reached the cloud.
@@ -205,16 +218,21 @@ async function finishUpload(context: common.UIAbilityContext, name: string, canc
   const info = await fs.stat(target);
   if (info.location !== 2 && info.location !== 3) { return false; }
   const identity = backupSnapshot(name);
-  if (!identity || identity.deviceId !== backupDeviceId(context)) { return true; }
-  const obsolete = expiredBackupSnapshots((await CloudBackup.list(context))
-    .filter((item) => item.location === 2 || item.location === 3).map((item) => item.name), identity.deviceId);
-  if (!obsolete.length) { return true; }
-  try {
-    for (const item of obsolete) { cancellation?.check(); await fs.unlink(directory + '/' + item); }
-    if (!await requestSync(cancellation)) { throw new Error(t('旧备份删除尚未同步。')); }
-  } catch (error) {
-    Diagnostics.log('error', 'backup', 'retire_failed', undefined, error as Error);
-    throw new Error(t('备份已上传，但旧备份清理未完成：{0}', [cloudBackupError(error as Error)]));
+  const uploaded = (await CloudBackup.list(context, true)).filter((item) => item.location === 2 || item.location === 3);
+  const obsolete = identity?.deviceId === backupDeviceId(context) ?
+    expiredBackupSnapshots(uploaded.map((item) => item.name), identity.deviceId) : [];
+  for (const item of uploaded) {
+    cancellation?.check();
+    if (item.location === 3 && !obsolete.includes(item.name)) { await releaseUploadedCache(directory + '/' + item.name); }
+  }
+  if (obsolete.length) {
+    try {
+      for (const item of obsolete) { cancellation?.check(); await fs.unlink(directory + '/' + item); }
+      if (!await requestSync(cancellation)) { throw new Error(t('旧备份删除尚未同步。')); }
+    } catch (error) {
+      Diagnostics.log('error', 'backup', 'retire_failed', undefined, error as Error);
+      throw new Error(t('备份已上传，但旧备份清理未完成：{0}', [cloudBackupError(error as Error)]));
+    }
   }
   return true;
 }
@@ -225,7 +243,7 @@ export class CloudBackup {
     return !!context.cloudFileDir && await fs.access(context.cloudFileDir);
   }
   // Listing cached metadata does not create or upload any snapshot.
-  static async list(context: common.UIAbilityContext): Promise<CloudBackupItem[]> {
+  static async list(context: common.UIAbilityContext, includeLegacyConflicts: boolean = false): Promise<CloudBackupItem[]> {
     let operation = 'cloud_directory';
     try {
       const directory = await backupDirectory(context);
@@ -235,7 +253,7 @@ export class CloudBackup {
       operation = 'list';
       for (const name of await fs.listFile(directory)) {
         const match = name.match(SNAPSHOT_NAME);
-        if (!validBackupName(name)) { continue; }
+        if (!validBackupName(name) && !(includeLegacyConflicts && LEGACY_CONFLICT_BACKUP.test(name))) { continue; }
         operation = 'stat';
         const stat = await fs.lstat(directory + '/' + name);
         if (stat.isFile() && !stat.isSymbolicLink()) {
@@ -277,14 +295,22 @@ export class CloudBackup {
     });
   }
 
-  static create(context: common.UIAbilityContext, data: AppData, options?: CloudBackupOptions): Promise<boolean> {
+  static create(context: common.UIAbilityContext, data: AppData, options?: CloudBackupOptions): Promise<CloudBackupCreateResult> {
     return withBackupOperation(async () => {
       const cancellation = options?.cancellation;
       cancellation?.check();
       const openID = options?.openID ?? await huaweiAccount.backupOpenID(context);
       cancellation?.check();
       const name = options?.name || newBackupSnapshot(context);
-      if (backupSnapshot(name)?.deviceId !== backupDeviceId(context)) { throw new Error('Invalid backup snapshot owner'); }
+      const deviceId = backupDeviceId(context);
+      if (backupSnapshot(name)?.deviceId !== deviceId) { throw new Error('Invalid backup snapshot owner'); }
+      const pending = (item: CloudBackupItem): boolean =>
+        item.deviceId === deviceId && item.name.startsWith('tinybot-config-') && item.location === 1;
+      if ((await CloudBackup.list(context)).some(pending)) {
+        await requestSync(cancellation);
+        if ((await CloudBackup.list(context)).some(pending)) { return 'blocked'; }
+      }
+      cancellation?.check();
       const directory = await backupDirectory(context);
       const source = await createConfigurationFile(context, data, openID, cancellation);
       const target = directory + '/' + name;
@@ -309,7 +335,7 @@ export class CloudBackup {
         if (await fs.access(temporary)) { await fs.unlink(temporary); }
       }
       await requestSync(cancellation);
-      return finishUpload(context, name, cancellation);
+      return await finishUpload(context, name, cancellation) ? 'uploaded' : 'pending';
     });
   }
 
