@@ -22,15 +22,18 @@ function checkCompiledPanel(f) {
     SectionHeader: Child, GroupCard: Child, SwitchRow: Child, NavRow: Child, RowDivider: Child, Banner: Child, IconButton: Child,
     ViewPU: { create() {} }, Space: {}, Radius: {}, BarState: { Off: 0 }, Alignment: { Top: 0 }, VerticalAlign: { Top: 0 } });
   const actions = [];
-  const panel = Object.assign(new exports.Probe(), { devices: [], automatic: f.service, app: { sharedBusy: false }, busy: false, status: '', error: '', backupDate: '', cloud: value => actions.push(value), chooseRestore:()=>actions.push('versions'), appearance: {},
+  const panel = Object.assign(new exports.Probe(), { devices: [], automatic: f.service, app: { sharedBusy: false }, busy: false, status: '', error: '', backupDate: '', cloud: value => actions.push(value), chooseRestore:()=>actions.push('versions'),
+    localBackup: restore => actions.push(restore ? 'import-file' : 'export-file'), appearance: {},
     observeComponentCreation2: callback => callback(1, true), ifElseBranchUpdateFunction: (_branch, callback) => callback(),
     forEachUpdateFunction: (_element, items, callback) => items.forEach(callback) });
   panel.backupTab();
-  assert.deepEqual([...nodes.keys()].sort(), ['create-cloud-backup', 'device-sync-receive', 'device-sync-send', 'restore-cloud-backup', 'webdav-backup-settings']); assert.ok(texts.includes(f.service.status));
+  assert.deepEqual([...nodes.keys()].sort(), ['create-cloud-backup', 'device-sync-receive', 'device-sync-send', 'export-local-backup', 'import-local-backup', 'restore-cloud-backup', 'webdav-backup-settings']); assert.ok(texts.includes(f.service.status));
   assert.equal(nodes.get('create-cloud-backup').title, '备份'); assert.equal(nodes.get('restore-cloud-backup').title, '恢复备份');
   nodes.get('create-cloud-backup').onTap(); nodes.get('restore-cloud-backup').onTap(); assert.deepEqual(actions, [false, 'versions']);
-  panel.busy = true; panel.backupTab(); assert.equal(nodes.get('create-cloud-backup').disabled, true); assert.equal(nodes.get('restore-cloud-backup').disabled, true);
-  console.log('PASS compiled backup page shows WebDAV, version selection, automatic status and busy guards');
+  nodes.get('export-local-backup').onTap(); nodes.get('import-local-backup').onTap(); assert.deepEqual(actions.slice(2), ['export-file', 'import-file']);
+  panel.busy = true; panel.backupTab();
+  for (const id of ['create-cloud-backup', 'restore-cloud-backup', 'export-local-backup', 'import-local-backup']) assert.equal(nodes.get(id).disabled, true);
+  console.log('PASS compiled backup page shows file and cloud actions, automatic status and busy guards');
 }
 function fixture() {
   let usable = true, ready = true, location = 1, failure, pending, writes = 0, uploads = 0, snapshots = 0, failFlush = false, leaseError, releaseError;

@@ -136,17 +136,35 @@ function setup() {
   };
 }
 
-function panel(cloud) {
+function panel(cloud, local = {}) {
   const exports = {};
   const account = { backupOpenID: async () => 'account' };
   vm.runInNewContext(panelCode, { exports, CloudBackup: cloud, cloudBackupError: error => error.message,
     latestCloudBackup: items => items.find(item => item.location === 2 || item.location === 3), getLocale: () => 'en-US',
     Diagnostics: { log() {} }, BackupLoginRequired, t, reviewBackupRestore: async () => true,
-    huaweiAccount: account, NativeData: { forFilesDir: () => ({ allowAutoBackup() {} }) } });
+    huaweiAccount: account, NativeData: { forFilesDir: () => ({ allowAutoBackup() {} }) },
+    withBackupOperation: action => action(), ...local });
   return Object.assign(new exports.Probe(), { visible: true, foreground: true, busy: false,
     error: '', status: '', statusError: false, backupDate: '', account,
     app: { busy: false, get sharedBusy(){return this.busy;}, configurationSnapshot: () => ({}), exportSnapshot: () => ({}) }, automatic: { confirmUploaded() {} }, context: () => ({}), getUIContext: () => ({}) });
 }
+
+test('local file actions can run while cloud status is pending and require confirmation before importing', async () => {
+  let finishCloudRead, imported = 0, confirm = false;
+  const restored = { source: 'file' };
+  const p = panel({ list: () => new Promise(resolve => { finishCloudRead = resolve; }) }, {
+    exportBackup: async () => true, readBackup: async () => restored, reviewBackupRestore: async () => confirm
+  });
+  p.app.importSnapshot = async data => { assert.equal(data, restored); imported++; return true; };
+  const reading = p.refreshStatus();
+  await p.localBackup(false);
+  assert.equal(p.status, '完整备份已保存。');
+  finishCloudRead([]); await reading;
+  await p.localBackup(true);
+  assert.equal(imported, 0); assert.equal(p.status, '');
+  confirm = true; await p.localBackup(true);
+  assert.equal(imported, 1); assert.equal(p.busy, false);
+});
 
 test('version selection requires login, excludes pending snapshots, and never reuses a stale listing',async()=>{
   let reads=0,selection;

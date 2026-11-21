@@ -157,7 +157,7 @@ const kits = {
       activatePermission: async () => { folderFailures.activations = (folderFailures.activations || 0) + 1; if (folderFailures.activate) throw folderFailures.activate; },
       revokePermission: async () => { if (folderFailures.revoke) throw folderFailures.revoke; } },
     fileUri: {getUriFromPath:p=>'file://'+p, FileUri: class { constructor(uri) { this.path = decodeURIComponent(new URL(uri).pathname); } }},
-    picker: { DocumentViewPicker: class { async save() {pickerCalls++;return [selectedFile];} async select() {pickerCalls++;return [selectedFile];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
+    picker: { DocumentViewPicker: class { async save() {pickerCalls++;return selectedFile ? [selectedFile] : [];} async select() {pickerCalls++;return selectedFile ? [selectedFile] : [];} } } }, '@kit.ImageKit': { image: {} }, '@kit.NetworkKit': { http },
   '@kit.RemoteCommunicationKit': { rcp: {
     createSession: config => webDavSession(config),
     Request: class { constructor(url, method, headers, content) { Object.assign(this, { url, method, headers, content }); } },
@@ -2828,8 +2828,12 @@ async function test(name, run) {
     } finally {fakeTimers=undefined;unobserve();}
   });
   await test('complete portable backup encrypts connections, merges device data and rolls back failed imports', async () => {
-    await require('./complete-backup-fixture.cjs')({ load: name => load(path.join(source, name)), fs, nativePath, secrets,
-      model, crypto, ConversationStore, idleRuntime, Attachments, backupAccount, preferences: kits['@kit.ArkData'].preferences });
+    const previous = selectedFile;
+    try {
+      await require('./complete-backup-fixture.cjs')({ load: name => load(path.join(source, name)), fs, nativePath, secrets,
+        selectFile: value => { selectedFile = value; }, model, crypto, ConversationStore, idleRuntime, Attachments, backupAccount,
+        preferences: kits['@kit.ArkData'].preferences });
+    } finally { selectedFile = previous; }
   });
   await test('usage ledger preserves new requests while restoring persisted records',async()=>{
     const {UsageLedger}=load(path.join(source,'services/UsageLedger'));const root='/sandbox/ledger';fs.mkdirSync(nativePath(root),{recursive:true});

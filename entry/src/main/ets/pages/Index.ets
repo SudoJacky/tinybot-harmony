@@ -2057,7 +2057,7 @@ struct Index {
                     Text(this.recoveryCloudStatus).id('storage-recovery-cloud-status')
                       .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
                   }
-                  Button(t('从其他设备接收')).id('storage-recover-device').attributeModifier(Btn.tonal)
+                  Button(t('打开备份与恢复')).id('storage-recover-options').attributeModifier(Btn.tonal)
                     .enabled(!this.recoveryBusy).onClick(() => this.recoverStorage(false))
                   if (this.recoveryLegacy) {
                     Text(t('升级前副本 · {0} 个会话 · {1}', [this.recoveryLegacy.threads,
