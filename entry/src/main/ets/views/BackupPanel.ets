@@ -110,9 +110,12 @@ export struct BackupPanel {
         this.recoveryPending = false;
         if (this.visible) { this.status = t('备份已恢复，已保留本机已有数据。'); }
       } else {
-        const completed = await CloudBackup.create(context, this.app.configurationSnapshot());
-        if (completed) { NativeData.forFilesDir(context.filesDir)?.allowAutoBackup(); this.recoveryPending = false; }
-        if (this.visible) { this.status = completed ? t('备份已上传到云端。') : t('备份已保存在本机，等待上传。请联网后再次备份。'); }
+        const result = await CloudBackup.create(context, this.app.configurationSnapshot());
+        if (result === 'uploaded') { NativeData.forFilesDir(context.filesDir)?.allowAutoBackup(); this.recoveryPending = false; }
+        if (this.visible) {
+          this.status = result === 'uploaded' ? t('备份已上传到云端。') : result === 'blocked' ?
+            t('已有配置备份等待上传。上传完成后，再创建新版本。') : t('备份已保存在本机，等待上传。请联网后再次备份。');
+        }
       }
     } catch (error) {
       if (this.visible) {
@@ -193,7 +196,7 @@ export struct BackupPanel {
         SectionHeader({ title: t('华为云空间') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('备份'), subtitle: t('只上传配置与加密连接凭据，保留最近 3 个配置版本'),
+            NavRow({ title: t('备份'), subtitle: t('只保留一份配置，自动清理旧备份（含完整备份）。'),
               compId: 'create-cloud-backup', animatedIcon: 'backup', disabled: this.locked(), onTap: () => this.cloud(false) })
             RowDivider()
             NavRow({ title: t('恢复备份'), subtitle: t('选择设备与版本，确认恢复内容'),
