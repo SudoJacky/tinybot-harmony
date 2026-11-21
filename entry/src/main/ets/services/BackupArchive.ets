@@ -102,7 +102,7 @@ export async function writeBackupArchive(path: string, metadata: string, sources
 // Unknown magic is handled only by the v1/v2 JSON reader, never as v3.
 // Extraction paths are generated locally; the archive cannot name a disk path.
 export async function openBackupArchive(path: string, cacheDir: string,
-  beforeExtract?: (metadata: string) => Promise<void>): Promise<OpenBackupArchive | undefined> {
+  beforeExtract?: (metadata: string, fileCount: number) => Promise<void>): Promise<OpenBackupArchive | undefined> {
   const input = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
   let directory = ''; let complete = false;
   try {
@@ -125,7 +125,7 @@ export async function openBackupArchive(path: string, cacheDir: string,
       if (!Number.isSafeInteger(total) || total > stat.size) { throw new Error(t('备份不完整或已损坏。')); }
     }
     if (total !== stat.size) { throw new Error(t('备份不完整或已损坏。')); }
-    if (beforeExtract) { await beforeExtract(index.metadata); }
+    if (beforeExtract) { await beforeExtract(index.metadata, index.sizes.length); }
     directory = cacheDir + '/restore-' + util.generateRandomUUID();
     await fs.mkdir(directory);
     const files: string[] = [];

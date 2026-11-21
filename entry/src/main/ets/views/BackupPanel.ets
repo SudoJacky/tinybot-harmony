@@ -196,7 +196,7 @@ export struct BackupPanel {
         SectionHeader({ title: t('华为云空间') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('备份'), subtitle: t('只上传配置与加密连接凭据，保留最近 3 个配置版本'),
+            NavRow({ title: t('备份'), subtitle: t('只保留一份配置，自动清理旧备份（含完整备份）。'),
               compId: 'create-cloud-backup', animatedIcon: 'backup', disabled: this.locked(), onTap: () => this.cloud(false) })
             RowDivider()
             NavRow({ title: t('恢复备份'), subtitle: t('选择设备与版本，确认恢复内容'),

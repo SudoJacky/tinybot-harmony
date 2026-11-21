@@ -5,11 +5,11 @@ import { cloudSync, fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { AppData } from '../model/Conversation';
 import { t } from '../model/I18n';
-import { BackupConflictMode, backupBusy, createConfigurationFile, readBackupFile, withBackupOperation } from './Backup';
+import { BackupConflictMode, backupBusy, createConfigurationFile, readBackupFile, verifyConfigurationBackup, withBackupOperation } from './Backup';
 import { copyFileBytes } from './FileBytes';
 import { Cancellation } from './Cancellation';
 import { huaweiAccount } from './HuaweiAccount';
-import { backupSnapshot, expiredBackupSnapshots } from '../model/BackupSnapshots';
+import { backupSnapshot } from '../model/BackupSnapshots';
 import { backupDeviceId, newBackupSnapshot } from './BackupSnapshotNames';
 
 export interface CloudBackupItem {
@@ -24,15 +24,29 @@ const SNAPSHOT_NAME = /^tinybot-(\d{13})-[0-9a-f-]{36}\.(?:json|tinybot)$/;
 export const CLOUD_BACKUP_NAME: string = 'tinybot-latest.tinybot';
 const LATEST_BACKUP = CLOUD_BACKUP_NAME;
 const AUTO_BACKUP = /^tinybot-auto-[0-9a-f-]{36}\.tinybot$/;
-const LEGACY_CONFLICT_BACKUP = /^tinybot-latest\([1-9]\d*\)\.tinybot$/;
 function validBackupName(name: string): boolean { return !!backupSnapshot(name) || name === LATEST_BACKUP || SNAPSHOT_NAME.test(name) || AUTO_BACKUP.test(name); }
-export interface CloudBackupOptions { openID?: string; cancellation?: Cancellation; name?: string; onStaged?: () => void; }
+function isConflictBackup(name: string): boolean {
+  const original = name.replace(/\([1-9]\d*\)(\.(?:tinybot|json))$/, '$1');
+  return original !== name && validBackupName(original);
+}
+interface CloudBackupOptions { openID?: string; cancellation?: Cancellation; }
+interface CloudBackupCreateOptions extends CloudBackupOptions { onStaged?: (name: string) => void; }
+interface CloudBackupRetryOptions extends CloudBackupOptions { name?: string; }
 export type CloudBackupCreateResult = 'uploaded' | 'pending' | 'blocked';
+function uploaded(item: CloudBackupItem): boolean { return item.location === 2 || item.location === 3; }
+function configName(name: string): boolean { return name.startsWith('tinybot-config-') && backupSnapshot(name) !== undefined; }
+function compareSnapshots(a: CloudBackupItem, b: CloudBackupItem): number {
+  return b.createdAt - a.createdAt || (a.name < b.name ? 1 : a.name === b.name ? 0 : -1);
+}
+export function latestCloudConfiguration(items: CloudBackupItem[]): CloudBackupItem | undefined {
+  return items.filter((item) => uploaded(item) && configName(item.name)).sort(compareSnapshots)[0];
+}
 export function latestCloudBackup(items: CloudBackupItem[]): CloudBackupItem | undefined {
-  return items.filter((item) => item.location === 2 || item.location === 3)
+  return items.filter(uploaded)
     .sort((a, b) => b.createdAt - a.createdAt || (a.name === LATEST_BACKUP ? -1 : b.name === LATEST_BACKUP ? 1 : 0))[0];
 }
 const CLOUD_READY_DELAYS: number[] = [500, 1000, 2000];
+const FILE_NOT_FOUND = 13900002;
 
 class CloudNotReadyError extends Error {
   code: number = 22400001;
@@ -211,30 +225,43 @@ async function releaseUploadedCache(path: string): Promise<void> {
   } catch (error) { Diagnostics.log('warn', 'backup', 'cache_release_failed', undefined, error as Error); }
 }
 
-// Retire old snapshots only after the replacement has actually reached the cloud.
-async function finishUpload(context: common.UIAbilityContext, name: string, cancellation?: Cancellation): Promise<boolean> {
-  const directory = await backupDirectory(context), target = directory + '/' + name;
-  if (!await fs.access(target)) { return false; }
-  const info = await fs.stat(target);
-  if (info.location !== 2 && info.location !== 3) { return false; }
-  const identity = backupSnapshot(name);
-  const uploaded = (await CloudBackup.list(context, true)).filter((item) => item.location === 2 || item.location === 3);
-  const obsolete = identity?.deviceId === backupDeviceId(context) ?
-    expiredBackupSnapshots(uploaded.map((item) => item.name), identity.deviceId) : [];
-  for (const item of uploaded) {
-    cancellation?.check();
-    if (item.location === 3 && !obsolete.includes(item.name)) { await releaseUploadedCache(directory + '/' + item.name); }
+// Every writer uses the same ordering, even when devices observe different subsets of the cloud directory.
+async function finishUpload(context: common.UIAbilityContext, openID: string, name?: string,
+  cancellation?: Cancellation): Promise<boolean> {
+  const items = await CloudBackup.list(context, true);
+  const keeper = latestCloudConfiguration(items);
+  if (!keeper) { return false; }
+  if (name) {
+    const expected = backupSnapshot(name);
+    const target = items.find((item) => item.name === name);
+    if (!expected || !name.startsWith('tinybot-config-') || (target && !uploaded(target))) { return false; }
+    if (!target && (keeper.createdAt < expected.createdAt ||
+      (keeper.createdAt === expected.createdAt && keeper.name <= name))) { return false; }
   }
-  if (obsolete.length) {
-    try {
-      for (const item of obsolete) { cancellation?.check(); await fs.unlink(directory + '/' + item); }
+  const directory = await backupDirectory(context), keeperPath = directory + '/' + keeper.name;
+  const obsolete = items.filter((item) => uploaded(item) && item.name !== keeper.name);
+  try {
+    if (obsolete.length) {
+      cancellation?.check();
+      if (keeper.location === 2) { await download(keeperPath); }
+      cancellation?.check();
+      await verifyConfigurationBackup(context, keeperPath, openID);
+      const location = (await fs.stat(keeperPath)).location;
+      if (location !== 2 && location !== 3) { throw new Error(t('云端同步尚未完成，请稍后重试恢复备份。')); }
+      for (const item of obsolete) {
+        cancellation?.check();
+        try { await fs.unlink(directory + '/' + item.name); }
+        catch (error) { if ((error as BusinessError).code !== FILE_NOT_FOUND) { throw error as Error; } }
+      }
       if (!await requestSync(cancellation)) { throw new Error(t('旧备份删除尚未同步。')); }
-    } catch (error) {
-      Diagnostics.log('error', 'backup', 'retire_failed', undefined, error as Error);
-      throw new Error(t('备份已上传，但旧备份清理未完成：{0}', [cloudBackupError(error as Error)]));
     }
+    return true;
+  } catch (error) {
+    Diagnostics.log('error', 'backup', 'retire_failed', undefined, error as Error);
+    throw new Error(t('备份已上传，但旧备份清理未完成：{0}', [cloudBackupError(error as Error)]));
+  } finally {
+    await releaseUploadedCache(keeperPath);
   }
-  return true;
 }
 
 export class CloudBackup {
@@ -243,7 +270,7 @@ export class CloudBackup {
     return !!context.cloudFileDir && await fs.access(context.cloudFileDir);
   }
   // Listing cached metadata does not create or upload any snapshot.
-  static async list(context: common.UIAbilityContext, includeLegacyConflicts: boolean = false): Promise<CloudBackupItem[]> {
+  static async list(context: common.UIAbilityContext, includeConflicts: boolean = false): Promise<CloudBackupItem[]> {
     let operation = 'cloud_directory';
     try {
       const directory = await backupDirectory(context);
@@ -253,15 +280,19 @@ export class CloudBackup {
       operation = 'list';
       for (const name of await fs.listFile(directory)) {
         const match = name.match(SNAPSHOT_NAME);
-        if (!validBackupName(name) && !(includeLegacyConflicts && LEGACY_CONFLICT_BACKUP.test(name))) { continue; }
+        if (!validBackupName(name) && !(includeConflicts && isConflictBackup(name))) { continue; }
         operation = 'stat';
-        const stat = await fs.lstat(directory + '/' + name);
-        if (stat.isFile() && !stat.isSymbolicLink()) {
+        try {
+          const stat = await fs.lstat(directory + '/' + name);
+          if (!stat.isFile() || stat.isSymbolicLink()) { continue; }
           // lstat lacks native FileInfo; reading its location can crash libfs.
           const info = await fs.stat(directory + '/' + name);
           const snapshot = backupSnapshot(name);
           result.push({ name: name, createdAt: snapshot?.createdAt || (match ? Number(match[1]) : info.mtime * 1000),
             deviceId: snapshot?.deviceId, size: stat.size, location: info.location });
+        } catch (error) {
+          // Another device can remove an older snapshot while the directory is being read.
+          if ((error as BusinessError).code !== FILE_NOT_FOUND) { throw error as Error; }
         }
       }
       return result.sort((a: CloudBackupItem, b: CloudBackupItem) => b.createdAt - a.createdAt);
@@ -272,12 +303,11 @@ export class CloudBackup {
   }
 
   static sync(cancellation?: Cancellation): Promise<boolean> { return withBackupOperation(() => requestSync(cancellation)); }
-  static retryUpload(context: common.UIAbilityContext, options?: CloudBackupOptions): Promise<boolean> {
+  static retryUpload(context: common.UIAbilityContext, options?: CloudBackupRetryOptions): Promise<boolean> {
     return withBackupOperation(async () => {
-      if (!options?.openID) { await huaweiAccount.backupOpenID(context); }
-      await requestSync(options?.cancellation);
-      const name = options?.name || (await CloudBackup.list(context)).find((item) => item.deviceId === backupDeviceId(context))?.name;
-      return name ? finishUpload(context, name, options?.cancellation) : false;
+      const openID = options?.openID ?? await huaweiAccount.backupOpenID(context);
+      if (!await requestSync(options?.cancellation)) { return false; }
+      return finishUpload(context, openID, options?.name, options?.cancellation);
     });
   }
 
@@ -295,22 +325,23 @@ export class CloudBackup {
     });
   }
 
-  static create(context: common.UIAbilityContext, data: AppData, options?: CloudBackupOptions): Promise<CloudBackupCreateResult> {
+  static create(context: common.UIAbilityContext, data: AppData, options?: CloudBackupCreateOptions): Promise<CloudBackupCreateResult> {
     return withBackupOperation(async () => {
       const cancellation = options?.cancellation;
       cancellation?.check();
       const openID = options?.openID ?? await huaweiAccount.backupOpenID(context);
       cancellation?.check();
-      const name = options?.name || newBackupSnapshot(context);
       const deviceId = backupDeviceId(context);
-      if (backupSnapshot(name)?.deviceId !== deviceId) { throw new Error('Invalid backup snapshot owner'); }
       const pending = (item: CloudBackupItem): boolean =>
-        item.deviceId === deviceId && item.name.startsWith('tinybot-config-') && item.location === 1;
-      if ((await CloudBackup.list(context)).some(pending)) {
+        item.deviceId === deviceId && configName(item.name) && item.location === 1;
+      let items = await CloudBackup.list(context);
+      if (items.some(pending)) {
         await requestSync(cancellation);
-        if ((await CloudBackup.list(context)).some(pending)) { return 'blocked'; }
+        items = await CloudBackup.list(context);
+        if (items.some(pending)) { return 'blocked'; }
       }
       cancellation?.check();
+      const name = newBackupSnapshot(context, items.find((item) => configName(item.name))?.createdAt);
       const directory = await backupDirectory(context);
       const source = await createConfigurationFile(context, data, openID, cancellation);
       const target = directory + '/' + name;
@@ -324,7 +355,7 @@ export class CloudBackup {
         await copyFileBytes(source, temporary);
         cancellation?.check();
         await fs.rename(temporary, target);
-        options?.onStaged?.();
+        options?.onStaged?.(name);
       } catch (error) {
         if ((error as BusinessError).code === 13900012) {
           throw new Error(t('无法写入华为云空间（13900012）。请在系统云空间中开启 Tinybot 后重试。'));
@@ -334,8 +365,8 @@ export class CloudBackup {
         await fs.unlink(source);
         if (await fs.access(temporary)) { await fs.unlink(temporary); }
       }
-      await requestSync(cancellation);
-      return await finishUpload(context, name, cancellation) ? 'uploaded' : 'pending';
+      if (!await requestSync(cancellation)) { return 'pending'; }
+      return await finishUpload(context, openID, name, cancellation) ? 'uploaded' : 'pending';
     });
   }
 

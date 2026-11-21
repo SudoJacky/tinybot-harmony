@@ -2,6 +2,7 @@
   "配置备份 · 设备 {0}": "Settings backup · Device {0}",
   "发现 {0} 的配置备份。会话和文件需从其他设备接收。": "Settings backup found from {0}. Transfer conversations and files from another device.",
   "从此版本导入设置和连接凭据。已有连接优先。": "Import settings and connection credentials from this version. Existing connections take priority.",
+  "只保留一份配置，自动清理旧备份（含完整备份）。": "Keeps one settings backup and removes old backups, including full backups.",
   "只上传配置与加密连接凭据，保留最近 3 个配置版本": "Uploads settings and encrypted connection credentials. Keeps the latest three configuration versions.",
   "请允许连接附近设备后再开启同步。": "Allow access to nearby devices to start syncing.",
   "请先在对方设备选择发送数据。": "Choose Send on the other device first.",
@@ -3089,7 +3090,7 @@
   "新增 {0} 个会话，跳过 {1} 个已有版本，另存 {2} 个冲突副本。原有会话和文件会保留。": "Add {0} conversations, skip {1} existing versions, and save {2} conflict copies. Existing conversations and files will be kept.",
   "1.3.1 · 2026-11-13": "1.3.1 · 2026-11-13",
   "会话、配置、用量和生活看板迁入本机加密数据库。华为云空间和 WebDAV 支持按设备选择历史备份恢复，冲突会话可另存副本。新增文件预览批注、离线图表和可编辑的 PowerPoint 图表。优化手机输入区、空会话右滑侧栏、平板工作区与快捷键。移除本地小程序和提示词模板入口。": "Conversations, settings, usage, and Life Boards now use a local encrypted database. Restore a selected Huawei Cloud or WebDAV backup version and keep conflict copies of conversations. Add annotations to file previews, render charts offline, and create editable PowerPoint charts. The phone composer, empty-chat sidebar gesture, tablet workspaces, and keyboard shortcuts have been refined. The local mini-app and prompt-template entries have been removed.",
-  "在“设置 → 备份与恢复”创建或恢复备份。华为云空间和 WebDAV 会按设备保留最近 3 个备份版本，恢复时可选择历史版本。备份中的连接凭据使用华为账号信息加密，换设备需登录同一账号。": "Open Settings → Backup & Restore to create or restore a backup. Huawei Cloud and WebDAV retain the three most recent versions per device and let you select a version to restore. Connection credentials in backups are encrypted with Huawei ID information. Sign in with the same account on the new device."
+  "在“设置 → 备份与恢复”创建或恢复备份。华为云每个账号只保留一份配置，新备份验证后会删除旧备份。WebDAV 每台设备保留最近 3 个版本。连接凭据使用华为账号信息加密，换设备需登录同一账号。": "Open Settings → Backup & Restore to create or restore a backup. Huawei Cloud keeps one settings backup per account and deletes older backups after verifying a new one. WebDAV keeps the latest three versions per device. Connection credentials are encrypted with Huawei ID information. Sign in with the same account on the new device."
 ,
   "旁聊": "Side chat",
   "新建旁聊": "New side chat",

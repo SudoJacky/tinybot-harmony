@@ -9,6 +9,7 @@ export function backupDeviceId(context: common.UIAbilityContext): string {
   if (!/^[0-9a-f-]{36}$/.test(id)) { throw new Error('Invalid backup device identity'); }
   return id;
 }
-export function newBackupSnapshot(context: common.UIAbilityContext): string {
-  return 'tinybot-config-' + backupDeviceId(context) + '-' + Date.now() + '-' + util.generateRandomUUID() + '.tinybot';
+export function newBackupSnapshot(context: common.UIAbilityContext, previousCreatedAt: number = 0): string {
+  const createdAt = Math.max(Date.now(), previousCreatedAt + 1);
+  return 'tinybot-config-' + backupDeviceId(context) + '-' + createdAt + '-' + util.generateRandomUUID() + '.tinybot';
 }

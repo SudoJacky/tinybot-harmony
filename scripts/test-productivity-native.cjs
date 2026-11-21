@@ -1938,7 +1938,7 @@ async function test(name, run) {
     fs.unlinkSync(nativePath(context.cloudFileDir+'/tinybot-backups/'+historical));
     assert.ok(syncInstances.every(s=>!s.callback),'native listeners are removed');
   });
-  await test('device backup retention preserves foreign and legacy snapshots and handles upload cleanup failures',async()=>{
+  await test('Huawei Cloud replaces foreign and legacy snapshots with one restorable configuration and retries cleanup failures',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
     const {backupDeviceId}=load(path.join(source,'services/BackupSnapshotNames'));
     const context={cloudFileDir:'/sandbox/cloud',cacheDir:'/sandbox/backup-app/cache',getApplicationContext:()=>({filesDir:'/sandbox/backup-app'})};
@@ -1947,8 +1947,9 @@ async function test(name, run) {
     const snapshot=legacyBackupFixture(before).data;
     const foreign='tinybot-device-'+crypto.randomUUID()+'-1700000000000-'+crypto.randomUUID()+'.tinybot';
     const legacy='tinybot-latest.tinybot';
+    const conflict='tinybot-latest(1).tinybot';
     const oldFull='tinybot-device-'+backupDeviceId(context)+'-1699999999000-'+crypto.randomUUID()+'.tinybot';
-    for(const name of [foreign,legacy,oldFull]){fs.writeFileSync(nativePath(directory+'/'+name),before);cloudLocations.set(directory+'/'+name,3);}
+    for(const name of [foreign,legacy,conflict,oldFull]){fs.writeFileSync(nativePath(directory+'/'+name),before);cloudLocations.set(directory+'/'+name,3);}
     cloudStart=async sync=>{
       for (const name of fs.readdirSync(nativePath(directory)).filter(name => name.endsWith('.tinybot'))) {
         const file = directory + '/' + name;
@@ -1960,10 +1961,11 @@ async function test(name, run) {
     const checks=backupAccount.checks;
     assert.equal(await CloudBackup.create(context,snapshot,{openID:await backupAccount.backupOpenID()}),'uploaded');
     assert.equal(backupAccount.checks,checks+1);
-    let items=await CloudBackup.list(context),own=items.filter(item=>item.deviceId===backupDeviceId(context) && item.name.startsWith('tinybot-config-'));
-    assert.equal(own.length,3);
-    for(const name of [foreign,legacy,oldFull])assert.deepEqual(fs.readFileSync(nativePath(directory+'/'+name)),before);
-    const name=own[0].name,target=directory+'/'+name,complete=fs.readFileSync(nativePath(target));
+    const items=await CloudBackup.list(context,true);
+    assert.equal(items.length,1);
+    assert.equal(items[0].deviceId,backupDeviceId(context));
+    assert.match(items[0].name,/^tinybot-config-/);
+    const name=items[0].name,target=directory+'/'+name,complete=fs.readFileSync(nativePath(target));
     assert.equal(cloudLocations.get(target), 2);
     const restored=await CloudBackup.restore(context,name,model.emptyData());
     assert.equal(restored.config.contextWindow,65536);
@@ -1977,13 +1979,19 @@ async function test(name, run) {
     assert.deepEqual(fs.readFileSync(nativePath(target)),complete);
     const obsolete=directory+'/tinybot-config-'+backupDeviceId(context)+'-1700000000000-'+crypto.randomUUID()+'.tinybot';
     fs.writeFileSync(nativePath(obsolete),complete);cloudLocations.set(obsolete,3);
+    const corrupt=Buffer.from(complete);
+    corrupt[corrupt.length-1]^=1;
+    fs.writeFileSync(nativePath(target),corrupt);
+    try {
+      await assert.rejects(CloudBackup.retryUpload(context,{name}),/备份已上传.*清理未完成/);
+      assert.ok(fs.existsSync(nativePath(obsolete)),'Corrupt replacement must leave the previous backup intact');
+    } finally { fs.writeFileSync(nativePath(target),complete); }
     const unlink=fileIo.unlink;fileIo.unlink=async value=>{if(value===obsolete)throw Error('injected retirement failure');return unlink(value);};
     try{await assert.rejects(CloudBackup.retryUpload(context,{name}),/备份已上传.*清理未完成.*injected retirement failure/);}finally{fileIo.unlink=unlink;}
     assert.deepEqual(fs.readFileSync(nativePath(target)),complete);assert.ok(fs.existsSync(nativePath(obsolete)));
     assert.equal(await CloudBackup.retryUpload(context,{name}),true);
     assert.equal(fs.existsSync(nativePath(obsolete)),false);
-    for(const protectedName of [foreign,legacy,oldFull])assert.ok(fs.existsSync(nativePath(directory+'/'+protectedName)));
-    fs.unlinkSync(nativePath(directory+'/'+oldFull));
+    assert.deepEqual(fs.readdirSync(nativePath(directory)),[name]);
     assert.ok(fs.readdirSync(nativePath(directory)).every(file=>!file.endsWith('.partial')));
   });
   await test('cloud metadata lookup excludes directories and symbolic links before querying location',async()=>{
@@ -2061,7 +2069,7 @@ async function test(name, run) {
     assert.equal(fs.readdirSync(nativePath(context.cacheDir)).length,0);
     cloudStart=async sync=>{sync.callback({state:cloudSync.SyncState.COMPLETED,error:0});};
     assert.equal(await CloudBackup.retryUpload(context),true);
-    assert.equal((await CloudBackup.list(context)).filter(item=>item.deviceId===load(path.join(source,'services/BackupSnapshotNames')).backupDeviceId(context)).length,3,'Keep three uploaded versions for this device');
+    assert.equal((await CloudBackup.list(context,true)).length,1,'Keep one uploaded version for the Huawei account');
   });
   await test('failed cloud snapshot publication preserves every existing restore point',async()=>{
     const {CloudBackup}=load(path.join(source,'services/CloudBackup'));
