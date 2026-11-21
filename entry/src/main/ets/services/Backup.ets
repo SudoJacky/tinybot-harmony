@@ -45,11 +45,11 @@ function backupThreadText(thread: ThreadData): string {
 interface BackupFile { threadId?: string; workspaceId?: string; path: string; bytes: string; }
 interface BackupAttachment { id: string; bytes: string; }
 interface BackupEnvelope { protectedKeys?: EncryptedBackupKeys; deviceState?: BackupDeviceState; orphanWorkspaceIds?: string[]; format: string; data: AppData; attachments: BackupAttachment[]; files: BackupFile[]; miniAppWorkspaceIds?: string[]; lifePanelWorkspaceIds?: string[]; lifeBoardWorkspaceIds?: string[]; lifePanelSourceWorkspaceIds?: string[]; }
-interface PreparedFile { files: NativeWorkspaceFiles; path: string; version?: string; }
+interface PreparedFile { files: NativeWorkspaceFiles; path: string; version: string; }
 async function rollbackPreparedFiles(files: PreparedFile[]): Promise<void> {
   const failures: string[] = [];
   for (const item of files.slice().reverse()) {
-    try { await item.files.remove(item.path, item.version!); }
+    try { await item.files.remove(item.path, item.version); }
     catch (error) { failures.push((error as Error).message); }
   }
   if (failures.length) { throw new Error('Backup file rollback failed: ' + failures.join('; ')); }
@@ -231,11 +231,12 @@ export async function createBackupFile(context: common.UIAbilityContext, snapsho
   await writeBackupArchive(path, JSON.stringify(envelope), sources, cancellation);
   return path;
 }
-export async function exportBackup(context: common.UIAbilityContext, data: AppData): Promise<void> {
+export async function exportBackup(context: common.UIAbilityContext, data: AppData): Promise<boolean> {
   const path = await createBackupFile(context, data);
   try {
-    const uris = await new picker.DocumentViewPicker(context).save({ newFileNames: ['Tinybot备份.tinybot'] });
-    if (!uris.length) { return; }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const uris = await new picker.DocumentViewPicker(context).save({ newFileNames: ['Tinybot-' + timestamp + '.tinybot'] });
+    if (!uris.length) { return false; }
     const input = await fs.open(path, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
     try {
       const output = await fs.open(uris[0], fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
@@ -245,6 +246,7 @@ export async function exportBackup(context: common.UIAbilityContext, data: AppDa
         await fs.fsync(output.fd);
       } finally { await fs.close(output); }
     } finally { await fs.close(input); }
+    return true;
   }
   finally { await fs.unlink(path); }
 }
@@ -252,7 +254,7 @@ export async function readBackup(context: common.UIAbilityContext, local: AppDat
   const openID = await huaweiAccount.backupOpenID(context);
   const uris = await new picker.DocumentViewPicker(context).select({ maxSelectNumber: 1, fileSuffixFilters: ['Tinybot 备份|.tinybot,.json'] });
   if (!uris.length) { return undefined; }
-  return readBackupFile(context, uris[0], local, openID);
+  return readBackupFile(context, uris[0], local, openID, 'copy');
 }
 export async function readBackupFile(context: common.UIAbilityContext, path: string, local: AppData, authorizedOpenID?: string,
   conflicts: BackupConflictMode = 'skip'): Promise<AppData> {
@@ -297,14 +299,13 @@ export async function readBackupFile(context: common.UIAbilityContext, path: str
       result = await restoreEnvelope(context, local, envelope, archive, importedPanels, importedWorkspaces, preparedFiles, conflicts, report);
     }
     attachBackupRestoreReport(result, report);
-    for (const file of preparedFiles) { file.version = await file.files.removalVersion(file.path); }
     if (keys) { attachBackupKeys(result, keys); }
     attachBackupImport(result, new NativeBackupImport(context, local, keys?.connections, importedPanels, importedWorkspaces, envelope.deviceState, preparedFiles));
     Diagnostics.log('info', 'backup', 'restore_completed', { durationMs: Date.now() - started, newChats: result.threads.length });
     return result;
   } catch (error) {
     Diagnostics.log('error', 'backup', 'restore_failed', { durationMs: Date.now() - started }, error as Error);
-    await rollbackBackupFailure(error as Error, () => rollbackPreparedFiles(preparedFiles.filter((file) => file.version !== undefined)));
+    await rollbackBackupFailure(error as Error, () => rollbackPreparedFiles(preparedFiles));
     throw error as Error;
   } finally { if (archive) { await cleanupBackupArchive(archive.directory); } }
 }
@@ -456,26 +457,31 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
     if ((local.projects || []).some((item) => item.id === project.id)) { await workspace.requireWorkspace(project.workspaceId); }
   }
   const attachmentRoot = context.getApplicationContext().filesDir + '/attachments'; if (!await fs.access(attachmentRoot)) { await fs.mkdir(attachmentRoot); }
-  for (const item of allAttachments(data).filter((item) => !item.original)) { const id = attachmentIds.get(item.id) as string; const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt'); await writePayload(binaries.get(item.id) as string, attachmentRoot + '/' + path, archive); preparedFiles.push({ files: new NativeWorkspaceFiles(attachmentRoot), path: path }); }
+  const attachmentFiles = new NativeWorkspaceFiles(attachmentRoot);
+  for (const item of allAttachments(data).filter((item) => !item.original)) {
+    const id = attachmentIds.get(item.id) as string;
+    const path = id + (item.mime === 'image/jpeg' ? '.jpg' : '.txt');
+    await writePayload(binaries.get(item.id) as string, attachmentRoot + '/' + path, archive);
+    preparedFiles.push({ files: attachmentFiles, path: path, version: await attachmentFiles.removalVersion(path) });
+  }
   for (const id of Array.from(destinations.values())) { await workspace.ensureThread(id); }
-  const importedPaths = new Set<string>();
-  const managedImports = new Map<string, PreparedFile>();
+  const importedFiles = new Map<string, PreparedFile>();
   for (let index = 0; index < envelope.files.length; index++) {
     const item = envelope.files[index];
     const target = destinations.get((legacy ? item.threadId : item.workspaceId) as string);
     if (!target) { continue; }
     const root = workspace.pathFor(target); const parts = item.path.split('/'); let directory = root;
+    const files = new NativeWorkspaceFiles(root);
     const managed = isManagedWorkspaceRecord(item.path) ? ArkDataWorkspace.forRoot(root) : undefined;
     if (managed) {
       if (await managed.read(item.path) !== undefined) { continue; }
       const text = archive ? await fs.readText(archive.files[blobIndex(item.bytes, archive)]) :
         new util.TextDecoder('utf-8', { fatal: true }).decodeToString(new util.Base64Helper().decodeSync(item.bytes));
-      const files = new NativeWorkspaceFiles(root), signal = new Cancellation();
+      const signal = new Cancellation();
       const write = parts[0] === 'life-boards' ? await files.writeLifeBoard(item.path, text, signal, { version: null }) :
         await files.writeLifePanel(item.path, text, signal, { version: null });
       const prepared: PreparedFile = { files: files, path: item.path, version: write.version };
-      preparedFiles.push(prepared); managedImports.set(target + '/' + item.path, prepared);
-      importedPaths.add(target + '/' + item.path);
+      preparedFiles.push(prepared); importedFiles.set(target + '/' + item.path, prepared);
       continue;
     }
     for (const part of parts.slice(0, -1)) {
@@ -489,39 +495,39 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
       if (!stat.isFile() || stat.isSymbolicLink()) { throw new Error(t('备份文件无效。')); }
       continue;
     }
-    importedPaths.add(target + '/' + item.path);
-    preparedFiles.push({ files: new NativeWorkspaceFiles(root), path: item.path });
     if (archive) {
-      await new NativeWorkspaceFiles(root).importFile(archive.files[blobIndex(item.bytes, archive)], item.path, true);
+      await files.importFile(archive.files[blobIndex(item.bytes, archive)], item.path, true);
     } else {
       const temporary = attachmentRoot + '/restore-' + util.generateRandomUUID() + '.bin';
       try {
         await writePayload(item.bytes, temporary);
-        await new NativeWorkspaceFiles(root).importFile(temporary, item.path, true);
+        await files.importFile(temporary, item.path, true);
       } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
     }
+    const prepared: PreparedFile = { files: files, path: item.path, version: await files.removalVersion(item.path) };
+    preparedFiles.push(prepared); importedFiles.set(target + '/' + item.path, prepared);
   }
   // Keep service IDs until SessionService can match them against this device's settings.
   for (const item of envelope.files.filter((item) => /^life-boards\/[^/]+\/board\.json$/.test(item.path))) {
     const destination = destinations.get(item.workspaceId || ''); if (!destination) { continue; }
-    if (!importedPaths.has(destination + '/' + item.path)) { continue; }
-    const files = new NativeWorkspaceFiles(workspace.pathFor(destination)), signal = new Cancellation(), file = await files.read(item.path, signal);
+    const prepared = importedFiles.get(destination + '/' + item.path); if (!prepared) { continue; }
+    const files = prepared.files, signal = new Cancellation(), file = await files.read(item.path, signal);
     const board = parseLifeBoard(file.content, item.path.split('/')[1]);
     board.items.forEach((reference) => { reference.workspaceId = boardWorkspaceMap.get(reference.workspaceId) || reference.workspaceId; });
     if (JSON.stringify(board) !== file.content) {
       const write = await files.writeLifeBoard(item.path, JSON.stringify(board), signal, { version: file.version });
-      const prepared = managedImports.get(destination + '/' + item.path); if (prepared) { prepared.version = write.version; }
+      prepared.version = write.version;
     }
   }
   for (const item of envelope.files.filter((item) => /^life-panels\/[^/]+\/panel\.json$/.test(item.path))) {
     const destination = destinations.get(item.workspaceId || ''); if (!destination) { continue; }
-    if (!importedPaths.has(destination + '/' + item.path)) { continue; }
-    const files = new NativeWorkspaceFiles(workspace.pathFor(destination)), signal = new Cancellation(), file = await files.read(item.path, signal);
+    const prepared = importedFiles.get(destination + '/' + item.path); if (!prepared) { continue; }
+    const files = prepared.files, signal = new Cancellation(), file = await files.read(item.path, signal);
     const panel = parsePanelRecord(file.content, item.path.split('/')[1]), source = panel.definition.source;
     if (source?.type === 'workspace-json' && source.workspaceId !== undefined) { source.workspaceId = boardWorkspaceMap.get(source.workspaceId) || source.workspaceId; }
     if (JSON.stringify(panel) !== file.content) {
       const write = await files.writeLifePanel(item.path, JSON.stringify(panel), signal, { version: file.version });
-      const prepared = managedImports.get(destination + '/' + item.path); if (prepared) { prepared.version = write.version; }
+      prepared.version = write.version;
     }
     importedPanels.push({ workspaceId: destination, path: item.path });
   }
@@ -535,7 +541,7 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
         await workspace.ensureThread(workspaceId);
         const value = binaries.get(item.id) as string;
         const files = new NativeWorkspaceFiles(workspace.pathFor(workspaceId));
-        if (!await fs.access(workspace.pathFor(workspaceId) + '/' + item.path)) { preparedFiles.push({ files: files, path: item.path }); }
+        const existed = await fs.access(workspace.pathFor(workspaceId) + '/' + item.path);
         if (archive) { await files.importFile(archive.files[blobIndex(value, archive)], item.path, true); }
         else {
           const temporary = attachmentRoot + '/restore-' + util.generateRandomUUID() + '.bin';
@@ -544,6 +550,7 @@ async function restoreEnvelope(context: common.UIAbilityContext, local: AppData,
             await files.importFile(temporary, item.path, true);
           } finally { if (await fs.access(temporary)) { await fs.unlink(temporary); } }
         }
+        if (!existed) { preparedFiles.push({ files: files, path: item.path, version: await files.removalVersion(item.path) }); }
         item.workspaceId = workspaceId;
         continue;
       }
