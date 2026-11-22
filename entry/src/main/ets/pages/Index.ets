@@ -657,9 +657,10 @@ struct Index {
   }
 
   private revealChat(): void {
-    this.paths.clear(); this.rootSection = ''; this.setDrawer(false);
+    if (this.paths.size() > 0) { this.paths.clear(); }
+    this.rootSection = ''; this.setDrawer(false);
     // Collapse the phone overlay without disposing retained editors or their drafts.
-    if (!this.workbench().docked) { this.setDetailPane(false); }
+    if (!this.workbench().docked && this.detailPaneOpen) { this.setDetailPane(false); }
   }
 
   private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }

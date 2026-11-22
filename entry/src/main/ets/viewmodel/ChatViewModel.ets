@@ -94,6 +94,7 @@ export class ChatViewModel {
   config: ModelConfig = defaultConfig();
   threads: ThreadViewModel[] = [];
   private readonly threadSearch: ThreadSearchCache = { query: '', archived: false };
+  private readonly threadLists: Map<boolean, ThreadViewModel[]> = new Map();
   active: ThreadViewModel = new ThreadViewModel({ id: '', title: '新对话', updatedAt: 0, messages: [] });
   settings: SettingsViewModel = new SettingsViewModel();
   providerEditor: ProviderEditorViewModel = new ProviderEditorViewModel();
@@ -122,6 +123,7 @@ export class ChatViewModel {
   private project(event: SessionEvent): void {
     const diagnosticMark = Diagnostics.begin();
     try {
+      if (event.data || event.kind === 'thread') { this.threadLists.clear(); }
       if (event.data || event.kind === 'thread' || event.kind === 'message' || event.kind === 'text') {
         this.threadSearch.results = undefined;
       }
@@ -245,9 +247,12 @@ export class ChatViewModel {
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] {
     const search = query.trim();
     const cache = this.threadSearch;
-    if (search && cache.query === search && cache.archived === archived && cache.results) { return cache.results; }
+    const existing = search ? (cache.query === search && cache.archived === archived ? cache.results : undefined) :
+      this.threadLists.get(archived);
+    if (existing) { return existing; }
     const results = matchingThreads(this.threads.filter((thread) => !thread.sideChat), search, archived) as ThreadViewModel[];
     if (search) { cache.query = search; cache.archived = archived; cache.results = results; }
+    else { this.threadLists.set(archived, results); }
     return results;
   }
 

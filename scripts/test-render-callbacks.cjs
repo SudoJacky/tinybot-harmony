@@ -90,7 +90,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   let sourceReady = false, layoutReady = false;
   let currentRows = [];
   let itemRect = { y: 112, height: 50 };
-  Object.assign(panel, { positionedThreadId: '', followOutput: true,
+  Object.assign(panel, { positionedThreadId: '', transcriptAttached: false, followOutput: true,
     getUIContext: () => ({ postFrameCallback: frame => frames.push(frame) }),
     topInset: 60, panelHeight: 500,
     messageSource: { update(_id, rows, limit) { assert.equal(building, false); sourceReady = true; currentRows = rows.slice(rows.length - Math.min(rows.length, limit)); },
@@ -114,7 +114,10 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   assert.equal(restored[3].extraOffset, -44, 'History insertion preserves the old message position');
   const open = async id => { panel.thread.id = panel.app.active.id = id; panel.syncMessages(); await drain(); };
   panel.app.teams = [{ ownerMessageId: '' }];
-  await open('with-team'); render(); assert.deepEqual(jumps.pop(), [120, false, 'end'], 'Include a trailing team card');
+  panel.transcriptAttached = true;
+  await open('with-team'); assert.equal(frames.length, 0);
+  assert.deepEqual(jumps.pop(), [120, false, 'end'], 'An attached List targets the new tail before laying out the previous offset, including a trailing team card');
+  panel.transcriptAttached = false;
   await open('touched'); panel.followOutput = false; render(); assert.equal(jumps.length, 0, 'Touch cancels pending initial positioning');
   panel.app.searchMessageId = 'match'; await open('search'); render(); assert.equal(jumps.length, 0, 'Search owns its initial position');
   panel.app.searchMessageId = ''; await open('late-search'); panel.app.searchMessageId = 'match';

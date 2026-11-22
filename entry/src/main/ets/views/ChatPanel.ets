@@ -116,6 +116,7 @@ export struct ChatPanel {
   private messageSource: MessageListSource = new MessageListSource();
   private messageSyncRevision: number = 0;
   private positionedThreadId: string = '';
+  private transcriptAttached: boolean = false;
   private earlierAnchor?: HistoryPageAnchor;
 
   private loadEarlierMessages(): void {
@@ -135,6 +136,7 @@ export struct ChatPanel {
     const revision = ++this.messageSyncRevision;
     this.afterRender(() => {
       if (revision !== this.messageSyncRevision || this.thread.id !== this.app.active.id) { return; }
+      const attached = this.transcriptAttached && !!this.positionedThreadId && this.messageSource.totalCount() > 0;
       this.messageSource.update(this.thread.id, this.thread.messages, this.app.visibleMessageCount);
       const visibleCount = this.messageSource.totalCount();
       const anchor = this.earlierAnchor;
@@ -164,6 +166,12 @@ export struct ChatPanel {
       this.inspectingOutput = false;
       this.followOutput = !this.app.searchMessageId;
       if (visibleCount === 0 || this.app.searchMessageId) { return; }
+      if (attached) {
+        // Replace the previous transcript's scroll offset before laying out the new data.
+        if (Diagnostics.recording) { Diagnostics.event('scroll.open', { rows: visibleCount }); }
+        this.scrollToLatest(false);
+        return;
+      }
       const threadId = this.thread.id;
       const lifecycle = this.lifecycle;
       // LazyForEach has not mounted the tail yet, so its area callback cannot initiate this jump.
@@ -374,6 +382,7 @@ export struct ChatPanel {
   aboutToDisappear(): void {
     this.lifecycle++;
     this.composerMounted = false;
+    this.transcriptAttached = false;
     this.composerEditRevision++; this.composerSelectionRevision++;
     this.focusOwner++;
     this.cancelPlusAction();
@@ -1132,6 +1141,8 @@ export struct ChatPanel {
       .scrollBar(this.desktop ? BarState.Auto : BarState.Off)
       .edgeEffect(this.desktop ? EdgeEffect.None : EdgeEffect.Spring)
       .cachedCount(1).maintainVisibleContentPosition(true)
+      .onAppear(() => { this.transcriptAttached = true; })
+      .onDisAppear(() => { this.transcriptAttached = false; })
       .onScrollStart(() => this.setScrollActivity(true))
       .onScrollStop(() => this.stopScrollActivity())
       .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.followOutput = false; } })
