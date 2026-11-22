@@ -32,7 +32,8 @@ function page() {
     flushDraft: async () => page.events.push('saved'),
     newThread: async project => { page.events.push(['new', project]); page.app.active.id = 'new'; return true; }
   };
-  page.paths = { clear: () => page.events.push('navigation') };
+  let pathCount = 1;
+  page.paths = { size: () => pathCount, clear: () => { pathCount = 0; page.events.push('navigation'); } };
   page.setDrawer = value => page.events.push(['drawer', value]);
   page.detailPaneOpen = true; page.workspaceOpen = true; page.editorDraft = 'Unsaved text';
   page.workbench = () => ({ docked: false });

@@ -4,7 +4,7 @@
 
 ## 版本与产物
 
-当前版本线：`1.3.3` / `versionCode=1003003`，包名 `com.sudojacky.tinybot`，设备类型 `phone`、`tablet`、`2in1`，最低 HarmonyOS 6.0.0（API 20）、目标 API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
+当前版本线：`1.3.4` / `versionCode=1003004`，包名 `com.sudojacky.tinybot`，设备类型 `phone`、`tablet`、`2in1`，最低 HarmonyOS 6.0.0（API 20）、目标 API 26，发布包仅 `arm64-v8a`（模拟器使用单独构建的调试包，不随正式包分发）。
 
 产物检查必须核对真实 HAP/APP 的 `minAPIVersion=60000020`、`targetAPIVersion=260000026`、版本号与 ABI，不能只检查模板文字。API 20 与 API 26 使用同一个包，发布说明必须同时写明两套系统的能力差异（沉浸光感材质、PDF 文字提取）。沉浸光感还需设备支持，API 26 本身不能证明材质可用。
 
