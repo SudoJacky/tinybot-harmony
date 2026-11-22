@@ -2,15 +2,16 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const root = path.resolve(__dirname, '..');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
-function load(name) {
+function load(name, modules = {}) {
   const file = path.join(root, 'entry/src/main/ets', name + '.ets'), exports = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
-  }).outputText, { exports, require: id => load(path.posix.join(path.posix.dirname(name), id)) });
+  }).outputText, { exports, setTimeout, clearTimeout,
+    require: id => modules[id] || load(path.posix.join(path.posix.dirname(name), id), modules) });
   return exports;
 }
 const { markdownSpans, markdownBlocks, MarkdownDocument } = load('model/Markdown');
-const { hasMath, mathHost } = load('model/MathContent');
+const { hasMath } = load('model/MathContent');
 const plain = value => JSON.parse(JSON.stringify(value));
 const math = text => plain(markdownSpans(text).filter(span => span.kind === 'math').map(span => span.text));
 assert.deepEqual(math('质能 $E=mc^2$，以及 \\(a^2+b^2=c^2\\)。'), ['E=mc^2', 'a^2+b^2=c^2']);
@@ -37,17 +38,91 @@ for (const source of ['$$x^2$$', '\\[x^2\\]', '$$\n\\frac{a}{b}\n$$', '\\[\n\\be
   }
 }
 assert.equal(markdownBlocks('$$\nx\ny\nz')[0].kind, 'math-pending');
-const assets = path.join(root, 'entry/src/main/resources/rawfile/math');
-const katex = require(path.join(assets, 'katex.min.js'));
-for (const tex of ['E=mc^2', '\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}', '\\sum_{n=1}^{\\infty}\\frac{1}{n^2}=\\frac{\\pi^2}{6}', '\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}']) {
-  const html = katex.renderToString(tex, { displayMode: true, trust: false });
-  assert.match(html, /katex-html/); assert.match(html, /<math/);
+async function checkTypesetting() {
+  const { typesetMath } = await import('../entry/src/main/ets/workers/MathEngine.js');
+  const examples = ['E=mc^2', '\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}', '\\sum_{n=1}^{\\infty}\\frac{1}{n^2}=\\frac{\\pi^2}{6}',
+    '\\begin{pmatrix}a&b\\\\c&d\\end{pmatrix}', '\\text{当 }x\\ge 0'];
+  for (const tex of examples) {
+    for (const display of [false, true]) {
+      const { svg, width, height, descent } = typesetMath(tex, display, '#123456');
+      assert.match(svg, /^<svg .*viewBox=/);
+      assert.match(svg, /<path /);
+      assert.match(svg, /fill="#123456"/);
+      assert.ok(width > 0 && height > 0 && Number.isFinite(descent));
+      assert.doesNotMatch(svg, /<script|<foreignObject|<use| href=/);
+    }
+  }
+  assert.ok(typesetMath('\\frac{a}{b}', true, '#000000').height > typesetMath('\\frac{a}{b}', false, '#000000').height);
+  const numbered = typesetMath('\\begin{align}a&=1\\tag{1}\\\\b&=2\\tag{2}\\end{align}', true, '#000000');
+  assert.match(numbered.svg, /data-labels="true"/);
+  assert.equal((numbered.svg.match(/<svg/g) || []).length, 1, 'equation numbers share the image viewBox');
+  assert.match(typesetMath('x\\coloneqq 1', false, '#000000').svg, /<path /);
+  assert.throws(() => typesetMath('\\frac{a}{', true, '#000000'));
+  assert.throws(() => typesetMath('\\href{https://example.com}{x}', false, '#000000'));
+  assert.throws(() => typesetMath('\\require{html}x', false, '#000000'));
+  typesetMath('\\newcommand{\\tmp}{x}\\tmp', false, '#000000');
+  assert.throws(() => typesetMath('\\tmp', false, '#000000'), 'macro definitions must stay inside the source formula');
 }
-const css = fs.readFileSync(path.join(assets, 'katex.min.css'), 'utf8');
-assert.ok((css.match(/@font-face/g) || []).length > 10, 'all font-face rules must survive bundling');
-assert.match(css, /\.katex\{/);
-assert.ok([...css.matchAll(/url\(([^)]+)\)/g)].every(match => match[1].startsWith('data:font/woff2;base64,')));
-const host = mathHost(fs.readFileSync(path.join(assets, 'katex.min.js'), 'utf8'), css, fs.readFileSync(path.join(assets, 'host.js'), 'utf8'));
-assert.match(host, /Content-Security-Policy/);
-assert.doesNotMatch(host, /<script[^>]+src=/);
-console.log('PASS formula delimiters, currency/escapes/code/links, display matrices, every stream boundary/replacement, offline KaTeX/fonts');
+async function checkWorkerCache() {
+  const posts = [];
+  const removed = [];
+  let thread;
+  class ThreadWorker {
+    constructor() { thread = this; }
+    postMessage(job) { posts.push(job); }
+    terminate() {}
+    finish(bytes = 32) { this.onmessage({ data: { bytes, width: 2, height: 1, descent: 0.2 } }); }
+  }
+  const fileIo = { access: async () => false, mkdir: async () => {}, unlink: async file => removed.push(file) };
+  const { acquireMath, forgetMissingMath } = load('services/MathResources', {
+    '@kit.ArkTS': { worker: { ThreadWorker } },
+    '@kit.CoreFileKit': { fileIo },
+    '../model/Diagnostics': { Diagnostics: { log: () => {} } },
+  });
+  const first = acquireMath('/cache', 'a', false, '#000000');
+  const same = acquireMath('/cache', 'a', false, '#000000');
+  const offscreen = acquireMath('/cache', 'b', false, '#000000');
+  const cancelled = assert.rejects(offscreen.result, /cancelled/);
+  offscreen.release();
+  await cancelled;
+  await new Promise(setImmediate);
+  assert.deepEqual(posts.map(job => job.tex), ['a']);
+  thread.finish();
+  assert.equal((await first.result).uri, (await same.result).uri);
+  first.release(); same.release();
+  const reused = acquireMath('/cache', 'a', false, '#000000');
+  assert.equal((await reused.result).uri, (await first.result).uri);
+  assert.equal(posts.length, 1, 'returning to a rendered formula reuses the image');
+  reused.release();
+  assert.equal(await forgetMissingMath('a', false, '#000000', (await reused.result).uri), true);
+  const regenerated = acquireMath('/cache', 'a', false, '#000000');
+  thread.finish();
+  assert.notEqual((await regenerated.result).uri, (await reused.result).uri);
+  regenerated.release();
+  const display = acquireMath('/cache', 'a', true, '#000000');
+  const dark = acquireMath('/cache', 'a', true, '#ffffff');
+  assert.equal(posts.at(-1).display, true);
+  thread.finish();
+  assert.equal(posts.at(-1).color, '#ffffff');
+  thread.finish();
+  assert.notEqual((await display.result).uri, (await dark.result).uri);
+  display.release(); dark.release();
+
+  fileIo.access = async () => true;
+  const pinned = acquireMath('/cache', 'visible', false, '#000000');
+  thread.finish();
+  const pinnedPath = (await pinned.result).uri.slice('file://'.length);
+  for (let i = 0; i < 36; i++) {
+    const unused = acquireMath('/cache', 'x_' + i, false, '#000000');
+    thread.finish(256 * 1024);
+    await unused.result;
+    unused.release();
+  }
+  assert.ok(removed.length >= 4, 'cache evicts old files after exceeding the byte budget');
+  assert.ok(!removed.includes(pinnedPath), 'visible images remain pinned while the view uses them');
+  pinned.release();
+}
+
+checkTypesetting().then(checkWorkerCache).then(() => {
+  console.log('PASS Markdown formulas, offline SVG, isolated macros, Worker deduplication, cancellation and cache eviction');
+}).catch(error => { console.error(error); process.exitCode = 1; });
