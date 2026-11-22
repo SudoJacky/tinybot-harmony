@@ -354,7 +354,7 @@ const SEGMENT_TRACK_INSET: number = 3;
 // Shared rubber motion; each surface keeps its existing dimensions and styling.
 @Component
 export struct Segmented {
-  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @StorageProp('tinybot.appearance.style') @Watch('motionChanged') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('resetGeometry') options: string[] = [];
   @Prop @Watch('syncSelection') selected: number = 0;
   @State private segmentWidth: number = 0;
@@ -365,6 +365,9 @@ export struct Segmented {
   trackRadius: number = Radius.sm;
   gap: number = 0;
   thumbShadow: boolean = true;
+  accentThumb: boolean = false;
+  trackFill: ResourceColor = $r('app.color.surface_variant');
+  trackOutline?: ResourceColor;
   optionIds: string[] = [];
   compIdPrefix: string = 'segment';
   onSelect: (index: number) => void = () => {};
@@ -404,6 +407,11 @@ export struct Segmented {
     if (this.segmentWidth <= 0) return;
     const from: SegmentFrame = { left: this.thumbLeft, right: this.thumbRight };
     const target = this.target();
+    if (this.appearance.effectStrength === 0) {
+      this.thumbLeft = target.left;
+      this.thumbRight = target.right;
+      return;
+    }
     if (Math.abs(from.left - target.left) + Math.abs(from.right - target.right) < 0.01) return;
     const generation = this.generation;
     const animator = this.getUIContext().createAnimator({
@@ -426,25 +434,31 @@ export struct Segmented {
     animator.play();
   }
 
+  private motionChanged(): void {
+    if (this.appearance.effectStrength === 0 && this.animator) { this.syncSelection(); }
+  }
+
   build() {
     Stack({ alignContent: Alignment.Start }) {
       if (this.segmentWidth > 0) {
-        Column().width(this.thumbRight - this.thumbLeft).height('100%')
-          .borderRadius(this.trackRadius - SEGMENT_TRACK_INSET)
-          .backgroundColor($r('app.color.surface'))
+        Column().id(this.compIdPrefix + '-selection').width(this.thumbRight - this.thumbLeft).height('100%')
+          .border({ radius: this.trackRadius - SEGMENT_TRACK_INSET, width: this.accentThumb ? 1 : 0,
+            color: this.accentThumb ? this.appearance.accentOutline : Color.Transparent })
+          .backgroundColor(this.accentThumb ? this.appearance.accentContainer : $r('app.color.surface'))
           .shadow({ radius: this.thumbShadow ? 4 : 0, color: this.thumbShadow ? '#14000000' : '#00000000', offsetY: 1 })
           .translate({ x: this.thumbLeft }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       }
       Row({ space: this.gap }) {
-        ForEach(this.options, (label: string, index: number) => {
-          Text(label).fontFamily(this.appearance.fontFamily).id(this.optionIds[index] || this.compIdPrefix + '-' + index)
+        ForEach(this.options.map((_label: string, index: number): number => index), (index: number) => {
+          Text(this.options[index]).fontFamily(this.appearance.fontFamily).id(this.optionIds[index] || this.compIdPrefix + '-' + index)
             .fontSize(this.labelSize).layoutWeight(1).height('100%').textAlign(TextAlign.Center)
             .fontWeight(index === this.selected ? FontWeight.Medium : FontWeight.Normal)
-            .fontColor(index === this.selected ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
-            .animation({ duration: Motion.fast, curve: Motion.standard })
-            .accessibilityText(label + (index === this.selected ? t("，已选中") : ''))
+            .fontColor(index === this.selected ?
+              this.accentThumb ? this.appearance.onAccentContainer : $r('app.color.text_primary') : $r('app.color.text_secondary'))
+            .animation({ duration: this.appearance.effectStrength > 0 ? Motion.fast : 0, curve: Motion.standard })
+            .accessibilityText(this.options[index]).accessibilitySelected(index === this.selected)
             .onClick(() => this.onSelect(index))
-        }, (label: string) => label)
+        }, (index: number) => String(index))
       }.width('100%').height('100%')
       .onAreaChange((_old: Area, next: Area) => {
         const width = next.width as number;
@@ -454,7 +468,8 @@ export struct Segmented {
         }
       })
     }.width('100%').height(this.controlHeight).padding(SEGMENT_TRACK_INSET).borderRadius(this.trackRadius)
-    .backgroundColor($r('app.color.surface_variant'))
+    .backgroundColor(this.trackFill)
+    .border({ width: this.trackOutline === undefined ? 0 : 1, color: this.trackOutline, radius: this.trackRadius })
   }
 }
 

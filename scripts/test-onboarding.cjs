@@ -23,17 +23,13 @@ function load(relative) {
   } }, { filename: file });
   return exports;
 }
-const model = load('model/Onboarding'), locale = load('model/I18n');
-assert.deepEqual(JSON.parse(JSON.stringify(model.onboardingProviders())), [
-  { preset: 'deepseek', name: 'DeepSeek' }, { preset: 'zai', name: 'Z.ai' }, { preset: 'ollama', name: 'Ollama' }
-]);
 const Preferences = load('services/OnboardingPreferences').OnboardingPreferences;
 const fresh = () => ({ config: { configured: false }, threads: [], projects: [], providerProfiles: [] });
+const ready = { ...fresh(), config: { configured: true }, providerProfiles: [{ id: 'saved' }] };
 let preferences = new Preferences({});
-assert.equal(preferences.shouldShow(fresh()), true);
+assert.equal(preferences.resumeStep(fresh()), 1);
 for (const data of [
-  { ...fresh(), config: { configured: true } }, { ...fresh(), providerProfiles: [{ id: 'saved' }] },
-  { ...fresh(), projects: [{ id: 'project' }] },
+  ready, { ...fresh(), providerProfiles: [{ id: 'saved' }] }, { ...fresh(), projects: [{ id: 'project' }] },
   { ...fresh(), threads: [{ messages: [{ content: 'saved chat' }] }] },
   { ...fresh(), threads: [{ messages: [], draft: 'unsent thought' }] },
   { ...fresh(), threads: [{ messages: [], attachments: [{ id: 'photo' }] }] },
@@ -41,14 +37,35 @@ for (const data of [
   ...['archived', 'pinned', 'titleEdited', 'parentThreadId'].map(key => ({ ...fresh(), threads: [{ messages: [], [key]: true }] })),
   { ...fresh(), threads: [{ messages: [], references: [{ threadId: 'source' }] }] },
   { ...fresh(), threads: [{ messages: [] }, { messages: [] }] }
-]) assert.equal(preferences.shouldShow(data), false, 'Returning users and unsent work must not be interrupted');
-failFlush = true; assert.throws(() => preferences.complete(), /preference write failed/);
-assert.equal(preferences.shouldShow(fresh()), true, 'Failed persistence must not silently complete onboarding');
-failFlush = false; preferences.complete(); working = new Map(disk); preferences = new Preferences({});
-assert.equal(preferences.shouldShow(fresh()), false, 'Completion survives a native preference reload');
-locale.setLocale('en'); assert.equal(model.onboardingTasks()[0].title, 'Untangle an idea');
-locale.setLocale('zh-CN'); assert.equal(model.onboardingTasks()[0].title, '理清一个想法');
-console.log('PASS first-use eligibility, returning-user/draft protection, durable skip/completion, failed-write rollback and localized task drafts');
+]) assert.equal(preferences.resumeStep(data), 0, 'Returning users and unsent work must be left alone');
+preferences.reach(3);
+assert.equal(preferences.resumeStep(ready), 0, 'A manual walkthrough does not enroll returning users');
+failFlush = true;
+assert.throws(() => preferences.begin(), /preference write failed/);
+assert.equal(preferences.resumeStep(ready), 0);
+failFlush = false;
+preferences.begin();
+preferences.reach(2);
+failFlush = true;
+assert.throws(() => preferences.reach(3), /preference write failed/);
+assert.equal(preferences.resumeStep(fresh()), 2);
+failFlush = false;
+preferences.reach(4);
+preferences.reach(2);
+working = new Map(disk);
+preferences = new Preferences({});
+assert.equal(preferences.resumeStep(ready), 4, 'Restart after provider save keeps the completion page pending');
+failFlush = true;
+assert.throws(() => preferences.complete(), /preference write failed/);
+assert.equal(preferences.resumeStep(ready), 4);
+failFlush = false;
+preferences.complete();
+working = new Map(disk);
+assert.equal(new Preferences({}).resumeStep(fresh()), 0);
+working = new Map([['onboardingComplete', true]]);
+assert.equal(new Preferences({}).resumeStep(fresh()), 0, 'Existing completed installations upgrade without prompting');
+console.log('PASS first-use and upgrade gating, durable checkpoints, provider-ready resumption, and failed-write rollback');
+
 
 function probe(relative, name, methods, globals = {}) {
   const source = path.join(root, 'entry/src/main/ets', relative + '.ets');
@@ -229,439 +246,304 @@ assert.equal(peeks.size, 0); assert.equal(shy.peekProgress, 0);
 console.log('PASS service gaze, cover-before-peek timing, blur/hidden/stale cancellation, reduced motion and disposal');
 
 function page() {
-  const events = [], paths = [];
-  const view = Object.assign(probe('pages/Index', 'Index', ['offerOnboarding', 'finishOnboarding', 'openSupport', 'connectOnboardingProvider'],
-    { ShareInbox: { peek: () => undefined } }), {
-    onboardingChecked: false, onboardingDraftThread: '', onboardingFinishing: false, onboardingActive: true, receiving: false, launching: false,
-    app: { ready: true, canNavigate: true, busy: false, saveError: '', error: '', draft: 'Keep my draft',
-      active: { id: 'old', messages: [{ id: 'old-message' }], attachments: [], projectId: 'project' },
-      exportSnapshot: fresh, flushDraft: async () => events.push('flush'),
-      newThread: async project => { events.push(['new', project]); view.app.active = { id: 'new', messages: [], attachments: [] }; return true; },
-      setDraft: value => { view.app.draft = value; events.push(['draft', value]); },
-      send: () => { throw Error('Onboarding must never send a model request'); }
-    },
-    onboardingPreferences: () => ({ shouldShow: data => model.isOnboardingCandidate(data), complete() { events.push('complete'); } }),
-    paths: { size: () => paths.length, pushPath: value => paths.push(value), pop: () => paths.pop(), clear: () => { paths.length = 0; events.push('clear'); } },
-    setDrawer: value => events.push(['drawer', value]), openSettings: () => events.push('settings'), events, pathEntries: paths
-  });
-  return view;
-}
-(async () => {
-  let view = page(); view.offerOnboarding(); view.offerOnboarding(); assert.equal(view.pathEntries.length, 1);
-  view = page(); view.app.exportSnapshot = () => ({ ...fresh(), providerProfiles: [{ id: 'saved' }] }); view.offerOnboarding();
-  assert.equal(view.pathEntries.length, 0);
-  view = page(); view.receiving = true; view.offerOnboarding(); assert.equal(view.pathEntries.length, 0);
-  view = page(); await view.openSupport('guide'); assert.equal(view.pathEntries[0].name, 'onboarding');
-  view = page(); await view.finishOnboarding('start', 'Try this task');
-  assert.deepEqual(view.events.slice(0, 4), ['flush', ['new', ''], ['draft', 'Try this task'], 'flush']);
-  assert.ok(view.events.includes('complete')); assert.equal(view.app.active.id, 'new');
-  view = page(); view.app.busy = true; await view.finishOnboarding('skip', '');
-  assert.deepEqual(view.events, ['complete']); assert.equal(view.app.draft, 'Keep my draft');
-  view = page(); view.app.saveError = 'draft write failed';
-  await assert.rejects(view.finishOnboarding('start', 'Task'), /draft write failed/); assert.deepEqual(view.events, ['flush']);
-  view = page(); view.onboardingPreferences = () => ({ complete() { throw Error('preference write failed'); } });
-  await assert.rejects(view.finishOnboarding('connect', 'Task'), /preference write failed/);
-  assert.equal(view.events.includes('settings'), false); assert.equal(view.events.includes('clear'), false);
-  await assert.rejects(view.finishOnboarding('connect', 'Task'), /preference write failed/);
-  assert.equal(view.events.filter(value => Array.isArray(value) && value[0] === 'new').length, 1, 'Retry must reuse the prepared draft');
-  view = page(); await view.finishOnboarding('connect', 'Task'); assert.equal(view.events.at(-1), 'settings');
-  view = page(); view.app.beginProvider = (preset, id) => { view.events.push(['provider', preset, id]); return true; };
-  view.connectOnboardingProvider('deepseek');
-  assert.equal(view.pathEntries[0].name, 'provider'); assert.equal(view.events.includes('complete'), false,
-    'Configuring a provider must return to the still-incomplete onboarding route');
-  view.connectOnboardingProvider('openai'); assert.equal(view.pathEntries.length, 1, 'Repeated taps cannot stack provider editors');
-  view = page(); view.app.beginProvider = () => false;
-  assert.throws(() => view.connectOnboardingProvider('deepseek'), /请先完成/); assert.equal(view.pathEntries.length, 0);
-  for (const extra of [{ references: [{ threadId: 'source' }] }, { pendingInputs: [{ text: 'queued' }] }, { archived: true }]) {
-    view = page(); view.app.draft = ''; view.app.active = { id: 'old', messages: [], attachments: [], ...extra };
-    await view.finishOnboarding('start', 'Task');
-    assert.equal(view.app.active.id, 'new', 'Even an empty-looking chat must go through the session new-chat policy');
-  }
-  view = page(); view.app.newThread = async () => false;
-  await assert.rejects(view.finishOnboarding('start', 'Task'), /无法创建新对话/);
-  assert.equal(view.events.includes('complete'), false); assert.equal(view.onboardingFinishing, false);
-  view = page(); let releaseSave;
-  view.app.flushDraft = () => new Promise(done => { releaseSave = done; });
-  const saving = view.finishOnboarding('start', 'Task');
-  await view.finishOnboarding('skip', ''); assert.equal(view.events.includes('complete'), false, 'System back must not finish while a draft is saving');
-  view.app.flushDraft = async () => {}; releaseSave(); await saving;
-  assert.equal(view.events.filter(value => value === 'complete').length, 1); assert.equal(view.onboardingFinishing, false);
-  console.log('PASS emitted first-run/replay routing, duplicate-open guard, shared-intent protection, draft preservation, explicit connect and failure-safe retry without model calls');
-
-  let resolve, calls = 0;
-  const scheduled = new Map(), delays = new Map(), prepared = [], focusedFields = [], focusFrames = []; let timerId = 0, providerSaves = 0, scrolls = 0;
-  let keyboardMode = 7;
-  const keyboardModes = [];
-  const panel = Object.assign(probe('views/OnboardingPanel', 'OnboardingPanel',
-    ['aboutToAppear', 'aboutToDisappear', 'activeChanged', 'foregroundChanged', 'connectionChanged', 'animate',
-      'cancelWake', 'cancelTyping', 'cancelFeedback', 'sayGoodbye', 'actorMood', 'greetActor', 'wake', 'continueWake', 'finish', 'move', 'selectTask', 'onMessageChange', 'currentPrompt',
-      'primaryEnabled', 'primaryAvailable', 'primaryLabel', 'primaryAction', 'connectSelected', 'connectProvider', 'focusConnectionField', 'settleTransition',
-      'selectProvider', 'providerSelectionChanged', 'taskSelectionChanged', 'signInAccount',
-      'providerLookX', 'connectionDiameter', 'setConnectionFocus', 'endConnectionEditing', 'keepConnectionInputVisible'],
-    { onboardingTasks: model.onboardingTasks, onboardingProviders: model.onboardingProviders, Diagnostics: { log() {} },
-      Motion: { fast: 160, medium: 220, standard: {} }, Edge: { Top: 0, Bottom: 1 }, KeyboardAvoidMode: { NONE: 4 },
-      setTimeout: (callback, delay) => { const id = ++timerId; scheduled.set(id, callback); delays.set(id, delay); return id; },
-      clearTimeout: id => scheduled.delete(id) }), {
-    hasWoken: false, typing: false, typingRevision: 0, typingTimer: -1, farewell: false, farewellTimer: -1,
-    saving: false, busy: false, step: 0, selectedTask: 1, message: model.onboardingTasks()[1].prompt,
-    active: true, foreground: true, configured: false, transitioning: false, transitionRevision: 0, focusRequest: 0,
-    providerEditing: false, connectionAttempted: false, keyFocused: false, connectionEditing: false, focusedConnectionField: '', bodyHeight: 560,
-    keyboardViewport: { keyboardHeight: 0, bottom: 0, observe() {}, dispose() {} }, previousKeyboardMode: undefined,
-    connectionScroller: { scrollBy: () => { scrolls++; }, scrollTo() {} },
-    app: { providerProfiles: [], active: {}, error: '',
-      providerEditor: { apiKey: '', error: '', fieldError: () => '', reset(profile) { this.id = profile.id; this.apiKey = ''; } },
-      beginProvider(preset, id) {
-        prepared.push({ preset, id }); this.providerEditor.apiKey = ''; return true;
-      },
-      async saveProvider() {
-        providerSaves++;
-        if (!this.providerProfiles.some(profile => profile.presetId === panel.selectedPreset)) {
-          this.providerProfiles.push({ id: 'saved-' + panel.selectedPreset, presetId: panel.selectedPreset, models: ['example-model'] });
-        }
-        panel.configured = true; panel.connectedPreset = panel.selectedPreset; panel.connectionChanged(); return true;
-      },
-      async selectModel(providerId, modelId) { this.active.modelRef = { providerId, modelId }; return true; }
-    },
-    connectedPreset: '', selectedPreset: '', waking: false, wakeReady: false, wakeTimer: -1, wakeRevision: 0,
-    agreed: false, account: { signedIn: false, ready: true, busy: false, error: '', signIn: async () => {
-      panel.account.signedIn = true;
-    } },
-    appearance: { effectStrength: 1 },
-    getUIContext: () => ({ animateTo: (options, action) => { action(); options.onFinish?.(); }, postFrameCallback: frame => focusFrames.push(frame),
-      getKeyboardAvoidMode: () => keyboardMode,
-      setKeyboardAvoidMode: mode => { keyboardMode = mode; keyboardModes.push(mode); },
-      px2vp: value => value, vp2px: value => value,
-      getComponentUtils: () => ({ getRectangleById: id => id === 'onboarding-inline-key' ?
-        { windowOffset: { y: 200 }, size: { height: 44 } } : id === 'onboarding-panel' ?
-        { windowOffset: { y: 0 }, size: { height: 800 } } : { windowOffset: { y: 100 }, size: { height: 100 } } }),
-      getFocusController: () => ({ requestFocus: id => focusedFields.push(id), clearFocus() {} }) }),
-    onFinish: () => { calls++; return new Promise(done => { resolve = done; }); }
-  });
-  panel.aboutToAppear(); panel.move(-1); assert.equal(panel.step, 0); panel.move(9); assert.equal(panel.step, 4);
-  panel.step = 0;
-  assert.equal(panel.primaryLabel(), '华为账号登录');
-  assert.equal(panel.primaryAvailable(), false, 'Consent is required before native sign-in');
-  panel.agreed = true; assert.equal(panel.primaryAvailable(), true);
-  await panel.signInAccount(); assert.equal(panel.account.signedIn, true);
-  assert.equal(panel.primaryLabel(), '继续', 'A verified account can continue past the first step');
-  panel.account.signedIn = false; panel.account.ready = false; await panel.signInAccount();
-  assert.match(panel.error, /确认登录状态/);
-  panel.account.ready = true; panel.agreed = false; await panel.signInAccount();
-  assert.match(panel.error, /同意/);
-  panel.agreed = true; panel.account.busy = true; assert.equal(panel.primaryAvailable(), false);
-  assert.equal(panel.primaryLabel(), '正在登录…');
-  panel.account.busy = false;
-  panel.account.signedIn = false; panel.agreed = false; panel.step = 0; panel.move(1);
-  assert.equal(panel.step, 1, 'Sign-in can be deferred without leaving onboarding');
-  panel.account.signedIn = true; panel.agreed = true; panel.step = 0; panel.primaryAction(); assert.equal(panel.step, 1);
-  const finishing = panel.finish('start'); await panel.finish('skip'); assert.equal(calls, 1);
-  resolve(); await finishing; assert.equal(panel.saving, false);
-  panel.onFinish = async () => { throw Error('save failed'); }; await panel.finish('connect');
-  assert.equal(panel.error, 'save failed'); assert.equal(panel.saving, false);
-  panel.step = 1; panel.waking = false; panel.wake(); panel.wake(); assert.equal(scheduled.size, 1);
-  assert.equal(delays.get(panel.wakeTimer), 1800, 'The wake must settle before the introduction opens');
-  const coveredWake = scheduled.get(panel.wakeTimer);
-  panel.active = false; panel.activeChanged(); assert.equal(scheduled.size, 0); assert.equal(panel.step, 1);
-  panel.active = true; assert.equal(panel.wakeReady, true); panel.continueWake(); assert.equal(panel.step, 2);
-  panel.move(-1); assert.equal(panel.wakeReady, true); panel.wake(); assert.equal(scheduled.size, 0, 'Returning to an awake Tiny does not restart the wake');
-  panel.hasWoken = false; panel.wake(); coveredWake();
-  assert.equal(panel.step, 1); assert.equal(scheduled.size, 1, 'An old wake callback must not navigate or clear the new timer');
-  panel.foreground = false; panel.foregroundChanged();
-  assert.equal(scheduled.size, 0); assert.equal(panel.step, 1);
-  panel.foreground = true; panel.continueWake(); panel.move(-1); panel.hasWoken = false; panel.wake();
-  const wakeId = panel.wakeTimer, completedWake = scheduled.get(wakeId);
-  scheduled.delete(wakeId); completedWake();
-  assert.equal(panel.step, 2, 'A completed foreground wake opens the introduction');
-  assert.equal(panel.waking, false); assert.equal(scheduled.size, 0);
-  panel.move(-1); panel.hasWoken = false; panel.wake();
-  const detachedWake = scheduled.values().next().value; panel.aboutToDisappear(); detachedWake();
-  assert.equal(scheduled.size, 0, 'Leaving the panel must clear pending wake navigation');
-  assert.equal(panel.step, 1, 'A detached wake callback must not navigate');
-  panel.aboutToAppear();
-  panel.step = 4; panel.selectTask(2); assert.equal(panel.message, model.onboardingTasks()[2].prompt);
-  panel.onMessageChange('  My own first idea  '); assert.equal(panel.selectedTask, -1);
-  assert.equal(panel.currentPrompt(), 'My own first idea'); assert.equal(panel.primaryEnabled(), true);
-  panel.onMessageChange(' '); assert.equal(panel.primaryEnabled(), false);
-  panel.step = 3;
-  panel.providerSelectionChanged('deepseek', true);
-  assert.equal(panel.providerEditing, true); assert.equal(panel.providerLookX(), -5);
-  panel.app.providerEditor.apiKey = 'unsaved-provider-key';
-  panel.providerSelectionChanged('zai', true);
-  assert.equal(panel.app.providerEditor.apiKey, '', 'Switching services resets the previous unsaved key');
-  assert.equal(panel.providerLookX(), 0);
-  panel.providerSelectionChanged('deepseek', false);
-  assert.equal(panel.selectedPreset, 'zai', 'The previous Toggle turning off must not clear the new choice');
-  assert.equal(panel.primaryAvailable(), true);
-  panel.providerSelectionChanged('zai', false);
-  panel.providerSelectionChanged('ollama', true);
-  panel.providerSelectionChanged('zai', false);
-  assert.equal(panel.selectedPreset, 'ollama'); assert.equal(panel.primaryLabel(), '保存服务');
-  assert.equal(panel.providerLookX(), 5); assert.equal(prepared.at(-1).preset, 'ollama');
-  const expandedDiameter = panel.connectionDiameter(); panel.setConnectionFocus('key', true);
-  assert.equal(panel.keyFocused, true); assert.ok(panel.connectionDiameter() < expandedDiameter); assert.equal(scrolls, 1);
-  assert.equal(panel.connectionEditing, true); assert.equal(keyboardMode, 4, 'Key entry overlays the keyboard instead of resizing the whole page');
-  panel.setConnectionFocus('key', true); assert.equal(keyboardModes.length, 1, 'Duplicate focus/edit events cannot overwrite the previous keyboard mode');
-  panel.keyboardViewport.keyboardHeight = 600; panel.keyboardViewport.onKeyboard(true);
-  panel.setConnectionFocus('url', true);
-  assert.equal(panel.keyFocused, false, 'URL editing never covers the eyes or starts peeking');
-  assert.equal(panel.connectionEditing, true); assert.equal(panel.connectionDiameter(), 96);
-  assert.equal(panel.focusedConnectionField, 'url'); assert.equal(keyboardMode, 4);
-  panel.setConnectionFocus('key', false);
-  assert.equal(panel.focusedConnectionField, 'url', 'Late blur from the previous field cannot cancel the new field');
-  panel.setConnectionFocus('key', true); panel.setConnectionFocus('url', false);
-  assert.equal(panel.keyFocused, true); assert.equal(panel.focusedConnectionField, 'key');
-  assert.equal(keyboardModes.length, 1, 'Switching fields keeps the keyboard layout and its original restoration mode');
-  panel.keyboardViewport.keyboardHeight = 0; panel.keyboardViewport.onKeyboard(false);
-  assert.equal(panel.connectionEditing, true); assert.equal(panel.keyFocused, true); assert.equal(keyboardMode, 4,
-    'Switching from URL to secure keyboard can report zero height after the new field starts editing');
-  panel.keyboardViewport.keyboardHeight = 600; panel.keyboardViewport.onKeyboard(true);
-  panel.setConnectionFocus('key', false); assert.equal(panel.keyFocused, false);
-  assert.equal(panel.connectionEditing, true, 'Providers stay hidden while the keyboard is closing');
-  assert.equal(keyboardMode, 4);
-  panel.keyboardViewport.keyboardHeight = 0; panel.keyboardViewport.onKeyboard(false);
-  assert.equal(panel.connectionEditing, false); assert.equal(keyboardMode, 7, 'Closing restores the previous page keyboard mode');
-  panel.setConnectionFocus('url', true);
-  assert.equal(panel.connectionEditing, true); assert.equal(panel.keyFocused, false);
-  panel.keyboardViewport.keyboardHeight = 600; panel.keyboardViewport.onKeyboard(true);
-  panel.keyboardViewport.keyboardHeight = 0; panel.keyboardViewport.onKeyboard(false);
-  panel.setConnectionFocus('url', false);
-  assert.equal(panel.connectionEditing, false); assert.equal(panel.focusedConnectionField, '');
-  assert.equal(keyboardMode, 7, 'Closing the URL keyboard also restores the previous mode');
-  panel.setConnectionFocus('key', true); panel.active = false; panel.activeChanged();
-  assert.equal(panel.connectionEditing, false); assert.equal(keyboardMode, 7, 'Covered routes must not inherit overlay mode');
-  panel.setConnectionFocus('key', true); assert.equal(panel.connectionEditing, false, 'Hidden focus callbacks cannot reclaim keyboard mode');
-  panel.active = true;
-  await panel.connectSelected();
-  assert.equal(providerSaves, 1); assert.equal(panel.providerEditing, false);
-  assert.equal(panel.app.active.modelRef.providerId, 'saved-ollama'); assert.equal(panel.primaryLabel(), '继续');
-  panel.primaryAction(); assert.equal(panel.step, 4); assert.equal(panel.primaryLabel(), '带进聊天');
-  panel.move(-1); assert.equal(panel.step, 3, 'The first-task Back action returns directly to model setup');
-  panel.configured = false;
-  panel.move(1); assert.equal(panel.step, 4, 'Deferring model setup also opens the first task directly');
-  panel.move(-1);
-  panel.providerSelectionChanged('ollama', false);
-  assert.equal(panel.selectedPreset, ''); assert.equal(panel.primaryAvailable(), false);
-  panel.taskSelectionChanged(0, true); panel.taskSelectionChanged(2, true); panel.taskSelectionChanged(0, false);
-  assert.equal(panel.selectedTask, 2); assert.equal(panel.message, model.onboardingTasks()[2].prompt);
-  panel.taskSelectionChanged(2, false);
-  assert.equal(panel.selectedTask, -1); assert.equal(panel.message, model.onboardingTasks()[2].prompt);
-  console.log('PASS choice callback ordering, inline provider save, service gaze, key draft isolation, keyboard layout and task draft preservation');
-  panel.providerSelectionChanged('deepseek', true);
-  const successfulProviderSave = panel.app.saveProvider;
-  panel.app.providerEditor.fieldError = field => field === 'key' ? 'missing key' : '';
-  await panel.connectSelected(); assert.equal(panel.error, 'missing key'); assert.equal(providerSaves, 1);
-  focusFrames.splice(0).forEach(frame => frame.onIdle());
-  assert.equal(focusedFields.at(-1), 'onboarding-inline-key', 'Invalid input must be focused without attempting a save');
-  panel.app.providerEditor.fieldError = () => '';
-  panel.app.providerEditor.error = 'vault failed'; panel.app.saveProvider = async () => false;
-  await panel.connectSelected(); assert.equal(panel.error, 'vault failed');
-  assert.equal(panel.saving, false); assert.equal(panel.providerEditing, true, 'Failed saves retain the inline editor');
-  let releaseProvider, pendingProviderSaves = 0;
-  panel.app.saveProvider = () => { pendingProviderSaves++; return new Promise(resolve => { releaseProvider = () => resolve(false); }); };
-  const pendingProvider = panel.connectSelected(); await panel.connectSelected();
-  assert.equal(pendingProviderSaves, 1); assert.equal(panel.saving, true);
-  releaseProvider(); await pendingProvider; panel.app.saveProvider = successfulProviderSave;
-  await panel.connectSelected(); assert.equal(panel.providerEditing, false);
-  assert.equal(panel.app.active.modelRef.providerId, 'saved-deepseek', 'Saving another service must select its model');
-  panel.providerSelectionChanged('deepseek', true);
-  assert.equal(prepared.at(-1).id, 'saved-deepseek', 'Reopening a saved preset edits it instead of creating duplicates');
-  const previousPrepare = panel.app.beginProvider; panel.app.beginProvider = () => false;
-  panel.providerSelectionChanged('zai', true);
-  assert.equal(panel.selectedPreset, 'deepseek', 'A refused draft reset must not show a stale service editor');
-  panel.app.beginProvider = previousPrepare;
-  let connection;
-  panel.onConnect = preset => { connection = preset; }; panel.connectProvider(''); assert.equal(connection, '');
-  panel.onConnect = () => { throw Error('provider is busy'); }; panel.connectProvider(''); assert.equal(panel.error, 'provider is busy');
-  console.log('PASS emitted step bounds, explicit completion, duplicate-tap guard and visible save failures');
-
-  const pageEnds = [];
-  panel.aboutToAppear(); panel.step = 2;
-  panel.getUIContext = () => ({ animateTo: (options, action) => { action(); pageEnds.push(options.onFinish); } });
-  panel.move(1); panel.move(1);
-  assert.equal(panel.step, 3, 'Repeated clicks during a transition must not skip a scene');
-  assert.equal(panel.transitioning, true); assert.equal(panel.pageDirection, 1);
-  assert.equal(panel.primaryEnabled(), false);
-  assert.equal(panel.primaryAvailable(), true, 'A transition must not flash the primary button into its disabled color');
-  pageEnds.shift()(); assert.equal(panel.transitioning, false);
-  panel.move(-1); assert.equal(panel.pageDirection, -1);
-  const oldEnd = pageEnds.shift();
-  panel.foreground = false; panel.foregroundChanged(); assert.equal(panel.transitioning, false);
-  panel.foreground = true; panel.move(1); oldEnd();
-  assert.equal(panel.transitioning, true, 'A stale callback must not unlock a newer transition');
-  pageEnds.shift()(); assert.equal(panel.transitioning, false);
-  panel.move(-1); const detachedEnd = pageEnds.shift(); panel.aboutToDisappear(); detachedEnd();
-  assert.equal(panel.transitioning, false);
-  panel.aboutToAppear(); panel.appearance.effectStrength = 0; panel.move(1);
-  assert.equal(panel.step, 3); assert.equal(panel.transitioning, false); assert.equal(pageEnds.length, 0);
-  panel.active = false; panel.move(1); assert.equal(panel.step, 3, 'Covered pages must not navigate');
-  console.log('PASS directional transitions, duplicate navigation, stable action feedback, stale/background/disposal callbacks and motion-off navigation');
-
-  const introTimers = new Map(); let introTimerId = 0;
-  const intro = Object.assign(probe('views/OnboardingIntroduction', 'OnboardingIntroduction',
-    ['aboutToAppear', 'aboutToDisappear', 'stopPlayback', 'visibilityChanged', 'syncPlayback', 'actorDiameter'],
-    { onboardingIntroduction: model.onboardingIntroduction, Motion: { enter: {} },
-      setTimeout: (callback, delay) => { const id = ++introTimerId; introTimers.set(id, { callback, delay }); return id; },
-      clearTimeout: id => introTimers.delete(id) }), {
-    mounted: false, visible: false, active: true, foreground: true, appearance: { effectStrength: 1 },
-    line: 0, spokenLine: -1, onSpeak() {}, timer: -1, revision: 0, bodyHeight: 560, speechHeight: 88,
-    getUIContext: () => ({ animateTo: (_, action) => action() })
-  });
-  const advanceIntro = () => {
-    const pending = introTimers.get(intro.timer); introTimers.delete(intro.timer); pending.callback();
+  const events = [];
+  const paths = [];
+  const store = {
+    resumeStep: () => 1,
+    begin: () => events.push('begin'),
+    reach: step => events.push(step),
+    complete: () => events.push('complete')
   };
-  intro.aboutToAppear(); intro.syncPlayback(); assert.equal(introTimers.size, 0);
-  intro.visibilityChanged(1); assert.equal(introTimers.size, 1);
-  assert.equal(introTimers.get(intro.timer).delay, 3200, 'Each spoken line needs reading time');
-  advanceIntro(); assert.equal(intro.line, 1);
-  const hiddenIntro = introTimers.get(intro.timer).callback;
-  intro.active = false; intro.syncPlayback(); assert.equal(introTimers.size, 0);
-  intro.active = true; intro.syncPlayback(); hiddenIntro();
-  assert.equal(intro.line, 1); assert.equal(introTimers.size, 1, 'A stale callback cannot advance a resumed introduction');
-  intro.foreground = false; intro.syncPlayback(); assert.equal(introTimers.size, 0);
-  intro.foreground = true; intro.syncPlayback(); assert.equal(introTimers.size, 1);
-  intro.visibilityChanged(0); assert.equal(introTimers.size, 0, 'Offscreen speech must stop advancing');
-  intro.visibilityChanged(1); intro.appearance.effectStrength = 0; intro.syncPlayback();
-  assert.equal(introTimers.size, 0, 'Motion-off introduction has no automatic text changes');
-  intro.bodyHeight = 420; assert.ok(intro.actorDiameter() < 200, 'Short viewports make room for examples');
-  intro.bodyHeight = 562; intro.speechHeight = 111;
-  assert.ok(intro.actorDiameter() + intro.speechHeight + 332 <= intro.bodyHeight,
-    'Three-line English speech must leave the entire caption and pagination in view');
-  intro.speechHeight = 187;
-  assert.ok(intro.actorDiameter() + intro.speechHeight + 332 <= intro.bodyHeight,
-    'Static reduced-motion speech keeps page controls visible by shrinking the decorative actor');
-  intro.appearance.effectStrength = 1; intro.syncPlayback();
-  advanceIntro(); assert.equal(intro.line, 2); assert.equal(introTimers.size, 0,
-    'The introduction stops scheduling timers after the last line; finished examples stay visible');
-  intro.foreground = false; intro.syncPlayback(); intro.foreground = true; intro.syncPlayback();
-  assert.equal(introTimers.size, 0, 'Returning to a finished introduction must not restart it');
-  intro.line = 0; intro.syncPlayback();
-  const detachedIntro = introTimers.get(intro.timer).callback; intro.aboutToDisappear(); detachedIntro();
-  assert.equal(introTimers.size, 0); assert.equal(intro.line, 0);
-  console.log('PASS introduction reading intervals, finite playback, stale callbacks, background/offscreen pause, reduced motion and disposal');
-
-  const deckTimers = new Map(); let deckTimerId = 0;
-  const looks = [], deckAnimations = [];
-  const deck = Object.assign(probe('views/OnboardingExampleDeck', 'OnboardingExampleDeck',
-    ['aboutToAppear', 'aboutToDisappear', 'stopPlayback', 'syncPlayback', 'scheduleTour', 'select', 'choose', 'side', 'fan', 'sideOffset'],
-    { Motion: { enter: {} },
-      setTimeout: (callback, delay) => { const id = ++deckTimerId; deckTimers.set(id, { callback, delay }); return id; },
-      clearTimeout: id => deckTimers.delete(id) }), {
-    mounted: false, active: true, speechLine: 0, appearance: { effectStrength: 1 }, compact: false,
-    selected: 0, stageWidth: 328, manual: false, tourStep: -1, timer: -1, lookTimer: -1, revision: 0,
-    onLook: down => looks.push(down),
-    getUIContext: () => ({ animateTo: (options, action) => { deckAnimations.push(options); action(); } })
+  const view = Object.assign(probe('pages/Index', 'Index',
+    ['offerOnboarding', 'openOnboarding', 'moveOnboarding', 'closeOnboarding', 'syncNavigationLocale'],
+    { ShareInbox: { peek: () => undefined } }), {
+    app: { ready: true, exportSnapshot: fresh },
+    onboardingPreferences: () => store,
+    paths: {
+      size: () => paths.length,
+      pushPath: path => paths.push(path.name),
+      getAllPathName: () => paths.slice()
+    },
+    revealChat: () => { paths.length = 0; events.push('chat'); },
+    receiveShare() {},
+    receiveLaunch() {}
   });
-  const tickDeck = id => { const pending = deckTimers.get(id); assert.ok(pending); deckTimers.delete(id); pending.callback(); };
-  deck.aboutToAppear(); assert.equal(deckTimers.size, 0);
-  deck.speechLine = 1; deck.syncPlayback(); assert.equal(deck.selected, 0);
-  assert.equal(deckTimers.get(deck.timer).delay, 1000);
-  assert.equal(deck.lookTimer, -1); assert.equal(looks.at(-1), true, 'The automatic tour holds one downward gaze');
-  tickDeck(deck.timer); assert.equal(deck.selected, 1); assert.equal(looks.at(-1), true);
-  const staleTour = deckTimers.get(deck.timer).callback;
-  deck.active = false; deck.syncPlayback(); assert.equal(deckTimers.size, 0); assert.equal(looks.at(-1), false);
-  deck.active = true; deck.syncPlayback(); staleTour(); assert.equal(deck.selected, 1);
-  tickDeck(deck.timer); assert.equal(deck.selected, 2);
-  tickDeck(deck.timer); assert.equal(deck.selected, 0); assert.equal(deck.timer, -1); assert.equal(looks.at(-1), false);
-  deck.speechLine = 2; deck.syncPlayback(); assert.equal(deckTimers.size, 0);
-  deck.active = false; deck.syncPlayback(); deck.active = true; deck.syncPlayback();
-  assert.equal(deckTimers.size, 0, 'Completed tour never loops after foregrounding');
-  deck.tourStep = -1; deck.speechLine = 1; deck.syncPlayback();
-  const supersededTour = deckTimers.get(deck.timer).callback;
-  deck.choose(2); supersededTour(); assert.equal(deck.selected, 2); assert.equal(deck.timer, -1);
-  deck.speechLine = 2; deck.syncPlayback(); assert.equal(deck.selected, 2, 'Speech must not reset a manually selected page');
-  deck.choose(3); assert.equal(deck.selected, 0); deck.choose(-1); assert.equal(deck.selected, 2);
-  const staleLook = deckTimers.get(deck.lookTimer).callback;
-  deck.appearance.effectStrength = 0; deck.syncPlayback(); assert.equal(deckTimers.size, 0);
-  const animationCount = deckAnimations.length; deck.choose(1);
-  assert.equal(deck.selected, 1); assert.equal(deckAnimations.length, animationCount); assert.equal(deckTimers.size, 0);
-  assert.equal(deck.fan(), false); assert.equal(deck.side(0), -1); assert.equal(deck.side(2), 1);
-  deck.appearance.effectStrength = 1; deck.compact = true; assert.equal(deck.fan(), false);
-  deck.compact = false; assert.equal(deck.fan(), true);
-  deck.stageWidth = 328; assert.equal(deck.sideOffset(), 79, 'Side pages fit the measured stage width');
-  deck.choose(0); deck.aboutToDisappear(); const lookCount = looks.length; staleLook();
-  assert.equal(looks.length, lookCount); assert.equal(deckTimers.size, 0);
-  deck.choose(1); assert.equal(deck.selected, 0, 'Unmounted deck ignores input');
-  console.log('PASS finite speech-synced deck, manual takeover, swipes, stale callbacks, hidden/disposed cleanup, compact and motion-off interaction');
+  return { view, store, paths, events };
+}
 
-  const revealTimers = new Map(); let revealId = 0;
-  const paper = Object.assign(probe('views/OnboardingExamplePage', 'OnboardingExamplePage',
-    ['aboutToAppear', 'aboutToDisappear', 'cancelReveal', 'syncReveal', 'motion'],
-    { Motion: { enter: {} },
-      setTimeout: callback => { revealTimers.set(++revealId, callback); return revealId; },
-      clearTimeout: id => revealTimers.delete(id) }), {
-    mounted: false, selected: true, playing: true, appearance: { effectStrength: 1 },
-    revealed: true, timer: -1, revision: 0
-  });
-  paper.aboutToAppear(); assert.equal(paper.revealed, false);
-  assert.equal(paper.motion(320, 40).duration, 0, 'Reset is immediate, never a reverse animation');
-  const staleReveal = revealTimers.get(paper.timer);
-  paper.playing = false; paper.syncReveal(); staleReveal();
-  assert.equal(paper.revealed, true); assert.equal(revealTimers.size, 0);
-  paper.playing = true; paper.syncReveal(); const reveal = revealTimers.get(paper.timer); revealTimers.delete(paper.timer); reveal();
-  assert.equal(paper.motion(320, 40).delay, 40);
-  paper.appearance.effectStrength = 0; paper.syncReveal();
-  assert.equal(paper.revealed, true); assert.equal(paper.motion(320, 40).duration, 0); assert.equal(paper.motion(320, 40).delay, 0);
-  paper.appearance.effectStrength = 1; paper.syncReveal(); paper.aboutToDisappear(); assert.equal(revealTimers.size, 0);
-  console.log('PASS paper reveals, per-element timing, immediate resets and background/disposal/reduced-motion cleanup');
+function testIndex() {
+  let p = page();
+  p.view.offerOnboarding();
+  p.view.offerOnboarding();
+  assert.deepEqual(p.paths, ['onboarding']);
+  assert.equal(p.view.onboardingStep, 1);
+  p.view.navigationLocale = 'zh-CN';
+  p.view.locale = 'en';
+  p.view.syncNavigationLocale();
+  assert.equal(p.view.navigationLocale, 'zh-CN', 'The notification must keep the open navigation subtree mounted');
+  p.view.moveOnboarding(2, true);
+  p.view.moveOnboarding(1, false);
+  p.view.closeOnboarding(false);
+  assert.equal(p.view.navigationLocale, 'en', 'The rest of the app adopts the language when the guide leaves');
+  assert.deepEqual(p.events, ['begin', 2, 'chat']);
+  assert.equal(p.view.onboardingActive, false);
 
-  const journeys = [];
-  const actor = Object.assign(probe('views/OnboardingPanel', 'OnboardingPanel',
-    ['stageChanged', 'locateActor', 'placeActor', 'followActorScroll', 'greetActor', 'animate', 'keepConnectionInputVisible'],
-    { Motion: { standard: {} } }), {
-    step: 1, active: true, foreground: true, transitioning: false, saving: false,
-    actorReady: false, actorScene: -1, actorX: 0, actorY: 0, actorSize: 180, greeted: false,
-    stageLeft: 24, stageTop: 100, stageWidth: 320, appearance: { effectStrength: 1 },
-    getUIContext: () => ({ animateTo: (options, action) => { journeys.push(options); action(); },
-      px2vp: value => value / 2, getComponentUtils: () => ({ getRectangleById: () => ({
-        size: { width: 320, height: 320 }, windowOffset: { x: 48, y: 280 }
-      }) }) })
+  p = page();
+  p.store.resumeStep = () => 4;
+  p.view.offerOnboarding();
+  assert.equal(p.view.onboardingStep, 4);
+  p.store.complete = () => { throw Error('preference write failed'); };
+  assert.throws(() => p.view.closeOnboarding(true), /preference write failed/);
+  assert.deepEqual(p.paths, ['onboarding']);
+  p.store.complete = () => p.events.push('complete');
+  p.view.closeOnboarding(true);
+  p.view.closeOnboarding(true);
+  assert.deepEqual(p.events, ['begin', 'complete', 'chat']);
+}
+
+function panel() {
+  const events = [];
+  const editor = {
+    id: '', apiKey: '', balanceApiKey: '', error: '', models: 'first\nsecond',
+    get modelList() { return this.models.split('\n'); },
+    fieldError: () => '',
+    reset(profile) { this.id = profile.id; this.apiKey = ''; this.models = profile.models.join('\n'); }
+  };
+  const app = {
+    active: {}, providerProfiles: [], providerEditor: editor,
+    providerPresets: [{ id: 'deepseek', name: 'DeepSeek', protocol: 'chat-completions' }],
+    beginProvider: () => true,
+    async flushDraft() {},
+    async saveProvider() {
+      events.push(['save', editor.id, editor.models]);
+      if (!editor.id) this.providerProfiles.push({ id: 'saved', models: editor.modelList });
+      return true;
+    },
+    async selectModel(providerId, modelId) {
+      events.push(['model', providerId, modelId]);
+      this.active.modelRef = { providerId, modelId };
+      this.configured = true;
+      return true;
+    }
+  };
+  const account = { ready: true, signedIn: false, async signIn() { events.push('sign-in'); } };
+  const haptics = [];
+  const vibrator = {
+    HapticFeedback: { EFFECT_SOFT: 'soft', EFFECT_NOTICE_SUCCESS: 'success' },
+    isSupportEffectSync: () => true,
+    async startVibration(effect, attribute) { haptics.push([effect.effectId, attribute.usage]); }
+  };
+  const view = Object.assign(probe('views/OnboardingPanel', 'OnboardingPanel', [
+    't', 'aboutToAppear', 'aboutToDisappear', 'visibleStep', 'blocked', 'move', 'playStepHaptic',
+    'goBack', 'backRequested', 'editableStep', 'pause',
+    'canContinue', 'primaryAction', 'clearValidation', 'setLanguage', 'setMode', 'presets', 'chooseProvider', 'clearProviderDraft', 'saveProvider'
+  ], {
+    Edge: { Top: 0 }, CUSTOM_PROVIDER: 'custom', isSupportedProtocol: protocol => protocol === 'chat-completions',
+    LanguagePreferences: { select: value => events.push(['language', value]) },
+    AppearancePreferences: { select: value => events.push(['appearance', value.mode]) },
+    copyAppearance: value => ({ ...value }), vibrator
+  }), {
+    initialStep: 1, active: true, foreground: true, account, app, options: { mode: 'system' }, language: 'system',
+    appearance: { effectStrength: 0 },
+    scroller: { scrollEdge() {} },
+    getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }) }),
+    onMove: (step, forward) => events.push(['step', step, forward]),
+    onClose: completed => events.push(['close', completed])
   });
-  actor.locateActor(1, { width: 220, height: 220, globalPosition: { x: 74, y: 260 } });
-  assert.equal(actor.actorReady, true); assert.equal(actor.actorX, 160); assert.equal(actor.actorY, 270);
-  assert.equal(journeys.length, 0, 'The first measured destination must not fly in from an uninitialized origin');
-  actor.step = 2;
-  actor.locateActor(1, { width: 220, height: 220, globalPosition: { x: 74, y: 800 } });
-  assert.equal(actor.actorY, 270, 'An exiting page must not pull the persistent actor back');
-  actor.locateActor(2, { width: 160, height: 160, globalPosition: { x: 104, y: 200 } });
-  assert.equal(actor.actorReady, true); assert.equal(actor.actorSize, 160); assert.equal(actor.actorY, 180);
-  assert.equal(journeys.length, 1); assert.equal(journeys[0].duration, 420);
-  actor.followActorScroll(2, 'slot'); assert.equal(actor.actorY, 120); assert.equal(journeys.length, 1,
-    'Scrolling should track the real slot immediately, without trailing behind the finger');
-  actor.appearance.effectStrength = 0; actor.placeActor(32, 52, 64, true);
-  assert.equal(actor.actorX, 32); assert.equal(actor.actorSize, 64); assert.equal(journeys.length, 1);
-  actor.step = 3; actor.keyFocused = true;
-  actor.locateActor(3, { width: 96, height: 96, globalPosition: { x: 0, y: 200 } });
-  assert.equal(actor.actorY, 148); assert.equal(actor.actorSize, 96, 'Key entry uses its actual slot without a second pinned reserve');
-  actor.followActorScroll(3, 'slot'); assert.equal(actor.actorY, 120, 'The actor follows measured layout rather than competing with a hard-coded keyboard position');
-  actor.keyFocused = false;
-  actor.step = 4;
-  actor.locateActor(4, { width: 64, height: 64, globalPosition: { x: 48, y: 180 } });
-  assert.equal(actor.actorX, 56, 'The final task positions Tiny beside its speech bubble');
-  actor.hasWoken = true; actor.step = 1;
-  actor.wake = () => { throw Error('An awake Tiny must not restart its wake journey'); };
-  actor.greetActor(); actor.greetActor();
-  panel.active = true; panel.foreground = true; panel.step = 4; panel.transitioning = false; panel.saving = false;
-  panel.appearance.effectStrength = 1;
-  panel.onMessageChange('Draft'); assert.equal(panel.actorMood(), 'focused');
-  const oldTyping = scheduled.get(panel.typingTimer);
-  panel.onMessageChange('Draft updated'); oldTyping(); assert.equal(panel.typing, true);
-  const typingEnd = scheduled.get(panel.typingTimer); scheduled.delete(panel.typingTimer); typingEnd();
-  assert.equal(panel.actorMood(), 'happy', 'A one-second typing pause settles into a smile');
-  panel.error = 'Could not save'; assert.equal(panel.actorMood(), 'oops'); panel.error = '';
-  panel.saving = true; assert.equal(panel.actorMood(), 'focused'); panel.saving = false;
-  let departures = 0;
-  panel.onFinish = async () => { departures++; };
-  const goodbye = panel.finish('start', 'Keep this draft');
-  assert.equal(panel.farewell, true); assert.equal(departures, 0, 'The farewell runs before popping the page');
-  await panel.finish('start', 'Duplicate'); assert.equal(departures, 0);
-  const goodbyeEnd = scheduled.get(panel.farewellTimer); scheduled.delete(panel.farewellTimer); goodbyeEnd();
-  await goodbye; assert.equal(departures, 1); assert.equal(panel.saving, false);
-  const cancelledGoodbye = panel.finish('start', 'Do not navigate in background');
-  panel.foreground = false; panel.foregroundChanged(); await cancelledGoodbye;
-  assert.equal(departures, 1); assert.equal(panel.farewell, false);
-  panel.foreground = true; panel.appearance.effectStrength = 0;
-  await panel.finish('start', 'Immediate reduced-motion departure'); assert.equal(departures, 2);
-  assert.equal(panel.farewellTimer, -1);
-  console.log('PASS typing debounce, stale input callbacks, saving/error moods, farewell completion, duplicate taps, background cancellation and motion-off departure');
-  console.log('PASS persistent actor measured destinations, continuous transform, exiting-page isolation, scroll tracking and final-task interaction');
-})().catch(error => { console.error(error); process.exitCode = 1; });
+  view.aboutToAppear();
+  return { view, events, account, app, editor, haptics };
+}
+
+async function testPanel() {
+  let p = panel();
+  await p.view.primaryAction();
+  assert.deepEqual(p.events, [], 'The OS login sheet requires consent');
+  p.view.agreed = true;
+  await p.view.primaryAction();
+  assert.deepEqual(p.events, ['sign-in']);
+  assert.equal(p.view.visibleStep(), 1, 'Cancellation leaves the account step open');
+  p.account.signedIn = true;
+  await p.view.primaryAction();
+  await p.view.setLanguage('en');
+  p.view.setMode('dark');
+  await p.view.primaryAction();
+  assert.deepEqual(p.events.slice(1), [['step', 2, true], ['language', 'en'], ['appearance', 'dark'], ['step', 3, true]]);
+  await p.view.primaryAction();
+  assert.equal(p.view.visibleStep(), 3);
+  p.view.chooseProvider(0);
+  p.view.modelId = 'second';
+  p.editor.apiKey = 'fixture';
+  const selectModel = p.app.selectModel;
+  p.app.selectModel = async () => false;
+  await p.view.primaryAction();
+  assert.equal(p.view.visibleStep(), 3);
+  assert.match(p.view.error, /切换当前模型/);
+  assert.equal(p.editor.id, 'saved');
+  p.app.selectModel = selectModel;
+  await p.view.primaryAction();
+  assert.equal(p.view.visibleStep(), 4);
+  assert.equal(p.app.providerProfiles.length, 1);
+  assert.deepEqual(p.events.slice(5), [
+    ['save', '', 'second\nfirst'], ['save', 'saved', 'second\nfirst'],
+    ['model', 'saved', 'second'], ['step', 4, true]
+  ]);
+  assert.equal(p.editor.apiKey, '');
+  p.view.goBack(3);
+  assert.equal(p.view.visibleStep(), 4, 'Completed steps no longer open editing from the finish screen');
+  p.view.backRequested();
+  assert.deepEqual(p.events.at(-1), ['close', true]);
+  assert.deepEqual(p.haptics, [], 'Effects off skips step haptics');
+
+  p = panel();
+  p.account.signedIn = true;
+  p.app.configured = true;
+  p.view.appearance.effectStrength = 1;
+  await p.view.primaryAction();
+  p.view.goBack(1);
+  await p.view.primaryAction();
+  await p.view.primaryAction();
+  await p.view.primaryAction();
+  assert.deepEqual(p.haptics, [['soft', 'touch'], ['soft', 'touch'], ['soft', 'touch'], ['success', 'touch']]);
+
+  p = panel();
+  p.view.step = 4;
+  assert.equal(p.view.visibleStep(), 1, 'A resumed route still needs current account state');
+  p.account.signedIn = true;
+  assert.equal(p.view.visibleStep(), 3, 'A removed provider must be configured again');
+  p.view.chooseProvider(0);
+  p.editor.apiKey = 'unsaved-fixture';
+  p.view.pause();
+  p.view.aboutToDisappear();
+  assert.deepEqual(p.events.at(-1), ['close', false]);
+  assert.equal(p.editor.apiKey, '', 'The setup checkpoint does not retain uncommitted credentials');
+}
+
+function testPreferenceMotion() {
+  const frames = [];
+  const { SegmentedMotion } = load('common/SegmentedMotion');
+  const segmented = Object.assign(probe('common/Widgets', 'Segmented', [
+    'stopAnimation', 'target', 'resetGeometry', 'syncSelection', 'motionChanged'
+  ], { SegmentedMotion }), {
+    options: ['跟随系统', '简体中文', 'English'], selected: 0,
+    gap: 0, trackWidth: 300, segmentWidth: 0, generation: 0, appearance: { effectStrength: 1 },
+    getUIContext: () => ({ createAnimator() {
+      const animator = { play() {}, cancel() { this.cancelled = true; } };
+      frames.push(animator);
+      return animator;
+    } })
+  });
+  segmented.resetGeometry();
+  segmented.selected = 2;
+  segmented.syncSelection();
+  const forward = frames[0];
+  forward.onFrame(0.25);
+  const midpoint = [segmented.thumbLeft, segmented.thumbRight];
+  assert.ok(midpoint[1] > 100 && midpoint[1] < 300);
+  segmented.options = ['Follow system', '简体中文', 'English'];
+  segmented.resetGeometry();
+  assert.equal(forward.cancelled, undefined, 'Translating the labels keeps the running thumb animation');
+  segmented.selected = 1;
+  segmented.syncSelection();
+  assert.equal(forward.cancelled, true);
+  frames[1].onFrame(0);
+  assert.deepEqual([segmented.thumbLeft, segmented.thumbRight], midpoint, 'Retargets from the displayed thumb');
+  segmented.appearance.effectStrength = 0;
+  segmented.motionChanged();
+  assert.equal(frames[1].cancelled, true);
+  assert.deepEqual([segmented.thumbLeft, segmented.thumbRight], [100, 200]);
+  frames[1].onFinish();
+  assert.deepEqual([segmented.thumbLeft, segmented.thumbRight], [100, 200]);
+  segmented.selected = 0;
+  segmented.syncSelection();
+  assert.equal(frames.length, 2, 'Effects-off selection completes without an animator');
+  assert.deepEqual([segmented.thumbLeft, segmented.thumbRight], [0, 100]);
+  console.log('PASS preference selection motion survives relabeling, rapid retargeting and effects-off mode');
+}
+
+function testCelebration() {
+  const fixture = (effectStrength = 1) => {
+    const animators = [];
+    const draws = [];
+    let now = 0;
+    const math = Object.create(Math);
+    math.random = () => 0.5;
+    const view = Object.assign(probe('views/OnboardingConfetti', 'OnboardingConfetti', [
+      'aboutToDisappear', 'clear', 'stop', 'syncPlayback', 'makeRibbons', 'draw', 'onTap', 'drawTapBursts', 'paint'
+    ], { RIBBON_COUNT: 108, BURST_COUNT: 36, FRAME_INTERVAL_MS: 32, PALETTE: ['#FFD572', '#95DFB8'],
+      TAP_RIBBON_COUNT: 24, MAX_TAP_BURSTS: 6, TAP_BURST_DURATION_MS: 1350,
+      Math: math, Date: { now: () => now } }), {
+      ready: true, visible: true, active: true, foreground: true, appearance: { effectStrength }, tapBursts: [],
+      canvas: { width: 300, height: 440, clearRect: () => draws.push('clear'), save() {}, restore() {},
+        translate: (x, y) => draws.push([x, y]), rotate() {}, fillRect() {} },
+      getUIContext: () => ({ createAnimator(options) {
+        const animator = { options, play() {}, cancel() { this.cancelled = true; } };
+        animators.push(animator);
+        return animator;
+      } })
+    });
+    return { view, animators, draws, tap(x, y) {
+      view.tap = { x, y };
+      view.onTap();
+    }, advance(ms) {
+      now += ms;
+      const start = draws.length;
+      animators.at(-1).onFrame();
+      return draws.slice(start).filter(Array.isArray);
+    } };
+  };
+
+  const visit = fixture();
+  visit.view.visible = false;
+  visit.view.syncPlayback(); assert.equal(visit.animators.length, 0);
+  visit.view.visible = true;
+  visit.view.syncPlayback(); visit.view.syncPlayback();
+  assert.equal(visit.animators.length, 1);
+  assert.equal(visit.animators[0].options.iterations, -1);
+  assert.ok(visit.advance(350).length > 108, 'A welcome burst overlaps the falling ribbons');
+  const steady = visit.advance(17000);
+  assert.equal(steady.length, 108, 'The shower continues after the original burst and a full falling cycle');
+  assert.equal(visit.advance(10).length, 0, 'Draws are paced independently of display refresh rate');
+  const next = visit.advance(90);
+  const falling = next.filter((point, index) => point[1] > steady[index][1] && point[1] - steady[index][1] < 5);
+  assert.ok(falling.length > 95, 'Ribbons drift downward slowly between frames');
+
+  visit.tap(65, 65);
+  visit.tap(230, 107);
+  const tapped = visit.advance(32).slice(108);
+  assert.equal(tapped.length, 48, 'Both taps add ribbons to the live shower');
+  assert.ok(tapped.slice(0, 24).every(([x, y]) => Math.hypot(x - 65, y - 65) < 10));
+  assert.ok(tapped.slice(24).every(([x, y]) => Math.hypot(x - 230, y - 107) < 10));
+  const expanded = visit.advance(200).slice(108, 132);
+  assert.ok(expanded.some(([x]) => x < 45) && expanded.some(([x]) => x > 85), 'Ribbons fan out from the tap');
+  assert.equal(visit.advance(1200).length, 108, 'Tap ribbons expire while the shower continues');
+  for (let x = 50; x < 60; x++) { visit.tap(x, 65); }
+  assert.deepEqual(visit.view.tapBursts.map(burst => burst.point.x), [54, 55, 56, 57, 58, 59]);
+
+  const interrupted = fixture();
+  interrupted.view.syncPlayback();
+  const inFlight = interrupted.animators[0]; interrupted.advance(350);
+  interrupted.tap(120, 70);
+  interrupted.view.foreground = false;
+  interrupted.view.syncPlayback(); assert.equal(inFlight.cancelled, true);
+  assert.equal(interrupted.view.tapBursts.length, 0);
+  assert.equal(interrupted.draws.at(-1), 'clear');
+  const drawCount = interrupted.draws.length;
+  inFlight.onFrame(); assert.equal(interrupted.draws.length, drawCount, 'Ignore stale drawing callbacks');
+  interrupted.view.foreground = true;
+  interrupted.view.syncPlayback(); assert.equal(interrupted.animators.length, 2);
+  interrupted.view.aboutToDisappear(); assert.equal(interrupted.animators[1].cancelled, true);
+
+  const effectsOff = fixture(0);
+  effectsOff.view.syncPlayback(); assert.equal(effectsOff.animators.length, 0);
+  effectsOff.tap(120, 70); assert.equal(effectsOff.view.tapBursts.length, 0);
+  visit.view.appearance.effectStrength = 0;
+  visit.view.syncPlayback(); assert.equal(visit.animators[0].cancelled, true);
+  console.log('PASS completion shower, tap origins, overlapping bursts, expiry, interruption, and effects-off gating');
+}
+
+testIndex();
+testPreferenceMotion();
+testCelebration();
+testPanel().then(() => {
+  console.log('PASS compiled setup flow, consent, preferences, provider retry, completion, and pause');
+}).catch(error => { console.error(error); process.exitCode = 1; });

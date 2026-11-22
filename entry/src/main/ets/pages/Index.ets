@@ -106,7 +106,8 @@ struct Index {
   @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = false;
   @StorageProp('tinybot.pcWindowVisible') @Watch('pcWindowVisibilityChanged') private pcWindowVisible: boolean = true;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
+  @StorageProp('tinybot.locale') @Watch('syncNavigationLocale') private locale: string = 'zh-CN';
+  @State private navigationLocale: string = getLocale();
   @StorageProp('tinybot.freeWindow') @Watch('desktopModeChanged') private desktop: boolean = false;
   @State private app: ChatViewModel = new ChatViewModel();
   @State private account: HuaweiAccount = huaweiAccount;
@@ -195,8 +196,8 @@ struct Index {
   private startupBackupRestoring: boolean = false;
   private startupBackupDialog?: CustomDialogController;
   private onboardingChecked: boolean = false;
-  private onboardingDraftThread: string = '';
-  private onboardingFinishing: boolean = false;
+  private onboardingStep: number = 1;
+  @State private onboardingBackRequest: number = 0;
   @State private onboardingActive: boolean = false;
   @State private providerEditorActive: boolean = false;
   @State private settingsActive: boolean = false;
@@ -443,6 +444,11 @@ struct Index {
     return new OnboardingPreferences(this.getUIContext().getHostContext() as common.UIAbilityContext);
   }
 
+  private syncNavigationLocale(): void {
+    // The guide translates in place. Apply the new key to the rest of the shell after the guide leaves the stack.
+    if (!this.paths.getAllPathName().includes('onboarding')) { this.navigationLocale = this.locale; }
+  }
+
   private privacyChanged(): void {
     if (this.privacyAllowed) { this.startBusiness(); }
     else {
@@ -468,10 +474,21 @@ struct Index {
     this.onboardingChecked = true;
     if (this.receiving || this.launching || ShareInbox.peek() || this.paths.size() > 0) { return; }
     try {
-      if (this.onboardingPreferences().shouldShow(this.app.exportSnapshot())) {
-        this.onboardingDraftThread = ''; this.onboardingActive = true; this.paths.pushPath({ name: 'onboarding' });
-      }
+      const preferences = this.onboardingPreferences();
+      const step = preferences.resumeStep(this.app.exportSnapshot());
+      if (step > 0) { preferences.begin(); this.openOnboarding(step); }
     } catch (error) { this.app.error = t('无法读取首次使用记录：{0}', [(error as Error).message]); }
+  }
+
+  private openOnboarding(step: number): void {
+    this.onboardingStep = step;
+    this.onboardingActive = true;
+    this.paths.pushPath({ name: 'onboarding' });
+  }
+
+  private moveOnboarding(step: number, forward: boolean): void {
+    if (forward) { this.onboardingPreferences().reach(step); }
+    this.onboardingStep = step;
   }
 
   private canOfferStartupBackup(): boolean {
@@ -540,35 +557,13 @@ struct Index {
     finally { this.startupBackupRestoring = false; }
   }
 
-  private async finishOnboarding(action: string, prompt: string): Promise<void> {
-    if (this.onboardingFinishing) { return; }
-    this.onboardingFinishing = true;
-    try {
-      if (action !== 'skip') {
-        if (!this.app.canNavigate) { throw new Error(t('无法创建新对话。')); }
-        await this.app.flushDraft();
-        if (this.app.saveError) { throw new Error(this.app.saveError); }
-        if (this.onboardingDraftThread !== this.app.active.id) {
-          // SessionService owns the full untouched-chat check, including references and queued input.
-          if (!await this.app.newThread('')) { throw new Error(this.app.error || this.app.saveError || t('无法创建新对话。')); }
-          this.onboardingDraftThread = this.app.active.id;
-        }
-        this.app.setDraft(prompt); await this.app.flushDraft();
-        if (this.app.saveError) { throw new Error(this.app.saveError); }
-      }
-      this.onboardingPreferences().complete();
-      if (action === 'skip') { this.paths.pop(); }
-      else { this.paths.clear(); this.rootSection = ''; this.setDrawer(false); if (action === 'connect') { this.openSettings(); } }
-    } finally { this.onboardingFinishing = false; }
-  }
-
-  // Opening a real provider editor must never complete onboarding. The editor's
-  // existing onSaved pop returns to the still-mounted model-connection scene.
-  private connectOnboardingProvider(preset: string): void {
-    if (!this.onboardingActive || this.onboardingFinishing) { return; }
-    if (!this.app.beginProvider(preset, '')) { throw new Error(this.app.error || t('请先完成当前任务，再开始新的对话。')); }
+  private closeOnboarding(completed: boolean): void {
+    if (!this.onboardingActive) { return; }
+    if (completed) { this.onboardingPreferences().complete(); }
     this.onboardingActive = false;
-    this.paths.pushPath({ name: 'provider' });
+    this.revealChat();
+    this.syncNavigationLocale();
+    this.receiveShare(); this.receiveLaunch();
   }
 
   private async createChat(projectId?: string): Promise<void> {
@@ -1423,7 +1418,15 @@ struct Index {
       return;
     }
     if (page === 'guide') {
-      this.onboardingDraftThread = ''; this.onboardingActive = true; this.paths.pushPath({ name: 'onboarding' }); return;
+      try {
+        const preferences = this.onboardingPreferences();
+        const step = preferences.resumeStep(this.app.exportSnapshot());
+        if (step > 0) { preferences.begin(); }
+        this.openOnboarding(step || 1);
+      } catch (error) {
+        this.getUIContext().getPromptAction().showToast({ message: t('无法读取首次使用记录：{0}', [(error as Error).message]) });
+      }
+      return;
     }
     if (page !== 'rating') {
       this.paths.pushPath({ name: 'support', param: page });
@@ -1606,20 +1609,16 @@ struct Index {
   destination(name: string, param: Object) {
     if (name === 'onboarding') {
       NavDestination() {
-        OnboardingPanel({ app: this.app, active: this.onboardingActive, configured: this.app.configured,
-          connectedPreset: this.currentProviderPreset(), busy: this.app.busy, account: this.account,
-          onFinish: (action: string, prompt: string) => this.finishOnboarding(action, prompt),
-          onConnect: (preset: string) => this.connectOnboardingProvider(preset),
+        OnboardingPanel({ app: this.app, active: this.onboardingActive, account: this.account,
+          initialStep: this.onboardingStep, backRequest: this.onboardingBackRequest,
+          onMove: (step: number, forward: boolean) => this.moveOnboarding(step, forward),
+          onClose: (completed: boolean) => this.closeOnboarding(completed),
           onLegal: (page: string) => { this.openSupport(page); } })
       }.hideTitleBar(true).backgroundColor($r('app.color.page_background'))
-        .onBackPressed(() => {
-          this.finishOnboarding('skip', '').catch((error: Error) => {
-            this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: error.message });
-          });
-          return true;
-        })
+        .onBackPressed(() => { this.onboardingBackRequest++; return true; })
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
+        .onDisAppear(() => this.syncNavigationLocale())
     } else if (name === 'life-panels') {
       LifePanelsPanel({ app: this.app, onShown: () => { this.rootSection = 'life-panels'; }, onChat: () => this.revealChat(), requestedTarget: this.lifePanelTarget })
     } else if (name === 'branches') {
@@ -1781,10 +1780,6 @@ struct Index {
           onSaved: () => { this.paths.pop(); } })
       }.title(t('选择要添加的模型'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     }
-  }
-
-  private currentProviderPreset(): string {
-    return this.app.providerProfiles.find((profile) => profile.id === this.app.active.modelRef?.providerId)?.presetId || '';
   }
 
   @Builder
@@ -1990,7 +1985,7 @@ struct Index {
           .backgroundColor($r('app.color.page_background'))
           .onFocus(() => this.privacy.onGateFocus(true)).onBlur(() => this.privacy.onGateFocus(false))
       } else {
-      ForEach([this.locale], (_locale: string) => {
+      ForEach([this.navigationLocale], (_locale: string) => {
     Stack() {
     Row() {
     if (this.workbench().rail) {
