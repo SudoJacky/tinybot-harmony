@@ -34,7 +34,7 @@ const state = { phase: 'running', ready: true, acceptingSteering: true, error: '
   contextBreakdown: [{ id: 'prompt', kind: 'message', tokens: 120, messageId: 'm', step: 0, name: 'Prompt' }] };
 chat.project({ kind: 'state', state });
 const contextItems = chat.contextItems;
-for (let i = 0; i < 1000; i++) chat.project({ kind: 'reasoning', state: JSON.parse(JSON.stringify(state)) });
+for (let i = 0; i < 1000; i++) chat.project({ kind: 'stream', state: JSON.parse(JSON.stringify(state)) });
 assert.equal(chat.contextItems, contextItems, 'Token snapshots retain equal observed context rows');
 for (const [field, value] of Object.entries({ id: 'next', kind: 'tool', tokens: 121, messageId: 'n', step: 1, name: 'Tool' })) {
   const changed = JSON.parse(JSON.stringify(state)); changed.contextBreakdown[0][field] = value;
@@ -78,8 +78,8 @@ for (const status of ['stopped', 'failed', 'complete']) assert.equal(turnPhase(s
 const streaming = new MessageViewModel({ id: 'stream', role: 'assistant', content: '', error: '', status: 'generating',
   steps: [step('', [], '')] });
 chat.threads = [{ id: 'thinking-thread', messages: [streaming], refreshPreviews() {} }];
-const thoughtDelta = { kind: 'reasoning', state, threadId: 'thinking-thread', messageId: streaming.id, step: 0, stepContent: 'First thought' };
-chat.project(thoughtDelta);
+const thoughtDelta = { threadId: 'thinking-thread', messageId: streaming.id, step: 0, reasoningContent: 'First thought' };
+chat.project({ kind: 'stream', state, stream: [thoughtDelta] });
 assert.equal(turnPhase(streaming.status, streaming.stepViews), 'thinking');
 assert.equal(streaming.reasoningContent, 'First thought');
 const retry = step();
@@ -87,23 +87,23 @@ retry.retries = [{ waiting: true, attempt: 1, delayMs: 1000 }];
 chat.project({ kind: 'message', state, threadId: thoughtDelta.threadId,
   message: { id: streaming.id, role: 'assistant', content: '', error: '', status: 'generating', steps: [retry] } });
 assert.equal(turnPhase(streaming.status, streaming.stepViews), 'retry');
-chat.project(thoughtDelta);
+chat.project({ kind: 'stream', state, stream: [thoughtDelta] });
 assert.equal(turnPhase(streaming.status, streaming.stepViews), 'thinking');
 assert.equal(streaming.timeline[0].items[0].tool, -1);
 const thoughtTimeline = streaming.timeline;
 const liveStepViews = streaming.stepViews;
-for (let i = 0; i < 1000; i++) streaming.updateReasoning(0, 'First thought ' + i);
+for (let i = 0; i < 1000; i++) streaming.updateStream(0, undefined, undefined, 'First thought ' + i);
 assert.equal(streaming.timeline, thoughtTimeline, 'Further thought deltas retain the derived timeline');
 assert.equal(streaming.stepViews, liveStepViews, 'Further thought deltas leave the workflow header dependencies stable');
 assert.equal(streaming.reasoningContent, 'First thought 999');
-streaming.updateText('Narration', 0, 'Narration');
+streaming.updateStream(0, 'Narration', 'Narration');
 assert.equal(streaming.timeline.map(e => e.kind).join(','), 'process,text');
 const narrationTimeline = streaming.timeline;
-streaming.updateText('Narration continued', 0, 'Narration continued');
+streaming.updateStream(0, 'Narration continued', 'Narration continued');
 assert.equal(streaming.timeline, narrationTimeline);
-streaming.updateText(' ', 0, ' ');
+streaming.updateStream(0, ' ', ' ');
 assert.equal(streaming.timeline.map(e => e.kind).join(','), 'process');
-streaming.updateReasoning(0, ' '); assert.equal(streaming.timeline.length, 0);
+streaming.updateStream(0, undefined, undefined, ' '); assert.equal(streaming.timeline.length, 0);
 const publication = { ...tool('published', 'complete'), previewContent: '```tinybot-ui\n' + 'x'.repeat(30000),
   call: { id: 'published', function: { name: 'publish_preview', arguments: '{}' } }, output: '{"path":"view.html","title":"View"}' };
 streaming.update({ id: 'stream', role: 'assistant', content: '', error: '', status: 'generating', steps: [step('', [publication])] });
@@ -131,7 +131,7 @@ probe.message = firstStep;
 assert.equal(probe.workflowLabel(), '等待模型响应');
 assert.equal(probe.awaitingModel(), true);
 const initialStepViews = firstStep.stepViews;
-firstStep.updateReasoning(0, 'First thought');
+firstStep.updateStream(0, undefined, undefined, 'First thought');
 assert.notEqual(firstStep.stepViews, initialStepViews, 'The first chunk invalidates ArkUI workflow bindings');
 assert.equal(firstStep.stepViews[0], initialStepViews[0], 'The thought row keeps its observed step');
 assert.equal(probe.workflowLabel(), '正在思考');

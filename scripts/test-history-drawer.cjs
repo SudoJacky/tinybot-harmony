@@ -91,12 +91,12 @@ for (const name of ['Alignment','Space','Font','FontWeight','TextOverflow','Colo
   uiGlobals[name] = {};
 }
 const Toolbar = probe('views/ThreadList', 'ThreadList', ['historyToolbar','scopeMenu','searchControl','searchRequested','closeSearch',
-  'updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected','searchHeight','modifySelection'], uiGlobals);
+  'searchInputChanged','updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected','searchHeight','modifySelection'], uiGlobals);
 const focus = [], newChats = [];
 let boardOpens = 0;
 const toolbar = Object.assign(new Toolbar(), {
   active: true, mounted: true, foreground: true, searchOpen: false, toolbarWidth: 280, workbench: true,
-  query: '', visibleCounts: {}, focusRequest: 0, selecting: false, selectedIds: [], archived: false, projectFilter: null,
+  query: '', visibleCounts: {}, focusRequest: 0, searchInputRevision: 0, selecting: false, selectedIds: [], archived: false, projectFilter: null,
   appearance: {}, app: { ready: true, activeProject: { id: 'current' }, projects: [{ id: 'project', name: 'Project' }], filteredThreads: () => [
     { id: 'one', projectId: 'project' }, { id: 'two' }, { id: 'old', projectId: 'deleted' }
   ] },
@@ -128,13 +128,12 @@ assert.equal(buttonActions.has('thread-search-toggle'), false);
 requestFrame();
 assert.deepEqual(focus, ['search-threads']);
 inputChanged('test');
-assert.equal(toolbar.query, 'test');
+assert.equal(toolbar.query, '', 'Search input must defer writes until the render callback returns');
 icons.get('close-thread-search').onTap();
 assert.equal(toolbar.searchOpen, false);
 assert.equal(toolbar.query, '');
 assert.equal(focus.at(-1), null);
 inputChanged('late IME update');
-assert.equal(toolbar.query, '', 'A closed field must ignore late text updates');
 
 toolbar.setScope(false, 'project');
 assert.deepEqual(toolbar.filtered().map(thread => thread.id), ['one']);
@@ -198,17 +197,24 @@ for (const initial of [true, false]) {
 }
 const NavigationPage = probe('pages/Index', 'Index', ['createChat', 'revealChat'], {t: value => value, Diagnostics: { log() {} }});
 (async () => {
-  let cleared = 0, drawerClosed = 0, created = 0;
+  await Promise.resolve();
+  assert.equal(toolbar.query, '', 'A closed field must ignore late text updates');
+  let cleared = 0, drawerClosed = 0, detailClosed = 0, created = 0, destinations = 1;
   const toasts = [];
-  const nav = Object.assign(new NavigationPage(), {paths: {clear(){cleared++;}, size: () => 0}, appearance: {},
+  const nav = Object.assign(new NavigationPage(), {paths: {clear(){cleared++; destinations=0;}, size: () => destinations}, appearance: {},
     getUIContext: () => ({ getPromptAction: () => ({ showToast: value => toasts.push(value.message) }) }),
     app: {canNavigate:true,active:{id:'old'},async newThread(){created++;this.active.id='new';return true;}},
-    workbench:()=>({expanded:true,docked:true}),setDrawer(open){assert.equal(open,false);drawerClosed++;}});
+    workbench:()=>({expanded:true,docked:true}),setDrawer(open){assert.equal(open,false);drawerClosed++;},
+    setDetailPane(open){assert.equal(open,false);detailClosed++;}});
   sidebarProps.call(nav,true).onSelected();
   assert.equal(cleared,1,'Selecting a visible conversation exits Settings');
-  await nav.createChat();assert.equal(cleared,2);assert.equal(created,1);assert.equal(drawerClosed,2);
+  await nav.createChat();assert.equal(cleared,1);assert.equal(created,1);assert.equal(drawerClosed,2);
   nav.app.newThread=async()=>false;
-  await nav.createChat();assert.equal(cleared,2,'Failed creation leaves the current page intact');
+  await nav.createChat();assert.equal(drawerClosed,2,'Failed creation leaves the current page intact');
   assert.deepEqual(toasts, ['无法创建新对话。']);
+  nav.workbench = () => ({ expanded: false, docked: false });
+  nav.revealChat(); assert.equal(detailClosed, 0, 'Keep a hidden detail pane out of the history close animation');
+  nav.detailPaneOpen = true;
+  nav.revealChat(); assert.equal(detailClosed, 1);
   console.log('PASS tablet sidebar survives destinations; selection and successful new chat return to chat');
 })().catch(error=>{console.error(error);process.exitCode=1;});

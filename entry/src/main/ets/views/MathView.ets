@@ -1,70 +1,186 @@
 import { common } from '@kit.AbilityKit';
-import { ColorMetrics } from '@kit.ArkUI';
-import { webview } from '@kit.ArkWeb';
+import { ColorMetrics, FrameCallback, LengthMetrics } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
-import { MathContent } from '../model/MathContent';
-import { markdownSpans } from '../model/Markdown';
-import { loadMathHost } from '../services/MathResources';
+import { MarkdownSpan } from '../model/Markdown';
+import { acquireCachedMath, acquireMath, MathImage, MathLease } from '../services/MathResources';
+
+interface MathSpan extends MarkdownSpan {
+  image?: MathImage;
+  failed: boolean;
+}
+
+interface MathRow {
+  spans: MathSpan[];
+  block: boolean;
+}
+
+class MathLayoutFrame extends FrameCallback {
+  private readonly apply: () => void;
+  constructor(apply: () => void) { super(); this.apply = apply; }
+  onFrame(_time: number): void { this.apply(); }
+  onIdle(_time: number): void {}
+}
 
 @Component
 export struct MathView {
-  @StorageProp('tinybot.appearance.style') @Watch('schedule') private appearance: AppearanceStyle = new AppearanceStyle();
-  @StorageProp('tinybot.appearance.dark') @Watch('schedule') private dark: boolean = false;
-  @Prop @Watch('schedule') content: string = '';
-  @Prop @Watch('schedule') display: boolean = false;
-  @Prop @Watch('schedule') fontSize: number = 16;
-  @Prop @Watch('schedule') bold: boolean = false;
-  @Prop @Watch('schedule') color: ResourceColor = $r('app.color.text_primary');
-  @Prop @Watch('schedule') selectable: boolean = true;
-  @State private heightValue: number = 32;
-  @State private failed: boolean = false;
-  private controller: webview.WebviewController = new webview.WebviewController();
+  @StorageProp('tinybot.appearance.style') @Watch('refresh') private appearance: AppearanceStyle = new AppearanceStyle();
+  @StorageProp('tinybot.appearance.dark') @Watch('refresh') private dark: boolean = false;
+  @Prop @Watch('refresh') content: string = '';
+  @Prop @Watch('refresh') display: boolean = false;
+  @Prop @Watch('refresh') fontSize: number = 16;
+  @Prop bold: boolean = false;
+  @Prop @Watch('refresh') color: ResourceColor = $r('app.color.text_primary');
+  @Prop selectable: boolean = true;
+  inlineSpans: (source: string) => MarkdownSpan[] = () => [];
+  @State private rows: MathRow[] = [];
+  @State private availableWidth: number = 0;
+  private source: MarkdownSpan[] = [];
+  private leases: Map<string, MathLease> = new Map();
+  private images: Map<string, MathImage> = new Map();
+  private failed: Set<string> = new Set();
+  private palette: string = '';
+  private emPixels: number = 0;
+  private emVp: number = 0;
   private mounted: boolean = false;
-  private ready: boolean = false;
-  private navigationPending: boolean = false;
-  private revision: number = 0;
-  private timer: number = -1;
-  private startupTimer: number = -1;
-  aboutToAppear(): void { this.mounted = true; }
+  private visible: boolean = false;
+  private layoutScheduled: boolean = false;
+  private generation: number = 0;
+
+  aboutToAppear(): void {
+    this.generation++;
+    this.mounted = true;
+    this.refresh();
+  }
+
   aboutToDisappear(): void {
-    this.mounted = false; this.ready = false; this.revision++;
-    clearTimeout(this.timer); clearTimeout(this.startupTimer); this.timer = -1;
+    this.generation++;
+    this.mounted = false;
+    this.visible = false;
+    this.layoutScheduled = false;
+    this.clear();
   }
-  private report(event: string, error?: Error): void {
+
+  private clear(): void {
+    this.leases.forEach((lease: MathLease) => lease.release());
+    this.leases.clear();
+    this.images.clear();
+    this.failed.clear();
+  }
+
+  private rgb(): string {
+    const color = ColorMetrics.resourceColor(this.color);
+    return '#' + color.red.toString(16).padStart(2, '0') +
+      color.green.toString(16).padStart(2, '0') + color.blue.toString(16).padStart(2, '0');
+  }
+
+  private refresh(): void {
     if (!this.mounted) { return; }
-    this.failed = true;
-    clearTimeout(this.startupTimer);
-    Diagnostics.log('error', 'math', event, undefined, error);
+    const palette = this.rgb() + (this.display ? ':display' : '');
+    const ui = this.getUIContext();
+    const pixels = ui.fp2px(this.fontSize) * (this.display ? 1.18 : 1);
+    const emPixels = Math.ceil(pixels);
+    this.emVp = ui.px2vp(pixels);
+    if (this.palette !== palette || this.emPixels !== emPixels) {
+      this.clear(); this.palette = palette; this.emPixels = emPixels;
+    }
+    this.source = this.display ? [{ text: this.content, kind: 'math', url: '' }] : this.inlineSpans(this.content);
+    if (this.leases.size) {
+      const wanted = new Set<string>();
+      this.source.forEach((span: MarkdownSpan) => { if (span.kind === 'math') { wanted.add(span.text); } });
+      this.leases.forEach((lease: MathLease, tex: string) => {
+        if (wanted.has(tex)) { return; }
+        this.leases.delete(tex);
+        this.images.delete(tex);
+        this.failed.delete(tex);
+        lease.release();
+      });
+    }
+    const color = this.palette.slice(0, 7);
+    // A warm formula can take part in the first layout. Misses still wait for visibility.
+    this.source.forEach((span: MarkdownSpan) => {
+      if (span.kind !== 'math' || this.leases.has(span.text)) { return; }
+      const hit = acquireCachedMath(span.text, this.display, color, this.emPixels);
+      if (!hit) { return; }
+      this.leases.set(span.text, hit);
+      this.images.set(span.text, hit.image!);
+    });
+    this.rebuild();
+    this.request();
   }
-  private async attach(): Promise<void> {
-    try {
-      this.startupTimer = setTimeout(() => this.report('startup_timeout'), 10000);
-      const host = await loadMathHost(this.getUIContext().getHostContext() as common.UIAbilityContext);
-      if (!this.mounted) { return; }
-      this.navigationPending = true;
-      this.controller.loadData(host, 'text/html', 'UTF-8', 'https://tinybot-math.invalid/', 'https://tinybot-math.invalid/');
-    } catch (error) { this.report('load_failed', error as Error); }
+
+  private request(): void {
+    if (!this.visible || !this.mounted) { return; }
+    const color = this.palette.slice(0, 7);
+    this.source.forEach((span: MarkdownSpan) => {
+      if (span.kind !== 'math' || this.leases.has(span.text)) { return; }
+      const tex = span.text;
+      const lease = acquireMath(tex, this.display, color, this.emPixels);
+      this.leases.set(tex, lease);
+      lease.result.then((image: MathImage) => {
+        if (this.leases.get(tex) !== lease) { return; }
+        this.images.set(tex, image);
+        this.scheduleLayout();
+      }, () => {
+        if (this.leases.get(tex) !== lease) { return; }
+        this.failed.add(tex);
+        this.scheduleLayout();
+      });
+    });
   }
-  private schedule(): void {
-    if (!this.mounted || !this.ready || this.failed || this.timer !== -1) { return; }
-    this.timer = setTimeout(() => { this.timer = -1; this.render(); }, 32);
+
+  private setVisibility(visible: boolean): void {
+    this.visible = visible;
+    if (visible) { this.request(); return; }
+    this.leases.forEach((lease: MathLease, tex: string) => {
+      if (this.images.has(tex) || this.failed.has(tex)) { return; }
+      this.leases.delete(tex);
+      lease.release();
+    });
   }
-  private cssColor(value: ResourceColor): string {
-    const color = ColorMetrics.resourceColor(value);
-    return `rgba(${color.red},${color.green},${color.blue},${color.alpha / 255})`;
+
+  private imageWidth(image: MathImage): number { return Math.max(1, image.width * this.emVp); }
+  private imageHeight(image: MathImage): number { return Math.max(1, image.height * this.emVp); }
+
+  private scheduleLayout(): void {
+    if (this.layoutScheduled || !this.mounted) { return; }
+    this.layoutScheduled = true;
+    const generation = this.generation;
+    this.getUIContext().postFrameCallback(new MathLayoutFrame(() => {
+      if (this.generation !== generation) { return; }
+      this.layoutScheduled = false;
+      this.rebuild();
+    }));
   }
-  private async render(): Promise<void> {
-    if (!this.mounted || !this.ready || this.failed) { return; }
-    try {
-      const data: MathContent = { revision: ++this.revision, spans: this.display ? [{ kind: 'math', text: this.content, url: '' }] : markdownSpans(this.content),
-        display: this.display, size: this.fontSize, bold: this.bold, color: this.cssColor(this.color),
-        accent: this.cssColor(this.appearance.accent), selectable: this.selectable };
-      // JSON is passed to the packaged function; reply text never becomes HTML or executable code.
-      await this.controller.runJavaScript('window.renderMath(' + JSON.stringify(data) + ')');
-    } catch (error) { this.report('render_failed', error as Error); }
+
+  private rebuild(): void {
+    if (!this.mounted) { return; }
+    const rows: MathRow[] = [];
+    let inline: MathSpan[] = [];
+    this.source.forEach((span: MarkdownSpan) => {
+      const image = span.kind === 'math' && !this.failed.has(span.text) ? this.images.get(span.text) : undefined;
+      const item: MathSpan = { kind: span.kind, text: span.text, url: span.url, image: image, failed: this.failed.has(span.text) };
+      if (this.display || (image && this.availableWidth > 0 && this.imageWidth(image) > this.availableWidth)) {
+        if (inline.length) { rows.push({ spans: inline, block: false }); inline = []; }
+        rows.push({ spans: [item], block: true });
+      } else {
+        inline.push(item);
+      }
+    });
+    if (inline.length) { rows.push({ spans: inline, block: false }); }
+    this.rows = rows;
   }
+
+  private onImageError(tex: string, id: number): () => void {
+    return () => {
+      if (this.images.get(tex)?.id !== id || this.failed.has(tex)) { return; }
+      this.failed.add(tex);
+      Diagnostics.log('warn', 'math', 'bitmap_display_failed');
+      this.scheduleLayout();
+    };
+  }
+
   private async open(url: string): Promise<void> {
     if (!/^https?:\/\//.test(url)) { return; }
     try { await (this.getUIContext().getHostContext() as common.UIAbilityContext).startAbility({ action: 'ohos.want.action.viewData', uri: url }); }
@@ -72,43 +188,88 @@ export struct MathView {
       if (this.mounted) { this.getUIContext().getPromptAction().showToast({ message: t('无法打开链接，可复制后在浏览器中打开。') }); }
     }
   }
-  build() {
-    Column() {
-      if (this.failed) {
-        Text(t('公式渲染失败')).fontSize(12).fontColor($r('app.color.danger'))
-        Text(this.content).fontSize(this.fontSize).fontColor(this.color)
-          .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None)
+
+  @Builder
+  blockImage(index: number) {
+    Image(this.rows[index].spans[0].image!.pixelMap)
+      .width(this.imageWidth(this.rows[index].spans[0].image!))
+      .height(this.imageHeight(this.rows[index].spans[0].image!))
+      .objectFit(ImageFit.Fill)
+      .accessibilityText(this.rows[index].spans[0].text)
+      .onError(this.onImageError(this.rows[index].spans[0].text, this.rows[index].spans[0].image!.id))
+  }
+
+  @Builder
+  block(index: number) {
+    if (this.rows[index].spans[0].image) {
+      if (this.availableWidth > 0 && this.imageWidth(this.rows[index].spans[0].image!) > this.availableWidth) {
+        Scroll() { this.blockImage(index) }
+          .width('100%').scrollable(ScrollDirection.Horizontal)
       } else {
-        Web({ src: '', controller: this.controller })
-          .width('100%').height(this.heightValue).backgroundColor(Color.Transparent)
-          .javaScriptAccess(true).domStorageAccess(false).databaseAccess(false).fileAccess(false)
-          .onlineImageAccess(false).blockNetwork(true).zoomAccess(false)
-          .nestedScroll({ scrollUp: NestedScrollMode.PARENT_FIRST, scrollDown: NestedScrollMode.PARENT_FIRST })
-          .onControllerAttached(() => { this.attach(); })
-          .onPageEnd(() => {
-            if (!this.mounted || this.ready || this.failed) { return; }
-            this.ready = true; clearTimeout(this.startupTimer); this.render();
-          })
-          .onTitleReceive((event) => {
-            const match = event.title.match(/^math:(\d+):(\d+)$/);
-            if (!match || Number(match[1]) !== this.revision) { return; }
-            const height = Number(match[2]);
-            Promise.resolve().then(() => {
-              if (this.mounted && Number(match[1]) === this.revision) { this.heightValue = Math.max(1, height); }
-            });
-          })
-          .onLoadIntercept((event) => {
-            const url = event.data.getRequestUrl();
-            if (this.navigationPending && event.data.isMainFrame() && url.startsWith('data:text/html')) {
-              this.navigationPending = false; return false;
-            }
-            if (event.data.isMainFrame() && /^https?:\/\//.test(url)) { this.open(url); }
-            return url !== 'about:blank';
-          })
-          .onPermissionRequest((event) => event.request.deny())
-          .onErrorReceive((event) => { if (event.request.isMainFrame()) { this.report('page_failed'); } })
-          .onRenderExited(() => this.report('process_exited'))
+        Row() { this.blockImage(index) }.width('100%').justifyContent(FlexAlign.Center)
+      }
+    } else if (this.rows[index].spans[0].failed) {
+      Text(t('公式渲染失败')).fontSize(12).fontColor($r('app.color.danger'))
+      Text(this.rows[index].spans[0].text).fontSize(this.fontSize).fontColor($r('app.color.danger'))
+        .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None)
+    } else {
+      Text(this.rows[index].spans[0].text).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .fontSize(this.fontSize).fontColor(this.color)
+    }
+  }
+
+  @Builder
+  prose(index: number) {
+    Text() {
+      ForEach(this.rows[index].spans, (span: MathSpan) => {
+        if (span.image) {
+          ImageSpan(span.image.pixelMap)
+            .width(this.imageWidth(span.image)).height(this.imageHeight(span.image))
+            .objectFit(ImageFit.Fill).verticalAlign(ImageSpanAlignment.BASELINE)
+            .baselineOffset(LengthMetrics.vp(-span.image.descent * this.emVp))
+            .accessibilityText(span.text)
+            .onError(this.onImageError(span.text, span.image.id))
+        } else if (span.kind === 'code') {
+          Span(span.text).fontFamily('monospace').fontSize(this.fontSize - 2)
+            .textBackgroundStyle({ color: $r('app.color.surface_variant'), radius: 4 })
+        } else {
+          Span(span.text).fontWeight(this.bold || span.kind === 'bold' ? FontWeight.Bold : FontWeight.Normal)
+            .fontStyle(span.kind === 'italic' ? FontStyle.Italic : FontStyle.Normal)
+            .fontColor(span.failed ? $r('app.color.danger') : span.kind === 'link' ? this.appearance.accent : this.color)
+            .decoration({ type: span.kind === 'link' ? TextDecorationType.Underline :
+              span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None })
+            .onClick(() => { if (span.url) { this.open(span.url); } })
+        }
+      }, (span: MathSpan, offset: number) => JSON.stringify([offset, span.kind, span.text, span.url, span.image?.id, span.failed]))
+    }.fontFamily(this.appearance.fontFamily).fontSize(this.fontSize).fontColor(this.color)
+      .lineSpacing(LengthMetrics.vp(3), { onlyBetweenLines: true })
+      .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).width('100%')
+  }
+
+  build() {
+    Column({ space: 4 }) {
+      if (this.display && this.rows.length) {
+        this.block(0)
+      } else {
+        ForEach(this.rows, (_row: MathRow, index: number) => {
+          if (this.rows[index].block) { this.block(index) } else { this.prose(index) }
+        }, (_row: MathRow, index: number) => `${index}`)
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
+      .onAreaChange((previous: Area, area: Area) => {
+        const width = Number(area.width);
+        if (previous.width === area.width && width === this.availableWidth) { return; }
+        const generation = this.generation;
+        Promise.resolve().then(() => {
+          if (this.mounted && generation === this.generation && width !== this.availableWidth) {
+            this.availableWidth = width;
+            if (!this.display && this.images.size) { this.scheduleLayout(); }
+          }
+        });
+      })
+      .onVisibleAreaChange([0], (visible: boolean) => {
+        const generation = this.generation;
+        Promise.resolve().then(() => { if (this.mounted && generation === this.generation) { this.setVisibility(visible); } });
+      })
   }
 }

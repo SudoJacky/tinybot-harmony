@@ -10,7 +10,8 @@ function load(name) {
   const exports = {}; cache.set(file, exports);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS, experimentalDecorators: true
-  } }).outputText, { exports, Observed: c => c, require: id => load(path.resolve(path.dirname(file), id)) });
+  } }).outputText, { exports, Observed: c => c, DataOperationType: { ADD: 'add', RELOAD: 'reload' },
+    require: id => load(path.resolve(path.dirname(file), id)) });
   return exports;
 }
 const from = name => load(path.join(srcRoot, name));
@@ -63,7 +64,12 @@ console.log('PASS repeated and failed publications, distinct artifacts, immutabl
 
 const data = { id: 'thread', title: 'Test', updatedAt: 0, messages: messages.map(m => ({ ...m, role: 'assistant', content: '', status: 'complete', error: '' })) };
 const thread = new ThreadViewModel(data), source = new MessageListSource();
-let reloads = 0; const listener = { onDataReloaded() { reloads++; } };
+let reloads = 0;
+const additions = [];
+const listener = { onDatasetChange([operation]) {
+  if (operation.type === 'reload') { reloads++; }
+  else { additions.push([operation.index, operation.count]); }
+} };
 source.registerDataChangeListener(listener); source.update(thread.id, thread.messages);
 source.update(thread.id, thread.messages.slice()); assert.equal(reloads, 1, 'Streaming must not reload identical lazy rows');
 const retained = source.getData(0); retained.disclosures.get('preview').open = true;
@@ -71,9 +77,108 @@ retained.uiPresentation.webHeights.set('0:1/web', 640);
 thread.update(data); source.update(thread.id, thread.messages);
 assert.equal(reloads, 1); assert.equal(source.getData(0), retained); assert.equal(retained.uiPresentation.webHeights.get('0:1/web'), 640);
 assert.equal(retained.disclosures.get('preview').open, true);
-source.update('other-thread', thread.messages); assert.equal(reloads, 2);
-source.unregisterDataChangeListener(listener); source.update('third-thread', []); assert.equal(reloads, 2);
+source.update(thread.id, [{ id: 'older' }, ...thread.messages]);
+assert.deepEqual(additions, [[0, 1]]);
+assert.equal(source.getData(1), retained, 'prepending keeps mounted row identities');
+source.update(thread.id, [{ id: 'older' }, ...thread.messages]);
+assert.equal(reloads, 2, 'replaced rows require key reconciliation');
+const previous = [source.getData(0), ...thread.messages];
+source.update(thread.id, [...previous, { id: 'last' }]);
+assert.deepEqual(additions, [[0, 1], [previous.length, 1]]);
+source.update('other-thread', thread.messages); assert.equal(reloads, 3);
+source.unregisterDataChangeListener(listener); source.update('third-thread', []); assert.equal(reloads, 3);
 console.log('PASS lazy row identity, retained disclosure/height state, thread switch and listener cleanup');
+
+{
+  let rowReads = 0;
+  const rows = new Proxy(Array.from({ length: 2400 }, (_, id) => ({ id: String(id) })), {
+    get(target, key) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) rowReads++;
+      return Reflect.get(target, key);
+    }
+  });
+  const source = new MessageListSource();
+  const operations = [];
+  source.registerDataChangeListener({ onDatasetChange([change]) { operations.push(change); } });
+  source.update('long', rows, 60);
+  assert.equal(source.totalCount(), 60);
+  assert.equal(source.getData(0).id, '2340');
+  assert.equal(source.getData(-1), undefined);
+  assert.equal(source.indexOf('2300'), -1);
+  source.update('long', rows, 120);
+  assert.deepEqual([operations.at(-1).type, operations.at(-1).index, operations.at(-1).count], ['add', 0, 60]);
+  assert.equal(source.indexOf('2340'), 60);
+  source.update('long', rows, rows.length);
+  rowReads = 0;
+  for (let i = 0; i < 50; i++) source.update('long', rows, rows.length);
+  assert.equal(rowReads, 0, 'Unrelated chat state changes must not scan the full search window');
+}
+
+{
+  let starts = 0;
+  let nextTimer = 0;
+  const timers = new Map();
+  const clock = { setTimeout(fn, delay) { timers.set(++nextTimer, { fn, delay }); return nextTimer; },
+    clearTimeout(id) { timers.delete(id); } };
+  const frame = () => { for (const [id, timer] of [...timers]) { if (timer.delay === 16) { timers.delete(id); timer.fn(); } } };
+  const resources = { exports: {}, require: () => ({ Diagnostics: { log() {} } }), ...clock };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(srcRoot, 'services/MermaidResources.ets'), 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS }
+  }).outputText, resources);
+  const { mermaidStartup, mermaidPreviews, mermaidPreviewHasContent } = resources.exports;
+  const Mermaid = native('MermaidView', 'MermaidView', ['aboutToAppear', 'activate', 'aboutToDisappear', 'available', 'snapshotKey', 'releasePreview'], {
+    mermaidStartup, mermaidPreviews, ...clock,
+    webview: { WebviewController: class { constructor() { starts++; } } },
+  });
+  const make = (instanceId, visibleRatio, content) => {
+    const chart = Object.assign(new Mermaid(), { instanceId, visibleRatio, content, widthPx: 300, dark: false, lifetime: 0,
+      revision: 0, foreground: true, scrolling: true, timeout: -1, capturePreview() {} });
+    chart.aboutToAppear(); return chart;
+  };
+  const chart = make(1, 0.6, 'first'), next = make(2, 0.9, 'second');
+  chart.activate(); frame();
+  assert.equal(starts, 0, 'Scrolling past a chart does not initialize ArkWeb');
+  chart.scrolling = next.scrolling = false;
+  chart.activate(); next.activate(); frame();
+  assert.equal(starts, 1);
+  assert.ok(next.controller, 'Start the more visible chart first');
+  assert.equal(chart.controller, undefined, 'Only one chart starts at a time');
+  chart.scrolling = true; chart.activate();
+  next.aboutToDisappear(); frame();
+  assert.equal(starts, 1, 'A queued chart is dropped when scrolling restarts');
+  chart.scrolling = false; chart.activate(); frame();
+  assert.equal(starts, 2);
+  chart.aboutToDisappear();
+  assert.equal(chart.controller, undefined);
+  assert.equal(timers.size, 0);
+
+  const released = [];
+  const pixel = id => ({ id, getPixelBytesNumber: () => 8 * 1024 * 1024, async release() { released.push(id); } });
+  const cached = make(3, 1, 'first');
+  mermaidPreviews.store(cached.snapshotKey(), pixel('cached'), 120);
+  cached.scrolling = false; cached.activate(); frame();
+  assert.equal(starts, 2, 'A warm diagram appears without a Web controller');
+  assert.equal(cached.diagramHeight, 120);
+  assert.equal(cached.preview.pixel.id, 'cached');
+  for (const key of ['one', 'two', 'three', 'four']) { mermaidPreviews.store(key, pixel(key), 120); }
+  assert.ok(!released.includes('cached') && released.includes('one'), 'A displayed preview survives eviction of older unpinned images');
+  cached.useLive = true; cached.activate(); frame();
+  assert.equal(starts, 3, 'The original Web remains available when the user opens a warm diagram');
+  assert.equal(cached.preview.pixel.id, 'cached', 'Retain the image while the original Web loads');
+  cached.aboutToDisappear();
+  console.log('PASS Mermaid startup is staggered, clears on scroll, and reuses pinned images with live selection on demand');
+  (async () => {
+    let submitted = 0;
+    const sample = colors => ({ async createScaledPixelMap() {
+      return { getPixelBytesNumber: () => colors.length, async readPixelsToBuffer(out) { new Uint8Array(out).set(colors); },
+        async release() { submitted++; } };
+    } });
+    assert.equal(await mermaidPreviewHasContent(sample([240, 240, 240, 255, 240, 240, 240, 255]), 2, 1), false);
+    assert.equal(await mermaidPreviewHasContent(sample([240, 240, 240, 255, 100, 72, 110, 255]), 2, 1), true);
+    assert.equal(submitted, 2);
+    console.log('PASS Mermaid rejects flat snapshots and releases sampled pixel maps');
+  })().catch(error => { console.error(error); process.exitCode = 1; });
+}
 
 let now = 0, sequence = 0, controllers = 0; const timers = new Map();
 const logs = [], context = { Diagnostics: from('model/Diagnostics').Diagnostics,

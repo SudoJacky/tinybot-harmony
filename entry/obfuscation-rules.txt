@@ -26,3 +26,8 @@ globalThis
 
 # Dynamic import namespace accesses must match this exported builder name.
 drawingBoardBuilder
+
+# ThreadWorker loads this entry by its packaged path.
+-keep-file-name
+workers
+MathWorker

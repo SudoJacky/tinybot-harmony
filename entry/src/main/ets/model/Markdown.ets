@@ -78,15 +78,28 @@ function parseMarkdown(source: string): MarkdownParse {
   return { blocks: blocks, starts: starts };
 }
 
-export interface MarkdownUpdate { start: number; blocks: MarkdownBlock[]; }
+export interface MarkdownUpdate { start: number; blocks: MarkdownBlock[]; cached?: boolean; }
+
+interface CachedMarkdown extends MarkdownParse { weight: number; }
+const MIN_CACHED_MARKDOWN_CHARS: number = 1024;
+const MARKDOWN_CACHE_WEIGHT: number = 512 * 1024;
+const settledMarkdown: Map<string, CachedMarkdown> = new Map();
+let markdownCacheWeight: number = 0;
+
 // Keep the final two blocks mutable: a partial table separator may initially
 // parse as its own block, then turn the preceding line into a table header.
 export class MarkdownDocument {
   private source: string = '';
   private starts: number[] = [];
-  update(content: string): MarkdownUpdate {
+  update(content: string, settled: boolean = false): MarkdownUpdate {
     const source = content.replace(/\r\n/g, '\n');
     if (source === this.source) { return { start: this.starts.length, blocks: [] }; }
+    const cached = settled ? settledMarkdown.get(source) : undefined;
+    if (cached) {
+      settledMarkdown.delete(source); settledMarkdown.set(source, cached);
+      this.source = source; this.starts = cached.starts.slice();
+      return { start: 0, blocks: cached.blocks, cached: true };
+    }
     const append = source.startsWith(this.source);
     const start = append ? Math.max(0, this.starts.length - 2) : 0;
     const offset = append && this.starts.length ? this.starts[start] : 0;
@@ -95,6 +108,20 @@ export class MarkdownDocument {
     for (const position of parsed.starts) { this.starts.push(offset + position); }
     this.source = source;
     return { start: start, blocks: parsed.blocks };
+  }
+
+  retainComplete(blocks: MarkdownBlock[]): void {
+    if (this.source.length < MIN_CACHED_MARKDOWN_CHARS || settledMarkdown.has(this.source)) { return; }
+    // Weight accounts for both source text and per-block objects. Keep the cache useful for several replies.
+    const weight = this.source.length + 32 * blocks.length;
+    if (weight > MARKDOWN_CACHE_WEIGHT / 4) { return; }
+    for (const source of settledMarkdown.keys()) {
+      if (markdownCacheWeight + weight <= MARKDOWN_CACHE_WEIGHT) { break; }
+      markdownCacheWeight -= settledMarkdown.get(source)!.weight;
+      settledMarkdown.delete(source);
+    }
+    settledMarkdown.set(this.source, { starts: this.starts.slice(), blocks: blocks.slice(), weight: weight });
+    markdownCacheWeight += weight;
   }
 }
 function tableCells(line: string): string[] { return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim()); }

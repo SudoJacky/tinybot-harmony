@@ -1,15 +1,151 @@
-import { common } from '@kit.AbilityKit';
-import { util } from '@kit.ArkTS';
-import { mathHost } from '../model/MathContent';
+import { worker, MessageEvents } from '@kit.ArkTS';
+import { image } from '@kit.ImageKit';
+import { Diagnostics } from '../model/Diagnostics';
+import { MathDimensions, MathRequest, MathResponse } from '../model/MathContent';
 
-// Shared across formula paragraphs; load lazily so ordinary chat startup is unchanged.
-let cachedHost: Promise<string> | undefined;
-export function loadMathHost(context: common.UIAbilityContext): Promise<string> {
-  if (!cachedHost) {
-    cachedHost = Promise.all(['katex.min.js', 'katex.min.css', 'host.js'].map(async (name: string): Promise<string> => {
-      const bytes = await context.resourceManager.getRawFileContent('math/' + name);
-      return util.TextDecoder.create('utf-8').decodeWithStream(bytes);
-    })).then((parts: string[]): string => mathHost(parts[0], parts[1], parts[2]));
+export interface MathImage extends MathDimensions {
+  id: number;
+  pixelMap: image.PixelMap;
+}
+
+export interface MathLease {
+  result: Promise<MathImage>;
+  image?: MathImage;
+  release: () => void;
+}
+
+interface Entry {
+  key: string;
+  job: MathRequest;
+  result: Promise<MathImage>;
+  resolve: (image: MathImage) => void;
+  reject: (error: Error) => void;
+  users: number;
+  bytes: number;
+  done: boolean;
+  image?: MathImage;
+}
+
+// Visible views pin their bitmaps. Evict least recently used unpinned bitmaps as needed.
+const CACHE_BYTES: number = 32 * 1024 * 1024;
+const CACHE_ENTRIES: number = 384;
+const entries = new Map<string, Entry>();
+const waiting = new Map<string, Entry>();
+let renderer: worker.ThreadWorker | undefined;
+let active: Entry | undefined;
+let timeout: number = -1;
+let sequence: number = 0;
+let bytes: number = 0;
+
+function trim(): void {
+  for (const key of entries.keys()) {
+    if (bytes <= CACHE_BYTES && entries.size <= CACHE_ENTRIES) { return; }
+    const entry = entries.get(key)!;
+    if (!entry.done || entry.users) { continue; }
+    entries.delete(key);
+    bytes -= entry.bytes;
+    entry.image?.pixelMap.release().catch((error: Error) => Diagnostics.log('warn', 'math', 'bitmap_release_failed', undefined, error));
   }
-  return cachedHost;
+}
+
+function complete(response?: MathResponse, failure: string = 'worker_failed'): void {
+  const entry = active;
+  if (!entry) { return; }
+  clearTimeout(timeout); timeout = -1; active = undefined;
+  entry.done = true;
+  if (response?.pixelMap && !response.error) {
+    entry.bytes = response.bytes; bytes += response.bytes;
+    entry.image = { id: ++sequence, pixelMap: response.pixelMap, width: response.width, height: response.height, descent: response.descent };
+    entry.resolve(entry.image);
+  } else {
+    const code = response?.error || failure;
+    if (code !== 'invalid_formula' && code !== 'formula_too_large') { entries.delete(entry.key); }
+    Diagnostics.log('warn', 'math', code, { code: response?.nativeCode });
+    entry.reject(new Error(code));
+  }
+  trim();
+  next();
+}
+
+function restart(code: string): void {
+  const previous = renderer;
+  renderer = undefined;
+  previous?.terminate();
+  complete(undefined, code);
+}
+
+function dispatch(entry: Entry): void {
+  if (!renderer) {
+    const thread = new worker.ThreadWorker('entry/ets/workers/MathWorker.ets');
+    renderer = thread;
+    thread.onmessage = (event: MessageEvents) => {
+      if (renderer === thread) { complete(event.data as MathResponse); }
+    };
+    thread.onerror = () => { if (renderer === thread) { restart('worker_failed'); } };
+    thread.onmessageerror = () => { if (renderer === thread) { restart('worker_message_failed'); } };
+    thread.onexit = () => {
+      if (renderer === thread) { renderer = undefined; complete(undefined, 'worker_exited'); }
+    };
+  }
+  timeout = setTimeout(() => restart('worker_timeout'), 8000);
+  renderer.postMessage(entry.job);
+}
+
+function next(): void {
+  if (active || !waiting.size) { return; }
+  for (const key of waiting.keys()) {
+    const entry = waiting.get(key)!;
+    waiting.delete(key);
+    active = entry;
+    try { dispatch(entry); }
+    catch (error) {
+      Diagnostics.log('warn', 'math', 'worker_dispatch_failed', undefined, error as Error);
+      restart('worker_dispatch_failed');
+    }
+    return;
+  }
+}
+
+function mathKey(tex: string, display: boolean, color: string, emPixels: number): string {
+  return JSON.stringify([tex, display, color, emPixels]);
+}
+
+export function acquireCachedMath(tex: string, display: boolean, color: string, emPixels: number): MathLease | undefined {
+  const entry = entries.get(mathKey(tex, display, color, emPixels));
+  return entry?.image ? pin(entry) : undefined;
+}
+
+export function acquireMath(tex: string, display: boolean, color: string, emPixels: number): MathLease {
+  const key = mathKey(tex, display, color, emPixels);
+  let entry = entries.get(key);
+  if (!entry) {
+    let resolve: (image: MathImage) => void = () => {};
+    let reject: (error: Error) => void = () => {};
+    const result = new Promise<MathImage>((answer, fail) => { resolve = answer; reject = fail; });
+    const job: MathRequest = { tex: tex, display: display, color: color, emPixels: emPixels };
+    entry = { key: key, job: job, result: result, resolve: resolve, reject: reject, users: 0, bytes: 0, done: false };
+    waiting.set(key, entry);
+  }
+  const lease = pin(entry);
+  next();
+  return lease;
+}
+
+function pin(leased: Entry): MathLease {
+  const key = leased.key;
+  leased.users++;
+  entries.delete(key);
+  entries.set(key, leased);
+  let released = false;
+  return { result: leased.result, image: leased.image, release: () => {
+    if (released) { return; }
+    released = true;
+    leased.users--;
+    if (!leased.users && waiting.get(key) === leased) {
+      waiting.delete(key);
+      entries.delete(key);
+      leased.reject(new Error('cancelled'));
+    }
+    trim();
+  }};
 }

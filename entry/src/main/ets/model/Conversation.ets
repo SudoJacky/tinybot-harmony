@@ -221,7 +221,12 @@ function restoreLocalThread(thread: ExperimentalThreadData): void {
 }
 
 export function parseAppData(text: string): AppData {
-  const data = JSON.parse(text) as ExperimentalAppData;
+  return normalizeAppData(JSON.parse(text) as AppData);
+}
+
+// The repository already owns its decoded records and can validate them in place.
+export function normalizeAppData(decoded: AppData): AppData {
+  const data = decoded as ExperimentalAppData;
   if (!data || ![1, 2].includes(data.version) || !data.config || !Array.isArray(data.threads) ||
     typeof data.activeThreadId !== 'string' || typeof data.config.configured !== 'boolean' || typeof data.config.baseUrl !== 'string' ||
     typeof data.config.model !== 'string' || typeof data.config.systemPrompt !== 'string' ||

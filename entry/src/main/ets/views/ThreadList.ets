@@ -26,10 +26,20 @@ class ThreadSection {
   id: string;
   title: string;
   threads: ThreadViewModel[] = [];
+  positions: Map<string, number> = new Map();
 
   constructor(id: string, title: string) {
     this.id = id; this.title = title;
   }
+}
+
+interface ThreadSections {
+  threads: ThreadViewModel[];
+  projects: ProjectData[];
+  scope: string | null;
+  hideEmpty: boolean;
+  sections: ThreadSection[];
+  byId: Map<string, ThreadSection>;
 }
 
 @Component
@@ -40,16 +50,19 @@ struct ThreadRow {
   @Prop desktop: boolean = false;
   @Prop lastBranch: boolean = false;
   @Prop activePath: boolean = false;
-  @Prop conversationActive: boolean = true;
+  @Prop current: boolean = false;
+  @Prop navigationLocked: boolean = false;
+  @Prop running: boolean = false;
   @Prop selecting: boolean = false;
   @Prop selected: boolean = false;
   @State private rowHeight: number = 40;
   @ObjectLink thread: ThreadViewModel;
-  @ObjectLink app: ChatViewModel;
+  app!: ChatViewModel;
   onSelected: () => void = () => {};
   onSelectionChanged: (selected: boolean) => void = () => {};
   onModifiedSelection: (range: boolean, additive: boolean) => void = () => {};
   @State private editing: boolean = false;
+  @State private opening: boolean = false;
   @State private name: string = '';
   @State private hovered: boolean = false;
   @State private focused: boolean = false;
@@ -70,11 +83,11 @@ struct ThreadRow {
   }
 
   private locked(): boolean {
-    return !this.app.canNavigate;
+    return this.navigationLocked;
   }
 
   private active(): boolean {
-    return this.conversationActive && this.app.active.id === this.thread.id;
+    return this.current;
   }
   private matchId(): string { return this.thread.messages.find((item) => item.content.toLocaleLowerCase().includes(this.query.trim().toLocaleLowerCase()))?.id || ''; }
   private matchExcerpt(): string {
@@ -85,6 +98,16 @@ struct ThreadRow {
     const offset = message.content.toLocaleLowerCase().indexOf(needle);
     const start = Math.max(0, offset - 18);
     return (start ? '…' : '') + message.content.slice(start, offset + 60).replace(/\s+/g, ' ').trim();
+  }
+
+  private async openThread(): Promise<void> {
+    this.opening = true;
+    try {
+      const query = this.query.trim();
+      const opened = query ? await this.app.openMessage(this.thread.id, this.matchId(), query) :
+        await this.app.selectThread(this.thread.id);
+      if (opened) { this.onSelected(); }
+    } finally { this.opening = false; }
   }
 
   @Builder
@@ -98,10 +121,10 @@ struct ThreadRow {
           .onClick(() => this.app.pinThread(this.thread.id))
         MenuItem(() => materialMenuContent.bind(this)({ label: this.thread.archived ? t('恢复对话') : t('归档'),
           icon: this.thread.archived ? $r('sys.symbol.arrow_right_and_square') : $r('sys.symbol.archivebox') }))
-          .enabled(!this.app.runningThreadIds.includes(this.thread.id))
+          .enabled(!this.running)
           .onClick(() => this.app.archiveThread(this.thread.id))
         MenuItem(() => materialMenuContent.bind(this)({ label: t("删除"), icon: $r('sys.symbol.trash'), danger: true }))
-          .enabled(!this.app.runningThreadIds.includes(this.thread.id))
+          .enabled(!this.running)
           .onClick(() => {
             this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface,
               title: t("删除这段对话？"), message: this.thread.title + t("\n会话工作区中的文件会保留。"),
@@ -154,8 +177,9 @@ struct ThreadRow {
             .animation({ duration: Motion.medium, curve: Motion.standard })
             .hitTestBehavior(this.selecting ? HitTestMode.Default : HitTestMode.None)
           Row({ space: 4 }) {
-            if (this.app.runningThreadIds.includes(this.thread.id)) {
-              LoadingProgress().width(14).height(14).color(this.appearance.accent).accessibilityText(t('正在执行'))
+            if (this.running || this.opening) {
+              LoadingProgress().width(14).height(14).color(this.appearance.accent)
+                .accessibilityText(t(this.opening ? '正在打开本地会话…' : '正在执行'))
             }
             if (this.thread.pinned) {
               SymbolGlyph($r('sys.symbol.pin_fill')).fontSize(13).fontColor([this.appearance.accent])
@@ -197,12 +221,12 @@ struct ThreadRow {
         .onFocus(() => { this.focused = true; }).onBlur(() => { this.focused = false; })
         .onKeyEvent((event: KeyEvent) => this.rowKeyEvent(event))
         .onClick(async (event: ClickEvent) => {
-          if (this.locked()) { return; }
+          if (!this.app.canNavigateNow) { return; }
           const range = event?.getModifierKeyState?.(['Shift']) === true;
           const additive = event?.getModifierKeyState?.(['Ctrl']) === true;
           if (range || additive) { this.onModifiedSelection(range, additive); return; }
           if (this.selecting) { this.onSelectionChanged(!this.selected); return; }
-          if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
+          await this.openThread();
         })
         .bindContextMenu(this.actions, ResponseType.LongPress, {
           systemMaterial: this.appearance.menu, mask: false })
@@ -252,7 +276,9 @@ export struct ThreadList {
   @State @Watch('searchVisibilityChanged') private searchOpen: boolean = false;
   @State private toolbarWidth: number = 44;
   private mounted: boolean = false;
+  private sectionCache?: ThreadSections;
   private focusRequest: number = 0;
+  private searchInputRevision: number = 0;
   onNewChat: (projectId?: string) => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
@@ -289,9 +315,9 @@ export struct ThreadList {
     this.mounted = true;
     if (this.searchRequest > 0) { this.searchRequested(); }
   }
-  aboutToDisappear(): void { this.mounted = false; this.focusRequest++; this.closeCloudPicker(); }
+  aboutToDisappear(): void { this.mounted = false; this.focusRequest++; this.searchInputRevision++; this.closeCloudPicker(); }
   private searchAvailabilityChanged(): void { if (!this.active || !this.foreground) { this.focusRequest++; } }
-  private searchVisibilityChanged(): void { if (!this.searchOpen) { this.focusRequest++; } }
+  private searchVisibilityChanged(): void { if (!this.searchOpen) { this.focusRequest++; this.searchInputRevision++; } }
 
   // The rail can mount the search field and request its focus in the same frame.
   private searchRequested(): void {
@@ -311,6 +337,14 @@ export struct ThreadList {
     this.searchOpen = false;
     this.getUIContext().getFocusController().clearFocus();
     this.updateQuery('');
+  }
+
+  private searchInputChanged(value: string): void {
+    const revision = ++this.searchInputRevision;
+    // The native editor can deliver a pending change during another view update.
+    Promise.resolve().then(() => {
+      if (this.mounted && this.searchOpen && revision === this.searchInputRevision) { this.updateQuery(value); }
+    });
   }
 
   private updateQuery(query: string): void {
@@ -363,8 +397,8 @@ export struct ThreadList {
   }
 
   private visibleThreadIds(): string[] {
-    return this.sections(this.filtered()).filter(section => this.groupOpen(section.id)).flatMap(section =>
-      this.sectionThreads(section.id).slice(0, this.visibleCount(section.id)).map(thread => thread.id));
+    return this.sections().filter(section => this.groupOpen(section.id)).flatMap(section =>
+      section.threads.slice(0, this.visibleCount(section.id)).map(thread => thread.id));
   }
   private allSelected(): boolean {
     const threads = this.filtered();
@@ -392,9 +426,9 @@ export struct ThreadList {
   private groupOpen(id: string): boolean { return !!this.query.trim() || !this.collapsedProjects.includes(id); }
   private visibleCount(id: string): number { return this.visibleCounts[id] || 20; }
   private onActivePath(id: string, threadId: string): boolean {
-    const threads = this.sectionThreads(id);
-    const index = threads.findIndex((item) => item.id === threadId);
-    const activeIndex = threads.findIndex((item) => item.id === this.app.active.id);
+    const section = this.section(id);
+    const index = section?.positions.get(threadId) ?? -1;
+    const activeIndex = section?.positions.get(this.app.active.id) ?? -1;
     return index >= 0 && activeIndex >= index && activeIndex < this.visibleCount(id);
   }
   private lastBranch(id: string, threadId: string): boolean {
@@ -402,8 +436,11 @@ export struct ThreadList {
     return threads[Math.min(threads.length, this.visibleCount(id)) - 1]?.id === threadId;
   }
   private sectionThreads(id: string): ThreadViewModel[] {
-    const projectIds = new Set(this.app.projects.map((project) => project.id));
-    return this.filtered().filter((thread) => this.threadProject(thread, projectIds) === id);
+    return this.section(id)?.threads || [];
+  }
+  private section(id: string): ThreadSection | undefined {
+    this.sections();
+    return this.sectionCache?.byId.get(id);
   }
   private sectionTitle(id: string): string {
     return this.app.projects.find((project) => project.id === id)?.name || t('普通聊天');
@@ -721,16 +758,28 @@ export struct ThreadList {
     }
   }
 
-  private sections(threads: ThreadViewModel[]): ThreadSection[] {
-    const result = this.app.projects.map((project) => new ThreadSection(project.id, project.name));
+  private sections(): ThreadSection[] {
+    const threads = this.app.filteredThreads(this.query, this.archived);
+    const projects = this.app.projects;
+    const scope = this.projectFilter;
+    const hideEmpty = !!this.query.trim() || this.archived;
+    const cached = this.sectionCache;
+    if (cached && cached.threads === threads && cached.projects === projects && cached.scope === scope &&
+      cached.hideEmpty === hideEmpty) { return cached.sections; }
+    const result = projects.map((project) => new ThreadSection(project.id, project.name));
     const ordinary = new ThreadSection('', t('普通聊天'));
     result.push(ordinary);
+    const byId = new Map<string, ThreadSection>();
+    for (const section of result) { byId.set(section.id, section); }
     for (const thread of threads) {
-      const section = result.find((item: ThreadSection) => item.id === (thread.projectId || '')) || ordinary;
+      const section = byId.get(thread.projectId || '') || ordinary;
+      section.positions.set(thread.id, section.threads.length);
       section.threads.push(thread);
     }
-    return result.filter((section) => (this.projectFilter === null || section.id === this.projectFilter) &&
-      (!(this.query.trim() || this.archived) || section.threads.length > 0));
+    const sections = result.filter((section) => (scope === null || section.id === scope) &&
+      (!hideEmpty || section.threads.length > 0));
+    this.sectionCache = { threads: threads, projects: projects, scope: scope, hideEmpty: hideEmpty, sections: sections, byId: byId };
+    return sections;
   }
 
   @Builder
@@ -790,20 +839,18 @@ export struct ThreadList {
             .onClick(() => this.searchRequested())
         }
       }.width(this.searchHeight()).height(this.searchHeight()).flexShrink(0)
-      TextInput({ text: this.query, placeholder: t('搜索对话') })
-        .id('search-threads').layoutWeight(1).height(this.searchHeight()).padding(0)
-        .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
-        .backgroundColor(Color.Transparent).enabled(this.searchOpen && !this.locked())
-        .focusable(this.searchOpen)
-        .visibility(this.searchOpen ? Visibility.Visible : Visibility.None).accessibilityText(t('搜索对话'))
-        .onChange((value: string) => { if (this.searchOpen) { this.updateQuery(value); } })
-        .onKeyEvent((event: KeyEvent) => {
-          if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
-            this.closeSearch();
-            event.stopPropagation();
-          }
-        })
       if (this.searchOpen) {
+        TextInput({ placeholder: t('搜索对话') })
+          .id('search-threads').layoutWeight(1).height(this.searchHeight()).padding(0)
+          .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
+          .backgroundColor(Color.Transparent).enabled(!this.locked()).accessibilityText(t('搜索对话'))
+          .onChange((value: string) => this.searchInputChanged(value))
+          .onKeyEvent((event: KeyEvent) => {
+            if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
+              this.closeSearch();
+              event.stopPropagation();
+            }
+          })
         IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭搜索'), compId: 'close-thread-search',
           diameter: this.searchHeight(), iconSize: 15, onTap: () => this.closeSearch() })
       }
@@ -919,7 +966,7 @@ export struct ThreadList {
           }
         }.width('100%').padding({ left: Space.sm, right: Space.sm })
       }
-      if (this.sections(this.filtered()).length === 0) {
+      if (this.sections().length === 0) {
         Column({ space: Space.sm }) {
           SymbolGlyph(this.query.trim().length > 0 ? $r('sys.symbol.magnifyingglass') : $r('sys.symbol.ellipsis_message'))
             .fontSize(32).fontColor([$r('app.color.text_tertiary')])
@@ -929,12 +976,14 @@ export struct ThreadList {
       } else {
         List({ space: 6 }) {
           // Retained ForEach nodes may capture IDs, never a derived section/array snapshot.
-          ForEach(this.sections(this.filtered()).map((section) => section.id),
+          ForEach(this.sections().map((section) => section.id),
             (id: string) => {
               ListItemGroup({ header: this.sectionHeader(id), space: 0 }) {
                 if (this.groupOpen(id)) {
                   ForEach(this.sectionThreads(id).slice(0, this.visibleCount(id)), (thread: ThreadViewModel) => {
-                    ListItem() { ThreadRow({ thread: thread, app: this.app, conversationActive: this.selectedSection === '', workbench: this.workbench, desktop: this.desktop, query: this.query, onSelected: () => { this.closeSearch(); this.onSelected(); },
+                    ListItem() { ThreadRow({ thread: thread, app: this.app, current: this.selectedSection === '' && this.app.active.id === thread.id,
+                      navigationLocked: !this.app.canNavigate, running: this.app.runningThreadIds.includes(thread.id),
+                      workbench: this.workbench, desktop: this.desktop, query: this.query, onSelected: () => { this.closeSearch(); this.onSelected(); },
                       selecting: this.selecting, selected: this.selectedIds.includes(thread.id),
                       onSelectionChanged: (selected: boolean) => this.selectThread(thread.id, selected),
                       onModifiedSelection: (range: boolean, additive: boolean) => this.modifySelection(thread.id, range, additive,

@@ -56,7 +56,7 @@ import { CONTENT_GUARD_REFUSAL } from '../model/ContentGuard';
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
-import { SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SettingsToggle, ThreadCheckpoint } from './SessionContracts';
+import { SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SessionStreamUpdate, SettingsToggle, ThreadCheckpoint } from './SessionContracts';
 import { prepareSessionContext, sessionPromptSections, sessionContextSource } from './SessionContext';
 import { PromptSection, renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
@@ -74,6 +74,7 @@ class ThreadExecution {
 // Sole owner of application/session data and admission. No ArkUI or platform Kit imports.
 export class SessionService {
   private pendingCommit?: Promise<void>;
+  private selectingThread: boolean = false;
   private memoryReviewRunning: boolean = false;
   private executions: Map<string, ThreadExecution> = new Map<string, ThreadExecution>();
   private sharedOperation: Promise<void> = Promise.resolve();
@@ -94,14 +95,19 @@ export class SessionService {
   private pendingToolSelections: Map<string, ToolSelection> = new Map<string, ToolSelection>();
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
   private compatibilityIssues: Set<string> = new Set<string>();
+  private readonly pendingStream: Map<string, SessionStreamUpdate> = new Map();
+  private readonly requestStreamFrame: (flush: () => void) => void;
+  private streamFramePending: boolean = false;
 
-  constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources, approval?: ToolApproval) {
+  constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources, approval?: ToolApproval,
+    requestStreamFrame: (flush: () => void) => void = (flush: () => void) => { flush(); }) {
     this.repository = repository;
     this.runtime = runtime;
     this.credentials = credentials;
     this.mcpSettings = new McpSettings(credentials, () => resources.createId(), (message) => resources.reportError('mcp_failed', message));
     this.resources = resources;
     this.approval = approval;
+    this.requestStreamFrame = requestStreamFrame;
     this.profiles = new ProfileSettings(credentials, () => resources.createId());
   }
 
@@ -180,8 +186,10 @@ export class SessionService {
     const state = JSON.parse(JSON.stringify(this.status)) as SessionState;
     state.ready = this.application.ready; state.saveError = this.application.saveError;
     state.compatibilityWarnings = this.application.compatibilityWarnings?.slice() || [];
-    if (this.application.phase !== 'idle') { state.phase = this.application.phase; }
-    state.runningThreadIds = this.runningThreadIds; state.canNavigate = this.canNavigate;
+    // A selection still holds the service write lock. Until it commits, the visible chat keeps its own state.
+    if (this.application.phase !== 'idle' && !this.selectingThread) { state.phase = this.application.phase; }
+    state.runningThreadIds = this.runningThreadIds;
+    state.canNavigate = this.selectingThread ? state.ready && !state.saveError : this.canNavigate;
     return state;
   }
   get canMutate(): boolean { return this.canNavigate && this.status.phase === 'idle'; }
@@ -574,11 +582,18 @@ export class SessionService {
     await this.send(); return true;
   }
   async selectThread(id: string): Promise<boolean> {
+    if (this.data.activeThreadId === id) { return this.canNavigate; }
     if (this.data.threads.some((thread) => thread.id === id && thread.sideChatContext !== undefined)) { return false; }
     return this.mutate(t("打开对话失败："), async () => {
       const thread = this.requireThread(id); await this.ensureThreadWorkspace(thread);
-      this.data.activeThreadId = id; await this.persist();
-    }, 'snapshot', 'navigation');
+      const candidate = copyAppMetadata(this.data);
+      candidate.activeThreadId = id;
+      const draftRevision = this.draftRevision;
+      await this.commitCandidate(candidate, () => {
+        this.data.activeThreadId = id;
+        if (this.draftRevision === draftRevision) { this.dirtyDrafts.clear(); }
+      }, this.draftWriteIds());
+    }, 'selection', 'navigation');
   }
   async deleteThread(id: string): Promise<boolean> {
     return this.deleteThreads([id]);
@@ -1061,12 +1076,9 @@ export class SessionService {
         if (!tool) { throw new Error('Tool event has no matching execution: ' + event.toolCallId); }
         this.emit({ kind: 'tool', state: this.state, threadId: thread.id, messageId: answer.id,
           step: event.step, parentToolCallId: event.parentToolCallId, tool: JSON.parse(JSON.stringify(tool)) as ToolExecution });
-      } else if (event.type === 'reasoning_delta') {
-        this.emit({ kind: 'reasoning', state: this.state, threadId: thread.id, messageId: answer.id,
-          step: event.step, stepContent: event.run.turn.steps[event.step || 0].reasoningContent || '' });
-      } else if (event.type === 'text_delta') {
-        this.emit({ kind: 'text', state: this.state, threadId: thread.id, messageId: answer.id,
-          content: answer.content, step: event.step, stepContent: event.run.turn.steps[event.step || 0].content });
+      } else if (event.type === 'reasoning_delta' || event.type === 'text_delta') {
+        const step = event.step || 0;
+        this.queueStream(thread.id, answer, step, event.type === 'reasoning_delta');
       } else {
         this.emit({ kind: 'message', state: this.state, threadId: thread.id,
           message: JSON.parse(JSON.stringify(answer)) as MessageData });
@@ -1591,13 +1603,14 @@ export class SessionService {
     await previous;
     try { return await action(); } finally { release(); }
   }
-  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'preferences' | 'state' = 'snapshot', scope: 'shared' | 'thread' | 'navigation' = 'shared'): Promise<boolean> {
+  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'selection' | 'preferences' | 'state' = 'snapshot', scope: 'shared' | 'thread' | 'navigation' = 'shared'): Promise<boolean> {
     if (!(scope === 'shared' ? this.canMutateShared : scope === 'navigation' ? this.canNavigate : this.canMutate)) { return false; }
     const startedAt = Date.now();
     const draftRevision = this.draftRevision;
+    this.selectingThread = scope === 'navigation';
     this.application.phase = 'saving';
     if (scope !== 'navigation') { this.status.error = ''; }
-    this.publish('state');
+    if (!this.selectingThread) { this.publish('state'); }
     try {
       await this.exclusive(action);
       // A settings commit must not overwrite typing that happened while disk/key IO was pending.
@@ -1608,6 +1621,7 @@ export class SessionService {
     }
     catch (error) { this.status.error = prefix + (error as Error).message; this.resources.reportError('mutation_failed', error as Error); return false; }
     finally {
+      this.selectingThread = false;
       this.application.phase = 'idle'; this.publish(publication);
       if (publication === 'preferences') {
         this.resources.reportResources?.('preferences_saved', { durationMs: Date.now() - startedAt, failed: this.status.error.length > 0 });
@@ -1712,9 +1726,15 @@ export class SessionService {
     this.emit({ kind: 'teams', state: this.state, threadId: thread.id,
       teams: JSON.parse(JSON.stringify(thread.teams || [])) as TeamRun[] });
   }
-  private publish(kind: 'snapshot' | 'state' | 'preferences'): void {
+  private publish(kind: 'snapshot' | 'selection' | 'state' | 'preferences'): void {
     const diagnosticMark = Diagnostics.begin();
     try {
+      if (kind === 'selection') {
+        const thread = this.active;
+        this.emit({ kind: kind, state: this.state, threadId: thread.id,
+          teams: JSON.parse(JSON.stringify(thread.teams || [])) as TeamRun[] });
+        return;
+      }
       const data = kind === 'snapshot' ? this.snapshot() : undefined;
       if (data) {
         for (const thread of data.threads) {
@@ -1727,7 +1747,41 @@ export class SessionService {
         preferences: kind === 'preferences' ? this.preferencesSnapshot() : undefined });
     } finally { if (Diagnostics.recording) { Diagnostics.end('session.publish', diagnosticMark); } }
   }
+  private queueStream(threadId: string, answer: MessageData, step: number, reasoning: boolean): void {
+    let update = this.pendingStream.get(threadId);
+    if (update && (update.messageId !== answer.id || update.step !== step)) {
+      this.emit({ kind: 'stream', state: this.state });
+      update = undefined;
+    }
+    if (!update) {
+      update = { threadId: threadId, messageId: answer.id, step: step };
+      this.pendingStream.set(threadId, update);
+    }
+    const current = answer.steps![step];
+    if (reasoning) {
+      update.reasoningContent = current.reasoningContent || '';
+    } else {
+      update.content = answer.content;
+      update.stepContent = current.content;
+    }
+    if (this.streamFramePending) { return; }
+    this.streamFramePending = true;
+    this.requestStreamFrame(() => {
+      this.streamFramePending = false;
+      if (this.pendingStream.size > 0) { this.emit({ kind: 'stream', state: this.state }); }
+    });
+  }
+
   private emit(event: SessionEvent): void {
+    // Full data already includes queued text. A full message supersedes only that turn's update.
+    if (event.data) { this.pendingStream.clear(); }
+    if (event.threadId && event.message && this.pendingStream.get(event.threadId)?.messageId === event.message.id) {
+      this.pendingStream.delete(event.threadId);
+    }
+    if (this.pendingStream.size > 0) {
+      event.stream = Array.from(this.pendingStream.values());
+      this.pendingStream.clear();
+    }
     for (const listener of Array.from(this.listeners)) {
       try { listener(event); }
       catch (error) { this.resources.reportError('observer_failed', error as Error); }

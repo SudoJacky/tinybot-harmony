@@ -25,7 +25,7 @@ const emitted = path.join(root, 'entry/build/default/cache/default/default@Compi
 assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build before testing');
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const cls = name => tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === name);
-const methods = ['filtered', 'threadProject', 'sections', 'sectionThreads', 'sectionTitle', 'groupOpen', 'visibleCount', 'loadMore',
+const methods = ['filtered', 'threadProject', 'sections', 'section', 'sectionThreads', 'sectionTitle', 'groupOpen', 'visibleCount', 'loadMore',
   'toggleGroup', 'onActivePath', 'lastBranch'];
 const globals = { exports: {}, t: key => key, Motion: { medium: 220, standard: 'ease' }, Diagnostics: { log() {} } };
 vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
@@ -120,7 +120,7 @@ async function testWorkspacePicker() {
   const sidebar = Object.assign(new globals.exports.Sidebar(), { app, query: '', archived: false, projectFilter: null,
     visibleCounts: {}, collapsedProjects: [],
     getUIContext: () => ({ animateTo: (_, apply) => apply() }) });
-  const groups = () => Array.from(sidebar.sections(sidebar.filtered()));
+  const groups = () => Array.from(sidebar.sections());
   const ids = group => Array.from(group.threads, item => item.id);
   assert.deepEqual(groups().map(g => g.id), ['alpha', 'beta', 'empty', ''], 'Duplicate names must remain distinct and empty projects retained');
   assert.deepEqual(ids(groups()[0]), ['a2', 'a1'], 'Keep pin ordering within each project');
@@ -153,6 +153,23 @@ async function testWorkspacePicker() {
   assert.equal(await app.saveProject('Beta', '', 'beta', []), true);
   assert.equal(revoked.length, 1, 'The final project removal revokes the unused system grant');
   console.log('PASS project tree: membership, ordinary chats, duplicate names, empty projects, pin order, search, archive, collapse, independent pagination and new-chat destinations');
+
+  const sections = sidebar.sections();
+  assert.equal(await app.selectThread('a2'), true);
+  assert.equal(sidebar.sections(), sections, 'The history tree reuses grouping when just the selection changes');
+  assert.equal(sidebar.onActivePath('alpha', 'a2'), true);
+  assert.equal(sidebar.onActivePath('alpha', 'a1'), false);
+  assert.equal(await app.archiveThread('a2'), true);
+  assert.notEqual(sidebar.sections(), sections, 'Archiving invalidates grouped membership');
+  assert.deepEqual(ids(groups().find(g => g.id === 'alpha')), ['a1']);
+
+  const results = app.filteredThreads('Find this', false);
+  assert.deepEqual(Array.from(results, item => item.id), ['a1']);
+  app.filteredThreads('', true);
+  assert.equal(app.filteredThreads('Find this', false), results, 'Repeated grouped lookups reuse the result of scanning the transcript');
+  assert.equal(await app.renameThread('a1', 'Renamed conversation'), true);
+  assert.equal(app.filteredThreads('Find this', false).length, 0, 'Metadata edits invalidate cached matches');
+  assert.deepEqual(Array.from(app.filteredThreads('Renamed conversation', false), item => item.id), ['a1']);
 
   const empty = seed(); empty.threads[0].title = '新对话';
   const headerFixture = new Fixture(empty), headerApp = new ChatViewModel(); await headerApp.initialize(headerFixture.session);

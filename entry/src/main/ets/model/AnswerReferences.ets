@@ -2,6 +2,7 @@ export interface AnswerReferencePart { kind: string; content: string; previewId:
 
 // References occupy a standalone Markdown line; examples inside code/quotes stay text.
 export function answerReferenceParts(content: string, streaming: boolean = false): AnswerReferencePart[] {
+  if (!content.includes('[[')) { return content.trim() ? [{ kind: 'text', content: content, previewId: '' }] : []; }
   const parts: AnswerReferencePart[] = [];
   const prefixes = ['[[tinybot-preview:', '[[tinybot-panel:', '[[tinybot-board:'];
   const lines = content.split('\n');

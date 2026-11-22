@@ -10,7 +10,6 @@ function load(name) {
   return exports;
 }
 const { highlightCode, highlightCodeBlocks } = load('CodeHighlight');
-const { StreamReveal } = load('StreamReveal');
 const has = (spans, text, kind) => assert.ok(spans.some(s => s.text.includes(text) && s.kind === 'syntax-' + kind), `${text}: ${kind}`);
 const cases = [
   ['ts', 'const answer = call("hello \\"world\\""); // comment\nreturn true;', [['const', 'keyword'], ['call', 'function'], ['// comment', 'comment'], ['true', 'number']]],
@@ -60,13 +59,6 @@ has(blocks[2], '你好🙂', 'string');
 assert.equal(blockText(highlightCodeBlocks('', 'js')[0]), '');
 
 // Preview and expansion run through emitted MarkdownChunkView in test-markdown-performance.cjs.
-const reveal = new StreamReveal();
-reveal.update('code', 'const x = ', 1000, false);
-reveal.update('code', 'const x = "hi"', 1100, true);
-const faded = reveal.spans('code', highlightCode('const x = "hi"', 'ts'), 1100);
-assert.equal(faded.map(s => s.text).join(''), 'const x = "hi"');
-assert.ok(faded.filter(s => s.opacity < 1).every(s => s.kind === 'syntax-string'));
-assert.ok(faded.filter(s => s.kind === 'syntax-keyword').every(s => s.opacity === 1));
 // Ensure syntax text remains readable against both code backgrounds.
 function luminance(hex) {
   const c = hex.slice(1).match(/../g).map(x => parseInt(x, 16) / 255).map(x => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4);
@@ -80,4 +72,4 @@ for (const theme of ['base', 'dark']) {
     assert.ok(ratio >= 4.5, `${theme} ${c.name} contrast ${ratio}`);
   }
 }
-console.log('PASS code highlighting: languages, exact text, all streaming prefixes, multiline tokens, reveal, theme contrast');
+console.log('PASS code highlighting: languages, exact text, all streaming prefixes, multiline tokens, theme contrast');

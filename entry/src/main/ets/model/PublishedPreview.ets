@@ -89,6 +89,7 @@ export function latestPreviewIds(messages: PreviewMessage[]): string[] {
 }
 
 export function stepPreviews(messageId: string, step: AgentStep, index: number, latest: string[], includeReferenced: boolean = false): PublishedPreview[] {
+  if (!step.tools.length) { return []; }
   const result: PublishedPreview[] = [];
   let offset = uiParts(step.content, false).filter((part) => part.kind === 'ui').length;
   for (const tool of toolReceipts(step.tools)) {
