@@ -56,7 +56,7 @@ import { CONTENT_GUARD_REFUSAL } from '../model/ContentGuard';
 import { AgentEvent, AgentRuntime } from './AgentRuntime';
 import { AgentTools } from './AgentLoop';
 import { CredentialVault, ProfileSettings, ProviderDraft } from './ProfileSettings';
-import { SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SettingsToggle, ThreadCheckpoint } from './SessionContracts';
+import { SessionEvent, SessionPreferences, SessionRepository, SessionResources, SessionState, SessionStreamUpdate, SettingsToggle, ThreadCheckpoint } from './SessionContracts';
 import { prepareSessionContext, sessionPromptSections, sessionContextSource } from './SessionContext';
 import { PromptSection, renderPrompt } from '../model/ContextProjection';
 interface UiComputeReceipt { status: string; result: UiValues; error: string; resultTruncated: boolean; }
@@ -95,14 +95,19 @@ export class SessionService {
   private pendingToolSelections: Map<string, ToolSelection> = new Map<string, ToolSelection>();
   private listeners: Set<(event: SessionEvent) => void> = new Set<(event: SessionEvent) => void>();
   private compatibilityIssues: Set<string> = new Set<string>();
+  private readonly pendingStream: Map<string, SessionStreamUpdate> = new Map();
+  private readonly requestStreamFrame: (flush: () => void) => void;
+  private streamFramePending: boolean = false;
 
-  constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources, approval?: ToolApproval) {
+  constructor(repository: SessionRepository, runtime: AgentRuntime, credentials: CredentialVault, resources: SessionResources, approval?: ToolApproval,
+    requestStreamFrame: (flush: () => void) => void = (flush: () => void) => { flush(); }) {
     this.repository = repository;
     this.runtime = runtime;
     this.credentials = credentials;
     this.mcpSettings = new McpSettings(credentials, () => resources.createId(), (message) => resources.reportError('mcp_failed', message));
     this.resources = resources;
     this.approval = approval;
+    this.requestStreamFrame = requestStreamFrame;
     this.profiles = new ProfileSettings(credentials, () => resources.createId());
   }
 
@@ -1071,12 +1076,9 @@ export class SessionService {
         if (!tool) { throw new Error('Tool event has no matching execution: ' + event.toolCallId); }
         this.emit({ kind: 'tool', state: this.state, threadId: thread.id, messageId: answer.id,
           step: event.step, parentToolCallId: event.parentToolCallId, tool: JSON.parse(JSON.stringify(tool)) as ToolExecution });
-      } else if (event.type === 'reasoning_delta') {
-        this.emit({ kind: 'reasoning', state: this.state, threadId: thread.id, messageId: answer.id,
-          step: event.step, stepContent: event.run.turn.steps[event.step || 0].reasoningContent || '' });
-      } else if (event.type === 'text_delta') {
-        this.emit({ kind: 'text', state: this.state, threadId: thread.id, messageId: answer.id,
-          content: answer.content, step: event.step, stepContent: event.run.turn.steps[event.step || 0].content });
+      } else if (event.type === 'reasoning_delta' || event.type === 'text_delta') {
+        const step = event.step || 0;
+        this.queueStream(thread.id, answer, step, event.type === 'reasoning_delta');
       } else {
         this.emit({ kind: 'message', state: this.state, threadId: thread.id,
           message: JSON.parse(JSON.stringify(answer)) as MessageData });
@@ -1745,7 +1747,41 @@ export class SessionService {
         preferences: kind === 'preferences' ? this.preferencesSnapshot() : undefined });
     } finally { if (Diagnostics.recording) { Diagnostics.end('session.publish', diagnosticMark); } }
   }
+  private queueStream(threadId: string, answer: MessageData, step: number, reasoning: boolean): void {
+    let update = this.pendingStream.get(threadId);
+    if (update && (update.messageId !== answer.id || update.step !== step)) {
+      this.emit({ kind: 'stream', state: this.state });
+      update = undefined;
+    }
+    if (!update) {
+      update = { threadId: threadId, messageId: answer.id, step: step };
+      this.pendingStream.set(threadId, update);
+    }
+    const current = answer.steps![step];
+    if (reasoning) {
+      update.reasoningContent = current.reasoningContent || '';
+    } else {
+      update.content = answer.content;
+      update.stepContent = current.content;
+    }
+    if (this.streamFramePending) { return; }
+    this.streamFramePending = true;
+    this.requestStreamFrame(() => {
+      this.streamFramePending = false;
+      if (this.pendingStream.size > 0) { this.emit({ kind: 'stream', state: this.state }); }
+    });
+  }
+
   private emit(event: SessionEvent): void {
+    // Full data already includes queued text. A full message supersedes only that turn's update.
+    if (event.data) { this.pendingStream.clear(); }
+    if (event.threadId && event.message && this.pendingStream.get(event.threadId)?.messageId === event.message.id) {
+      this.pendingStream.delete(event.threadId);
+    }
+    if (this.pendingStream.size > 0) {
+      event.stream = Array.from(this.pendingStream.values());
+      this.pendingStream.clear();
+    }
     for (const listener of Array.from(this.listeners)) {
       try { listener(event); }
       catch (error) { this.resources.reportError('observer_failed', error as Error); }

@@ -31,7 +31,7 @@ async function until(check) {
   for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 1)); }
   assert.ok(check(), 'Expected asynchronous operation did not reach its barrier');
 }
-async function fixture(configure = () => {}, approval) {
+async function fixture(configure = () => {}, approval, requestStreamFrame) {
   const data = emptyData();
   const profile = { id: 'test', name: 'Test', protocol: 'chat-completions', baseUrl: 'https://example.com/v1',
     credentialAlias: '', noApiKey: true, enabled: true, models: ['model-a', 'model-b'], contextWindow: 32768 };
@@ -51,10 +51,11 @@ async function fixture(configure = () => {}, approval) {
     } };
   const provider = { info: { id: 'test', name: 'Test', protocol: 'test', defaultBaseUrl: '', defaultModel: 'model-a' },
     endpoint: () => 'https://example.com',
-    stream(request, cancellation, onText) {
+    stream(request, cancellation, onText, onReasoning) {
       return new Promise((resolve, reject) => {
         const remove = cancellation.onCancel(() => reject(new RunCancelledError()));
-        requests.push({ request, cancellation, text: onText, finish(content, toolCalls = []) { remove(); resolve({ content, toolCalls }); } });
+        requests.push({ request, cancellation, text: onText, reasoning: onReasoning,
+          finish(content, toolCalls = [], reasoningContent) { remove(); resolve({ content, toolCalls, reasoningContent }); } });
       });
     } };
   const providers = new ProviderRegistry(); providers.register(provider);
@@ -62,7 +63,7 @@ async function fixture(configure = () => {}, approval) {
   const resources = { createId: () => 'id-' + ++sequence, ensureWorkspace: async () => {},
     configureProviders: () => {}, reportError: (event, error) => errors.push({ event, error }),
     tools: () => ({ definitions: () => [], execute: async () => 'ok' }) };
-  const session = new SessionService(repository, new AgentRuntime(providers, credentials), credentials, resources, approval);
+  const session = new SessionService(repository, new AgentRuntime(providers, credentials), credentials, resources, approval, requestStreamFrame);
   const app = new ChatViewModel(); await app.initialize(session);
   return { session, app, repository, requests, resources, errors, writeScopes };
 }
@@ -268,6 +269,53 @@ async function main() {
     assert.equal(thread(f, 'a', true).messages.at(-1).status, 'stopped');
     assert.equal(thread(f, 'b', true).messages.at(-1).content, 'B complete'); assert.equal(f.session.hasActiveRuns, false);
     console.log('PASS simultaneous requests, model isolation, background deltas, independent stop/queue, viewmodel subscriptions and persistence');
+  }
+  {
+    const frames = [], events = [];
+    const f = await fixture(undefined, undefined, flush => frames.push(flush));
+    f.session.subscribe(event => events.push(event));
+    let updatesA = 0, updatesB = 0;
+    f.app.setDraft('A'); const a = f.app.send(() => updatesA++); await until(() => f.requests.length === 1);
+    assert.equal(await f.app.selectThread('b'), true);
+    f.app.setDraft('B'); const b = f.app.send(() => updatesB++); await until(() => f.requests.length === 2);
+    const [alpha, beta] = f.requests;
+    const view = id => f.app.threads.find(item => item.id === id).messages.at(-1);
+    const before = [updatesA, updatesB];
+    const publication = events.length;
+    alpha.reasoning('思'); alpha.text('甲'); beta.text('乙');
+    beta.reasoning('略'); alpha.text('🙂'); beta.text('🧮'); alpha.reasoning('路');
+    assert.equal(frames.length, 1, 'Both threads share one pending frame');
+    assert.equal(events.length, publication, 'Provider chunks have not published session state');
+    assert.equal(view('a').content, ''); assert.equal(view('b').content, '');
+    assert.equal(thread(f, 'a').messages.at(-1).content, '甲🙂', 'Canonical output is current before the frame');
+    frames.shift()();
+    assert.equal(events.length, publication + 1);
+    assert.equal(events.at(-1).stream.length, 2);
+    assert.deepEqual([view('a').content, view('a').reasoningContent], ['甲🙂', '思路']);
+    assert.deepEqual([view('b').content, view('b').reasoningContent], ['乙🧮', '略']);
+    assert.deepEqual([updatesA, updatesB], [before[0], before[1] + 1]);
+
+    alpha.text('。');
+    const activeNotifications = updatesB;
+    frames.shift()();
+    assert.equal(updatesB, activeNotifications, 'A background-only frame does not scroll the visible thread');
+    alpha.text('中');
+    assert.equal(await f.app.selectThread('a'), true);
+    assert.equal(f.app.active.messages.at(-1).content, '甲🙂。中', 'Selection publishes pending content before notifying the view');
+    assert.equal(frames.length, 1);
+
+    alpha.text('尾'); beta.text('完');
+    alpha.finish('甲🙂。中尾', [], '思路'); await a;
+    assert.equal(view('a').status, 'complete');
+    assert.equal(view('a').content, '甲🙂。中尾', 'Completion publishes the last characters without waiting for the frame');
+    assert.equal(view('b').content, '乙🧮完', 'A full message does not discard the other thread’s pending output');
+    frames.shift()();
+    assert.equal(view('a').content, '甲🙂。中尾', 'The previously scheduled frame cannot overwrite completed output');
+    beta.text('结'); beta.finish('乙🧮完结', [], '略'); await b;
+    frames.shift()();
+    assert.equal(view('b').content, '乙🧮完结');
+    assert.equal(thread(f, 'b', true).messages.at(-1).content, '乙🧮完结');
+    console.log('PASS frame batching combines text and reasoning across threads, keeps callbacks scoped, and flushes selection and final output');
   }
   {
     const f = await fixture(), a = await start(f, 'a'); await until(() => f.requests.length === 1);

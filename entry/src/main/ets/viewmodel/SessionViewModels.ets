@@ -101,20 +101,20 @@ export class MessageViewModel {
     this.imageRevealId = '';
     return true;
   }
-  updateReasoning(index: number, content: string): void {
+  updateStream(index: number, content?: string, stepContent?: string, reasoningContent?: string): void {
+    if (content !== undefined) { this.content = content; }
     const step = this.stepViews[index];
     if (!step) { return; }
-    const hadThought = step.reasoningContent.trim().length > 0;
-    step.reasoningContent = content;
-    if (hadThought !== (content.trim().length > 0)) { this.refreshStreamPhase(); }
-  }
-  updateText(content: string, index: number, stepContent: string): void {
-    this.content = content;
-    const step = this.stepViews[index];
-    if (!step) { return; }
-    const hadText = step.content.trim().length > 0;
-    step.content = stepContent;
-    if (hadText !== (stepContent.trim().length > 0)) { this.refreshStreamPhase(); }
+    let phaseChanged = false;
+    if (reasoningContent !== undefined) {
+      phaseChanged = (step.reasoningContent.trim().length > 0) !== (reasoningContent.trim().length > 0);
+      step.reasoningContent = reasoningContent;
+    }
+    if (stepContent !== undefined) {
+      phaseChanged = ((step.content.trim().length > 0) !== (stepContent.trim().length > 0)) || phaseChanged;
+      step.content = stepContent;
+    }
+    if (phaseChanged) { this.refreshStreamPhase(); }
   }
   private refreshStreamPhase(): void {
     // The workflow header reads the outer array. Keep each step observed by its own row.

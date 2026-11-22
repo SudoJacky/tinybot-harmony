@@ -13,7 +13,6 @@ function load(file) {
 const flush = async () => { await Promise.resolve(); };
 const { isMermaidBlock, MarkdownDocument, markdownBlocks } = load('model/Markdown');
 const { MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS } = load('viewmodel/MarkdownChunkModel');
-const { StreamReveal } = load('model/StreamReveal');
 const { highlightCode } = load('model/CodeHighlight');
 const plain = value => JSON.parse(JSON.stringify(value));
 // Compare against the existing full parser at every possible arrival boundary.
@@ -80,13 +79,13 @@ function methods(file, name, names) {
   }
   return `class ${name} { ${members.join('\n')} } exports.${name} = ${name};`;
 }
-let parseCalls = 0, highlightChars = 0, clock = 1000, timers = new Map(), nextTimer = 0;
-const sandbox = { Diagnostics: load('model/Diagnostics').Diagnostics, exports: {}, StreamReveal, MarkdownDocument, MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS,
+let parseCalls = 0, highlightChars = 0, timers = new Map(), nextTimer = 0;
+const sandbox = { Diagnostics: load('model/Diagnostics').Diagnostics, exports: {}, MarkdownDocument, MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS,
   isMermaidBlock,
   markdownSpans: text => { parseCalls++; return load('model/Markdown').markdownSpans(text); },
   highlightCode: (text, language) => { highlightChars += text.length; return highlightCode(text, language); },
   codeTokenColor: kind => kind,
-  NBSP: '\u00a0', CODE_PREVIEW_LINES: 18, Date: { now: () => clock },
+  NBSP: '\u00a0', CODE_PREVIEW_LINES: 18,
   setTimeout: fn => { const id = ++nextTimer; timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id) };
 const areaCallbacks = [], visibilityCallbacks = [], placeholderHeights = [];
 const noop = new Proxy({}, { get: () => () => {} });
@@ -102,45 +101,28 @@ Object.assign(sandbox, { Text: noop, ForEach: noop, Column: column, Blank: blank
   Image: imageNode, ImageViewer: noop, ModalTransition: { ALPHA: 0 }, IMAGE_HEIGHT: 220, t: text => text, TextOverflow: {}, ImageFit: {}, FlexAlign: {},
   CopyOptions: { LocalDevice: 1, None: 0 }, Space: {}, Radius: {}, Alignment: {}, BarState: {}, ScrollDirection: {}, Color: {}, FontWeight: {}, FontStyle: {}, TextDecorationType: {} });
 const source = methods('MarkdownView', 'DocumentView', ['refresh', 'syncChunks', 'aboutToAppear', 'aboutToDisappear']) + '\n' +
-  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'refreshReveal', 'inlineSpans', 'proseHasMath', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'revealColor', 'columnWidths', 'scheduleReveal', 'afterRender', 'image', 'imageAlt', 'imageUrl', 'imagePreviewBuilder', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
+  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'inlineSpans', 'proseHasMath', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'columnWidths', 'afterRender', 'image', 'imageAlt', 'imageUrl', 'imagePreviewBuilder', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, sandbox);
-const makeBlock = (block, animate = false) => Object.assign(new sandbox.exports.BlockView(), {
-  model: new MarkdownChunkModel([block], animate), streaming: true, index: 0, mounted: false, disposed: false, generation: 0, visible: true,
-  inlineCache: new Map(), highlighted: new Map(), tableWidths: [], reveal: new StreamReveal(), expanded: [], codeTokens: [], imageFailed: [],
-  previewing: false, previewSource: '', revealTimer: -1, copyTimer: -1
+const makeBlock = block => Object.assign(new sandbox.exports.BlockView(), {
+  model: new MarkdownChunkModel([block]), index: 0, disposed: false, generation: 0, visible: true,
+  inlineCache: new Map(), highlighted: new Map(), tableWidths: [], expanded: [], codeTokens: [], imageFailed: [],
+  previewing: false, previewSource: '', copyTimer: -1
 });
 const paragraph = '普通 **粗体** `代码`🙂';
 const history = makeBlock(markdownBlocks('内容 $x^2$，接着是正文')[0]);
-history.streaming = false;
 const beforeHistory = parseCalls;
 history.aboutToAppear();
-assert.equal(parseCalls, beforeHistory, 'history must not parse prose while preparing unused reveal data');
+assert.equal(parseCalls, beforeHistory, 'Prose spans are parsed when the block is rendered');
 assert.equal(history.proseHasMath('0'), true);
-const inlineMath = history.inlineSpans(history.proseText('0'));
+history.inlineSpans(history.proseText('0'));
 assert.equal(parseCalls - beforeHistory, 1, 'formula detection and rendering share the parsed spans');
-assert.equal(history.reveal.spans('0', inlineMath, clock), inlineMath, 'static spans are rendered directly');
 history.aboutToDisappear();
 const row = makeBlock(markdownBlocks(paragraph)[0]); row.aboutToAppear();
 const spans = row.inlineSpans(paragraph), calls = parseCalls;
 assert.equal(row.inlineSpans(paragraph), spans); assert.equal(parseCalls, calls);
-row.model.update(markdownBlocks(paragraph + '新')); clock += 10; row.refresh();
+row.model.update(markdownBlocks(paragraph + '新')); row.refresh();
 assert.equal(row.inlineSpans(paragraph + '新').map(x => x.text).join(''), '普通 粗体 \u00a0代码\u00a0🙂新');
-assert.equal(row.reveal.active(clock), true);
-clock += 64;
-const fadingOpacity = row.reveal.spans('0', row.inlineSpans(paragraph + '新'), clock).at(-1).opacity;
-row.streaming = false; row.refresh();
-assert.equal(row.reveal.spans('0', row.inlineSpans(paragraph + '新'), clock).at(-1).opacity, fadingOpacity,
-  'completion must preserve the final chunk fade instead of jumping to opaque');
-assert.equal(row.reveal.active(clock), true); assert.equal(timers.size, 1);
-let revealTicks = 0;
-while (timers.size) {
-  assert.ok(revealTicks++ < 20, 'completion must stop scheduling once the fade settles');
-  const [id, tick] = timers.entries().next().value; timers.delete(id); clock += 16; tick();
-}
-assert.equal(row.reveal.spans('0', row.inlineSpans(paragraph + '新'), clock).at(-1).opacity ?? 1, 1);
-assert.equal(row.reveal.active(clock), false); assert.equal(row.revealTimer, -1);
-row.streaming = true; row.visible = false; clock += 10; row.model.update(markdownBlocks(paragraph + '新尾')); row.refresh();
-assert.equal(timers.size, 0, 'offscreen updates must not schedule reveal clocks');
+assert.equal(timers.size, 0, 'Live text requires no animation timers');
 const code = Array.from({ length: 2000 }, (_, i) => `const x${i} = ${i};`).join('\n');
 const codeRow = makeBlock(markdownBlocks('```ts\n' + code + '\n```')[0]);
 const beforeHighlight = highlightChars; codeRow.aboutToAppear();
@@ -238,7 +220,7 @@ const innerArea = areaCallbacks.find(fn => !fn.toString().includes('measuredWidt
 innerArea({}, { width: 400, height: 120 }); outerArea({}, { width: 400, height: 120 }); await flush();
 visibilityCallbacks.at(-1)(false); await flush(); rootBranch(1, false);
 assert.equal(branches.at(-1), 1); assert.equal(placeholderHeights.at(-1), 120);
-row.streaming = false; row.refresh(); assert.equal(row.measuredHeight, 120, 'completion must not remount all offscreen content');
+assert.equal(row.measuredHeight, 120, 'Offscreen content retains its measured height');
 row.invalidateMeasure(); assert.equal(row.measuredHeight, 0); rootBranch(1, false); assert.equal(branches.at(-1), 0);
 areaCallbacks.at(-1)({}, { width: 400, height: 130 });
 outerArea({}, { width: 500, height: 130 }); await flush(); assert.equal(row.measuredHeight, 0, 'width change must remeasure');
@@ -277,14 +259,14 @@ assert.ok(diagnostics.metrics.some(m => m.name === 'markdown.sourceChars' && m.m
 assert.ok(diagnostics.events.some(e => e.name === 'markdown.parse'));
 sandbox.Diagnostics.stop();
 // ArkUI can deliver retained model, geometry and visibility callbacks while tearing down.
-const finalHeight = row.measuredHeight, finalReveal = row.revealTime, finalChunks = documentView.chunks.length;
+const finalHeight = row.measuredHeight, finalChunks = documentView.chunks.length;
 row.aboutToDisappear(); documentView.aboutToDisappear();
 row.model.update(markdownBlocks('late model change')); row.refresh(); row.refreshCode(); row.invalidateMeasure();
 innerArea({}, { width: 1, height: 999 }); outerArea({}, { width: 1, height: 999 });
 visibilityCallbacks.at(-1)(true);
 documentView.content = 'late document update'; documentView.refresh(); documentView.syncChunks(0); await flush();
-assert.equal(row.measuredHeight, finalHeight); assert.equal(row.revealTime, finalReveal);
-assert.equal(documentView.chunks.length, finalChunks); assert.equal(timers.size, 0, 'Disposed views cannot start another render/reveal cycle');
+assert.equal(row.measuredHeight, finalHeight);
+assert.equal(documentView.chunks.length, finalChunks); assert.equal(timers.size, 0, 'Disposed views cannot start another render cycle');
 console.log('PASS disposed Markdown views ignore retained model, visibility and geometry callbacks');
 const previewRow = makeBlock(markdownBlocks('![test](https://example.com/a.png)')[0]); let previewBuilds = 0;
 previewRow.imagePreview = () => { previewBuilds++; };

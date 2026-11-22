@@ -1269,7 +1269,9 @@ export default function sessionServiceTests(): void {
       f.session.subscribe((event: SessionEvent) => {
         if (event.data) { event.data.config.systemPrompt = 'changed by view'; }
         if (event.message) { event.message.content = 'changed by view'; }
-        if (event.kind === 'text') { expect(event.data === undefined).assertTrue(); throw new Error('broken view'); }
+        if (event.stream?.some((update) => update.content !== undefined)) {
+          expect(event.data === undefined).assertTrue(); throw new Error('broken view');
+        }
       });
       f.session.setDraft('first'); await f.session.send();
       const copy = f.session.snapshot(); active(copy).draft = 'changed copy';

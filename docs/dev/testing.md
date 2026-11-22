@@ -55,8 +55,7 @@ hdc rport tcp:18770 tcp:18770
 | `test-bing-search-dom.cjs` | 真实 DOM 中桌面版与移动版标题链接、来源去重、重定向解码、异常链接和验证码识别；需可解析的 Playwright 依赖与本机 Edge | 否 |
 | `test-browser-annotation.cjs` | 批注几何、导出与图片投递 | 否 |
 | `test-code-highlight.cjs` | Markdown 代码高亮 | 否 |
-| `test-stream-reveal.cjs` | 流式文字渐显 | 否 |
-| `test-markdown-performance.cjs` | 增量解析与全文一致性（含逐字符到达的图片行）、稳定块复用、离屏高度占位、渐显收尾 | 是 |
+| `test-markdown-performance.cjs` | 增量解析与全文一致性（含逐字符到达的图片行）、稳定块复用、离屏高度占位、流式正文即时更新 | 是 |
 | `test-speech-orb.cjs` | 语音输入 UI 生命周期 | 是 |
 | `test-startup-backup.cjs` | 新安装识别、升级排除、一次性提示记录、检测期间配置变化、云端失败重试；`--ui` 验证编译后的弹窗和恢复回调、隐私撤销与迟到结果 | `--ui` 需 Debug 构建 |
 | `test-file-attachments.cjs` | 原件导入、读取、备份与草稿保存；拖入数据格式、去重、容量校验、会话切换、部分失败清理、保存重试和迟到回调；加 `--ui` 验证编译后的聊天接收回调 | `--ui` 需 Debug 构建 |

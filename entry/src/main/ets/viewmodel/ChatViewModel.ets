@@ -124,7 +124,7 @@ export class ChatViewModel {
     const diagnosticMark = Diagnostics.begin();
     try {
       if (event.data || event.kind === 'thread') { this.threadLists.clear(); }
-      if (event.data || event.kind === 'thread' || event.kind === 'message' || event.kind === 'text') {
+      if (event.data || event.kind === 'thread' || event.kind === 'message' || event.stream?.some((update) => update.content !== undefined)) {
         this.threadSearch.results = undefined;
       }
       this.projectState(event.state);
@@ -154,6 +154,17 @@ export class ChatViewModel {
         if (thread) { thread.draft = draft; }
         if (event.threadId === this.active.id) { this.draft = draft; this.active.draft = draft; }
       }
+      let activeStreamChanged = false;
+      for (const update of event.stream || []) {
+        const isActive = update.threadId === this.active.id;
+        const thread = isActive ? this.active : this.threads.find((item) => item.id === update.threadId);
+        if (!thread) { continue; }
+        const tail = thread.messages[thread.messages.length - 1];
+        const message = tail?.id === update.messageId ? tail : thread.messages.find((item) => item.id === update.messageId);
+        if (!message) { continue; }
+        message.updateStream(update.step, update.content, update.stepContent, update.reasoningContent);
+        if (isActive) { activeStreamChanged = true; }
+      }
       if (event.kind === 'message' && event.message) {
         const thread = this.threads.find((thread) => thread.id === event.threadId);
         thread?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
@@ -165,21 +176,9 @@ export class ChatViewModel {
         if (event.tool.status === 'complete' && (event.tool.call.function.name === 'publish_preview' ||
           (event.tool.children || []).some((child) => child.call.function.name === 'publish_preview'))) { thread?.refreshPreviews(); }
       }
-      if (event.kind === 'reasoning') {
-        const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
-        if (message) {
-          message.updateReasoning(event.step || 0, event.stepContent || '');
-        }
-      }
-      if (event.kind === 'text') {
-        const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
-        if (message) {
-          message.updateText(event.content || '', event.step || 0, event.stepContent || '');
-        }
-      }
-      if (['text', 'reasoning', 'message', 'tool', 'snapshot', 'selection', 'thread', 'teams'].includes(event.kind)) {
-        if (!event.threadId || event.threadId === this.active.id) { this.outputs.get(this.active.id)?.(); }
-      }
+      const activeOutputChanged = (!event.threadId || event.threadId === this.active.id) &&
+        ['message', 'tool', 'snapshot', 'selection', 'thread', 'teams'].includes(event.kind);
+      if (activeStreamChanged || activeOutputChanged) { this.outputs.get(this.active.id)?.(); }
     } finally { if (Diagnostics.recording) { Diagnostics.end('viewmodel.project', diagnosticMark); } }
   }
   private projectState(state: SessionState): void {
@@ -193,8 +192,7 @@ export class ChatViewModel {
     const warnings = state.compatibilityWarnings || [];
     if (JSON.stringify(warnings) !== JSON.stringify(this.compatibilityWarnings)) { this.compatibilityWarnings = warnings; }
     this.contextStatus = state.contextStatus; this.contextTokens = state.contextTokens;
-    // Session snapshots clone this array for every token; retain the observed value
-    // until its contents change so deltas do not invalidate the whole chat panel.
+    // Retain the observed context array across updates with the same contents.
     const items = state.contextBreakdown || [];
     if (items.length !== this.contextItems.length || items.some((item, index) => {
       const previous = this.contextItems[index];

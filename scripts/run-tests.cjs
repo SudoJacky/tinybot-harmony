@@ -57,7 +57,6 @@ const suites = {
     'test-storage-usage.cjs',
     'test-startup-backup.cjs',
     'test-auto-cloud-backup.cjs',
-    'test-stream-reveal.cjs',
     'test-system-bars-native.cjs',
     'test-team-toggle.cjs',
     'test-tool-catalog.cjs',

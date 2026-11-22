@@ -77,10 +77,20 @@ export interface ReasoningSelection {
   config?: ModelConfig;
 }
 
+export interface SessionStreamUpdate {
+  threadId: string;
+  messageId: string;
+  step: number;
+  content?: string;
+  stepContent?: string;
+  reasoningContent?: string;
+}
+
 // Structural changes carry detached snapshots. Selection and preference events omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'selection' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
+  kind: 'snapshot' | 'selection' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'stream' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
+  stream?: SessionStreamUpdate[];
   preferences?: SessionPreferences;
   reasoningSelection?: ReasoningSelection;
   data?: AppData;
@@ -93,5 +103,4 @@ export interface SessionEvent {
   parentToolCallId?: string;
   content?: string;
   step?: number;
-  stepContent?: string;
 }

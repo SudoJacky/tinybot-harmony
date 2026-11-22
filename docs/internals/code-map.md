@@ -49,7 +49,7 @@ scripts/               构建辅助、自动化测试与冒烟服务
 | `views/SideChatPanel.ets` | 旁聊消息、草稿、发送、停止与删除 |
 | `views/MessageBubble.ets` | 单条消息的正文、执行时间线、工具行与操作栏；生成图片与图片检查的展示 |
 | `views/MarkdownView.ets` | Markdown 渲染入口 |
-| `views/MarkdownChunkView.ets` | 长内容分块挂载与渐显，代码块默认折叠 |
+| `views/MarkdownChunkView.ets` | 长内容分块展示与离屏占位，代码块默认折叠 |
 | `views/ThreadList.ets` | 会话与项目侧栏：分组、搜索、置顶、归档与分页 |
 | `views/ToolDetails.ets` | 工具回执详情：结果、参数、日志与原始记录分页 |
 | `views/InputQueuePanel.ets` | 待发送指令列表：追加指令与队列任务的撤回、编辑、移除 |

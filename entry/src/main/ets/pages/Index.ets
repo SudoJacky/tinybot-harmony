@@ -49,7 +49,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { requestAppReview } from '../services/AppInformation';
 import { ReviewPreferences } from '../services/ReviewPreferences';
 import { ReviewChoice, ReviewInvitationDialog } from '../views/ReviewInvitationDialog';
-import { KeyboardAvoidMode } from '@kit.ArkUI';
+import { FrameCallback, KeyboardAvoidMode } from '@kit.ArkUI';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -97,6 +97,12 @@ import { DetailTabItem, DetailTabs } from '../views/DetailTabs';
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
 const PC_CHAT_HEADER_HEIGHT: number = 48;
+
+class SessionStreamFrame extends FrameCallback {
+  private readonly flush: () => void;
+  constructor(flush: () => void) { super(); this.flush = flush; }
+  onFrame(): void { this.flush(); }
+}
 
 @Entry
 @Component
@@ -233,7 +239,9 @@ struct Index {
       if (this.desktop) { this.restoreDesktopLayout(context); }
       try { this.startupBackup = new StartupBackup(context); }
       catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
-      this.session = createNativeSessionService(context, this.approval, this.browser);
+      const ui = this.getUIContext();
+      this.session = createNativeSessionService(context, this.approval, this.browser,
+        (flush) => ui.postFrameCallback(new SessionStreamFrame(flush)));
       this.session.subscribe((event) => {
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }

@@ -5,7 +5,6 @@ import { MarkdownChunkView } from './MarkdownChunkView';
 
 @Component
 export struct MarkdownView {
-  @StorageProp('tinybot.foreground') private foreground: boolean = true;
   @Prop @Watch('refresh') content: string = '';
   @Prop @Watch('refresh') streaming: boolean = false;
   @Prop fontSize: number = 16;
@@ -53,7 +52,7 @@ export struct MarkdownView {
     for (let index = start; index < end; index++) {
       const blocks = this.blocks.slice(index * MARKDOWN_CHUNK_BLOCKS, (index + 1) * MARKDOWN_CHUNK_BLOCKS);
       if (index < this.chunks.length) { this.chunks[index].update(blocks); }
-      else { this.chunks.push(new MarkdownChunkModel(blocks, this.mounted && this.streaming)); }
+      else { this.chunks.push(new MarkdownChunkModel(blocks)); }
     }
     if (this.chunks.length > count) { this.chunks.splice(count); }
     if (Diagnostics.recording) { Diagnostics.end('render.mountBatch', mark, { newChunks: this.chunks.length - previous, mountedChunks: this.chunks.length, totalChunks: count }); }
@@ -67,7 +66,7 @@ export struct MarkdownView {
   build() {
     Column({ space: 10 }) {
       ForEach(this.chunks, (chunk: MarkdownChunkModel, index: number) => {
-        MarkdownChunkView({ model: chunk, blockOffset: index * MARKDOWN_CHUNK_BLOCKS, streaming: this.streaming && this.foreground,
+        MarkdownChunkView({ model: chunk, blockOffset: index * MARKDOWN_CHUNK_BLOCKS,
           fontSize: this.fontSize, selectable: this.selectable })
       }, (_chunk: MarkdownChunkModel, index: number) => `${index}`)
     }.width('100%').alignItems(HorizontalAlign.Start)
