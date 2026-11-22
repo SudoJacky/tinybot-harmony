@@ -76,7 +76,8 @@ EVENTS.web = ['storage_failed', 'engine_start', 'engine_ready', 'release', 'acti
 EVENTS.office_preview = ['load_failed', 'update_annotations_failed', 'render_failed', 'annotation_failed', 'page_failed'];
 EVENTS.math = ['invalid_formula', 'formula_too_large', 'rasterize_failed', 'bitmap_release_failed', 'bitmap_display_failed',
   'worker_failed', 'worker_message_failed', 'worker_exited', 'worker_timeout', 'worker_dispatch_failed'];
-EVENTS.mermaid = ['startup_timeout', 'render_timeout', 'script_failed', 'diagram_failed', 'page_failed', 'process_exited'];
+EVENTS.mermaid = ['startup_timeout', 'render_timeout', 'script_failed', 'diagram_failed', 'page_failed', 'process_exited',
+  'snapshot_failed', 'snapshot_release_failed'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved', 'compare_reference_failed'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS.tool = ['failed', 'partial'];

@@ -116,26 +116,68 @@ console.log('PASS lazy row identity, retained disclosure/height state, thread sw
 
 {
   let starts = 0;
-  const timers = new Set();
-  const Mermaid = native('MermaidView', 'MermaidView', ['aboutToAppear', 'activate', 'aboutToDisappear'], {
+  let nextTimer = 0;
+  const timers = new Map();
+  const clock = { setTimeout(fn, delay) { timers.set(++nextTimer, { fn, delay }); return nextTimer; },
+    clearTimeout(id) { timers.delete(id); } };
+  const frame = () => { for (const [id, timer] of [...timers]) { if (timer.delay === 16) { timers.delete(id); timer.fn(); } } };
+  const resources = { exports: {}, require: () => ({ Diagnostics: { log() {} } }), ...clock };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(srcRoot, 'services/MermaidResources.ets'), 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS }
+  }).outputText, resources);
+  const { mermaidStartup, mermaidPreviews, mermaidPreviewHasContent } = resources.exports;
+  const Mermaid = native('MermaidView', 'MermaidView', ['aboutToAppear', 'activate', 'aboutToDisappear', 'available', 'snapshotKey', 'releasePreview'], {
+    mermaidStartup, mermaidPreviews, ...clock,
     webview: { WebviewController: class { constructor() { starts++; } } },
-    setTimeout() { const id = starts; timers.add(id); return id; },
-    clearTimeout(id) { timers.delete(id); }
   });
-  const chart = Object.assign(new Mermaid(), { lifetime: 0, revision: 0, foreground: true, visible: false, scrolling: true, timeout: -1 });
-  chart.aboutToAppear();
-  chart.activate();
-  chart.visible = true;
-  chart.activate();
-  assert.equal(starts, 0, 'scrolling past a chart must not initialize ArkWeb');
-  chart.scrolling = false;
-  chart.activate();
-  chart.activate();
+  const make = (instanceId, visibleRatio, content) => {
+    const chart = Object.assign(new Mermaid(), { instanceId, visibleRatio, content, widthPx: 300, dark: false, lifetime: 0,
+      revision: 0, foreground: true, scrolling: true, timeout: -1, capturePreview() {} });
+    chart.aboutToAppear(); return chart;
+  };
+  const chart = make(1, 0.6, 'first'), next = make(2, 0.9, 'second');
+  chart.activate(); frame();
+  assert.equal(starts, 0, 'Scrolling past a chart does not initialize ArkWeb');
+  chart.scrolling = next.scrolling = false;
+  chart.activate(); next.activate(); frame();
   assert.equal(starts, 1);
-  assert.equal(timers.size, 1);
+  assert.ok(next.controller, 'Start the more visible chart first');
+  assert.equal(chart.controller, undefined, 'Only one chart starts at a time');
+  chart.scrolling = true; chart.activate();
+  next.aboutToDisappear(); frame();
+  assert.equal(starts, 1, 'A queued chart is dropped when scrolling restarts');
+  chart.scrolling = false; chart.activate(); frame();
+  assert.equal(starts, 2);
   chart.aboutToDisappear();
   assert.equal(chart.controller, undefined);
-  assert.equal(timers.size, 0, 'leaving a chart cancels pending startup');
+  assert.equal(timers.size, 0);
+
+  const released = [];
+  const pixel = id => ({ id, getPixelBytesNumber: () => 8 * 1024 * 1024, async release() { released.push(id); } });
+  const cached = make(3, 1, 'first');
+  mermaidPreviews.store(cached.snapshotKey(), pixel('cached'), 120);
+  cached.scrolling = false; cached.activate(); frame();
+  assert.equal(starts, 2, 'A warm diagram appears without a Web controller');
+  assert.equal(cached.diagramHeight, 120);
+  assert.equal(cached.preview.pixel.id, 'cached');
+  for (const key of ['one', 'two', 'three', 'four']) { mermaidPreviews.store(key, pixel(key), 120); }
+  assert.ok(!released.includes('cached') && released.includes('one'), 'A displayed preview survives eviction of older unpinned images');
+  cached.useLive = true; cached.activate(); frame();
+  assert.equal(starts, 3, 'The original Web remains available when the user opens a warm diagram');
+  assert.equal(cached.preview.pixel.id, 'cached', 'Retain the image while the original Web loads');
+  cached.aboutToDisappear();
+  console.log('PASS Mermaid startup is staggered, clears on scroll, and reuses pinned images with live selection on demand');
+  (async () => {
+    let submitted = 0;
+    const sample = colors => ({ async createScaledPixelMap() {
+      return { getPixelBytesNumber: () => colors.length, async readPixelsToBuffer(out) { new Uint8Array(out).set(colors); },
+        async release() { submitted++; } };
+    } });
+    assert.equal(await mermaidPreviewHasContent(sample([240, 240, 240, 255, 240, 240, 240, 255]), 2, 1), false);
+    assert.equal(await mermaidPreviewHasContent(sample([240, 240, 240, 255, 100, 72, 110, 255]), 2, 1), true);
+    assert.equal(submitted, 2);
+    console.log('PASS Mermaid rejects flat snapshots and releases sampled pixel maps');
+  })().catch(error => { console.error(error); process.exitCode = 1; });
 }
 
 let now = 0, sequence = 0, controllers = 0; const timers = new Map();
