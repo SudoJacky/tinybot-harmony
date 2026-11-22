@@ -74,6 +74,7 @@ class ThreadExecution {
 // Sole owner of application/session data and admission. No ArkUI or platform Kit imports.
 export class SessionService {
   private pendingCommit?: Promise<void>;
+  private selectingThread: boolean = false;
   private memoryReviewRunning: boolean = false;
   private executions: Map<string, ThreadExecution> = new Map<string, ThreadExecution>();
   private sharedOperation: Promise<void> = Promise.resolve();
@@ -180,8 +181,10 @@ export class SessionService {
     const state = JSON.parse(JSON.stringify(this.status)) as SessionState;
     state.ready = this.application.ready; state.saveError = this.application.saveError;
     state.compatibilityWarnings = this.application.compatibilityWarnings?.slice() || [];
-    if (this.application.phase !== 'idle') { state.phase = this.application.phase; }
-    state.runningThreadIds = this.runningThreadIds; state.canNavigate = this.canNavigate;
+    // A selection still holds the service write lock. Until it commits, the visible chat keeps its own state.
+    if (this.application.phase !== 'idle' && !this.selectingThread) { state.phase = this.application.phase; }
+    state.runningThreadIds = this.runningThreadIds;
+    state.canNavigate = this.selectingThread ? state.ready && !state.saveError : this.canNavigate;
     return state;
   }
   get canMutate(): boolean { return this.canNavigate && this.status.phase === 'idle'; }
@@ -1602,9 +1605,10 @@ export class SessionService {
     if (!(scope === 'shared' ? this.canMutateShared : scope === 'navigation' ? this.canNavigate : this.canMutate)) { return false; }
     const startedAt = Date.now();
     const draftRevision = this.draftRevision;
+    this.selectingThread = scope === 'navigation';
     this.application.phase = 'saving';
     if (scope !== 'navigation') { this.status.error = ''; }
-    this.publish('state');
+    if (!this.selectingThread) { this.publish('state'); }
     try {
       await this.exclusive(action);
       // A settings commit must not overwrite typing that happened while disk/key IO was pending.
@@ -1615,6 +1619,7 @@ export class SessionService {
     }
     catch (error) { this.status.error = prefix + (error as Error).message; this.resources.reportError('mutation_failed', error as Error); return false; }
     finally {
+      this.selectingThread = false;
       this.application.phase = 'idle'; this.publish(publication);
       if (publication === 'preferences') {
         this.resources.reportResources?.('preferences_saved', { durationMs: Date.now() - startedAt, failed: this.status.error.length > 0 });

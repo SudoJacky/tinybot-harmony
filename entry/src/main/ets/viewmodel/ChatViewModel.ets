@@ -296,6 +296,7 @@ export class ChatViewModel {
   switchThreadWorkspace(threadId: string, projectId?: string): Promise<boolean> {
     return this.requireSession().switchThreadWorkspace(threadId, projectId);
   }
+  get canNavigateNow(): boolean { return this.session?.canNavigate ?? this.canNavigate; }
   selectThread(id: string): Promise<boolean> { return this.requireSession().selectThread(id); }
   deleteThread(id: string): Promise<boolean> { return this.requireSession().deleteThread(id); }
   deleteThreads(ids: string[]): Promise<boolean> { return this.requireSession().deleteThreads(ids); }

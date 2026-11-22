@@ -62,6 +62,7 @@ struct ThreadRow {
   onSelectionChanged: (selected: boolean) => void = () => {};
   onModifiedSelection: (range: boolean, additive: boolean) => void = () => {};
   @State private editing: boolean = false;
+  @State private opening: boolean = false;
   @State private name: string = '';
   @State private hovered: boolean = false;
   @State private focused: boolean = false;
@@ -97,6 +98,16 @@ struct ThreadRow {
     const offset = message.content.toLocaleLowerCase().indexOf(needle);
     const start = Math.max(0, offset - 18);
     return (start ? '…' : '') + message.content.slice(start, offset + 60).replace(/\s+/g, ' ').trim();
+  }
+
+  private async openThread(): Promise<void> {
+    this.opening = true;
+    try {
+      const query = this.query.trim();
+      const opened = query ? await this.app.openMessage(this.thread.id, this.matchId(), query) :
+        await this.app.selectThread(this.thread.id);
+      if (opened) { this.onSelected(); }
+    } finally { this.opening = false; }
   }
 
   @Builder
@@ -166,8 +177,9 @@ struct ThreadRow {
             .animation({ duration: Motion.medium, curve: Motion.standard })
             .hitTestBehavior(this.selecting ? HitTestMode.Default : HitTestMode.None)
           Row({ space: 4 }) {
-            if (this.running) {
-              LoadingProgress().width(14).height(14).color(this.appearance.accent).accessibilityText(t('正在执行'))
+            if (this.running || this.opening) {
+              LoadingProgress().width(14).height(14).color(this.appearance.accent)
+                .accessibilityText(t(this.opening ? '正在打开本地会话…' : '正在执行'))
             }
             if (this.thread.pinned) {
               SymbolGlyph($r('sys.symbol.pin_fill')).fontSize(13).fontColor([this.appearance.accent])
@@ -209,12 +221,12 @@ struct ThreadRow {
         .onFocus(() => { this.focused = true; }).onBlur(() => { this.focused = false; })
         .onKeyEvent((event: KeyEvent) => this.rowKeyEvent(event))
         .onClick(async (event: ClickEvent) => {
-          if (!this.app.canNavigate) { return; }
+          if (!this.app.canNavigateNow) { return; }
           const range = event?.getModifierKeyState?.(['Shift']) === true;
           const additive = event?.getModifierKeyState?.(['Ctrl']) === true;
           if (range || additive) { this.onModifiedSelection(range, additive); return; }
           if (this.selecting) { this.onSelectionChanged(!this.selected); return; }
-          if (this.query.trim() ? await this.app.openMessage(this.thread.id, this.matchId(), this.query.trim()) : await this.app.selectThread(this.thread.id)) { this.onSelected(); }
+          await this.openThread();
         })
         .bindContextMenu(this.actions, ResponseType.LongPress, {
           systemMaterial: this.appearance.menu, mask: false })

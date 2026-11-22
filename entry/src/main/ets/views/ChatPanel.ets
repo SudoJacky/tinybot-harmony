@@ -647,7 +647,7 @@ export struct ChatPanel {
     return (key: string, values: UiValues, action: string) => this.app.interactUi(threadId, messageId, key, values, action);
   }
   private send(): void {
-    if (this.speechActive()) { return; }
+    if (this.speechActive() || !this.app.canNavigateNow) { return; }
     if (!this.account.signedIn) { this.onAccount(); return; }
     this.inspectingOutput = false; this.followOutput = true;
     const context = this.getUIContext();

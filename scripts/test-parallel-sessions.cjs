@@ -104,6 +104,28 @@ async function main() {
     console.log('PASS thread selection saves the index and dirty drafts, retains transcript views, and rolls back on write failure');
   }
   {
+    const f = await fixture();
+    const commit = gate();
+    let persisting = false;
+    f.repository.beforeSave = async () => { persisting = true; await commit.promise; };
+    const selection = f.app.selectThread('b');
+    await until(() => persisting);
+    assert.equal(f.session.canNavigate, false, 'Selection owns the service write lock until it commits');
+    assert.equal(f.app.canNavigateNow, false);
+    assert.equal(await f.session.selectThread('a'), false);
+    assert.equal(f.app.active.id, 'a');
+    assert.equal(f.app.canNavigate, true, 'A pending selection does not disable the whole interface');
+    assert.equal(f.app.busy, false);
+    f.session.setDraft('Draft during selection', 'a');
+    assert.equal(f.app.busy, false, 'Concurrent events also keep the visual state of the active conversation');
+    commit.open();
+    assert.equal(await selection, true);
+    assert.equal(f.app.active.id, 'b');
+    assert.equal(thread(f, 'a', true).draft, 'Draft during selection');
+    assert.equal(f.app.canNavigateNow, true);
+    console.log('PASS selection keeps its live write lock without publishing a global saving state');
+  }
+  {
     const f = await fixture(data => {
       data.threads[0].messages = [
         { id: 'parent-user', role: 'user', content: 'Decide the workspace layout', status: 'complete', error: '' },
