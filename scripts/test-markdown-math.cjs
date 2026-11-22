@@ -11,7 +11,7 @@ function load(name, modules = {}) {
   return exports;
 }
 const { markdownSpans, markdownBlocks, MarkdownDocument } = load('model/Markdown');
-const { hasMath } = load('model/MathContent');
+const { hasMath, mathBitmapSize } = load('model/MathContent');
 const plain = value => JSON.parse(JSON.stringify(value));
 const math = text => plain(markdownSpans(text).filter(span => span.kind === 'math').map(span => span.text));
 assert.deepEqual(math('质能 $E=mc^2$，以及 \\(a^2+b^2=c^2\\)。'), ['E=mc^2', 'a^2+b^2=c^2']);
@@ -38,6 +38,11 @@ for (const source of ['$$x^2$$', '\\[x^2\\]', '$$\n\\frac{a}{b}\n$$', '\\[\n\\be
   }
 }
 assert.equal(markdownBlocks('$$\nx\ny\nz')[0].kind, 'math-pending');
+assert.deepEqual(plain(mathBitmapSize({ width: 8, height: 2, descent: .3 }, 56)), [448, 112]);
+for (const dims of [[256, 1], [256, 48], [1, 48], [.002, .002]]) {
+  const [width, height] = mathBitmapSize({ width: dims[0], height: dims[1], descent: 0 }, 120);
+  assert.ok(width > 0 && height > 0 && Math.max(width, height) <= 8192 && width * height <= 2 * 1024 * 1024);
+}
 async function checkTypesetting() {
   const { typesetMath } = await import('../entry/src/main/ets/workers/MathEngine.js');
   const examples = ['E=mc^2', '\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}', '\\sum_{n=1}^{\\infty}\\frac{1}{n^2}=\\frac{\\pi^2}{6}',
@@ -62,6 +67,18 @@ async function checkTypesetting() {
   assert.throws(() => typesetMath('\\require{html}x', false, '#000000'));
   typesetMath('\\newcommand{\\tmp}{x}\\tmp', false, '#000000');
   assert.throws(() => typesetMath('\\tmp', false, '#000000'), 'macro definitions must stay inside the source formula');
+  const tagged = typesetMath('\\newtagform{brackets}{[}{]}\\usetagform{brackets}x\\tag{5}', true, '#000000');
+  assert.match(tagged.svg, /data-c="5B"/);
+  assert.throws(() => typesetMath('\\usetagform{brackets}x\\tag{5}', true, '#000000'), { message: /Undefined tag form/ });
+  if (global.gc) {
+    global.gc();
+    const before = process.memoryUsage().heapUsed;
+    for (let i = 0; i < 400; i++) {
+      typesetMath(`\\frac{${i}x^2+1}{x^2+1}+\\text{ for }x\\geq 0`, i % 3 === 0, '#123456');
+    }
+    global.gc();
+    assert.ok(process.memoryUsage().heapUsed - before < 16 * 1024 * 1024, 'MathJax must release old TeX parsers');
+  }
 }
 async function checkWorkerCache() {
   const posts = [];
@@ -71,55 +88,54 @@ async function checkWorkerCache() {
     constructor() { thread = this; }
     postMessage(job) { posts.push(job); }
     terminate() {}
-    finish(bytes = 32) { this.onmessage({ data: { bytes, width: 2, height: 1, descent: 0.2 } }); }
+    finish(bytes = 32) {
+      const pixelMap = { release: async () => removed.push(pixelMap) };
+      this.onmessage({ data: { bytes, width: 2, height: 1, descent: 0.2, pixelMap } });
+    }
   }
-  const fileIo = { access: async () => false, mkdir: async () => {}, unlink: async file => removed.push(file) };
-  const { acquireMath, forgetMissingMath } = load('services/MathResources', {
+  const { acquireMath } = load('services/MathResources', {
     '@kit.ArkTS': { worker: { ThreadWorker } },
-    '@kit.CoreFileKit': { fileIo },
     '../model/Diagnostics': { Diagnostics: { log: () => {} } },
   });
-  const first = acquireMath('/cache', 'a', false, '#000000');
-  const same = acquireMath('/cache', 'a', false, '#000000');
-  const offscreen = acquireMath('/cache', 'b', false, '#000000');
+  const first = acquireMath('a', false, '#000000', 56);
+  const same = acquireMath('a', false, '#000000', 56);
+  const offscreen = acquireMath('b', false, '#000000', 56);
   const cancelled = assert.rejects(offscreen.result, /cancelled/);
   offscreen.release();
   await cancelled;
-  await new Promise(setImmediate);
   assert.deepEqual(posts.map(job => job.tex), ['a']);
   thread.finish();
-  assert.equal((await first.result).uri, (await same.result).uri);
+  assert.equal((await first.result).pixelMap, (await same.result).pixelMap);
   first.release(); same.release();
-  const reused = acquireMath('/cache', 'a', false, '#000000');
-  assert.equal((await reused.result).uri, (await first.result).uri);
+  const reused = acquireMath('a', false, '#000000', 56);
+  assert.equal((await reused.result).pixelMap, (await first.result).pixelMap);
   assert.equal(posts.length, 1, 'returning to a rendered formula reuses the image');
   reused.release();
-  assert.equal(await forgetMissingMath('a', false, '#000000', (await reused.result).uri), true);
-  const regenerated = acquireMath('/cache', 'a', false, '#000000');
-  thread.finish();
-  assert.notEqual((await regenerated.result).uri, (await reused.result).uri);
-  regenerated.release();
-  const display = acquireMath('/cache', 'a', true, '#000000');
-  const dark = acquireMath('/cache', 'a', true, '#ffffff');
+  const display = acquireMath('a', true, '#000000', 56);
+  const dark = acquireMath('a', true, '#ffffff', 56);
   assert.equal(posts.at(-1).display, true);
   thread.finish();
   assert.equal(posts.at(-1).color, '#ffffff');
   thread.finish();
-  assert.notEqual((await display.result).uri, (await dark.result).uri);
+  assert.notEqual((await display.result).pixelMap, (await dark.result).pixelMap);
   display.release(); dark.release();
-
-  fileIo.access = async () => true;
-  const pinned = acquireMath('/cache', 'visible', false, '#000000');
+  const larger = acquireMath('a', true, '#000000', 72);
+  assert.equal(posts.at(-1).emPixels, 72);
   thread.finish();
-  const pinnedPath = (await pinned.result).uri.slice('file://'.length);
-  for (let i = 0; i < 36; i++) {
-    const unused = acquireMath('/cache', 'x_' + i, false, '#000000');
-    thread.finish(256 * 1024);
+  assert.notEqual((await larger.result).pixelMap, (await display.result).pixelMap);
+  larger.release();
+
+  const pinned = acquireMath('visible', false, '#000000', 56);
+  thread.finish();
+  const pinnedBitmap = (await pinned.result).pixelMap;
+  for (let i = 0; i < 20; i++) {
+    const unused = acquireMath('x_' + i, false, '#000000', 56);
+    thread.finish(2 * 1024 * 1024);
     await unused.result;
     unused.release();
   }
-  assert.ok(removed.length >= 4, 'cache evicts old files after exceeding the byte budget');
-  assert.ok(!removed.includes(pinnedPath), 'visible images remain pinned while the view uses them');
+  assert.ok(removed.length >= 4, 'cache releases evicted bitmaps when exceeding the byte budget');
+  assert.ok(!removed.includes(pinnedBitmap), 'visible images remain pinned while the view uses them');
   pinned.release();
 }
 

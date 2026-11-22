@@ -1,10 +1,10 @@
 import { common } from '@kit.AbilityKit';
-import { ColorMetrics, LengthMetrics } from '@kit.ArkUI';
+import { ColorMetrics, FrameCallback, LengthMetrics } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
 import { MarkdownSpan, markdownSpans } from '../model/Markdown';
-import { acquireMath, forgetMissingMath, MathImage, MathLease } from '../services/MathResources';
+import { acquireMath, MathImage, MathLease } from '../services/MathResources';
 
 interface MathSpan extends MarkdownSpan {
   image?: MathImage;
@@ -16,13 +16,20 @@ interface MathRow {
   block: boolean;
 }
 
+class MathLayoutFrame extends FrameCallback {
+  private readonly apply: () => void;
+  constructor(apply: () => void) { super(); this.apply = apply; }
+  onFrame(_time: number): void { this.apply(); }
+  onIdle(_time: number): void {}
+}
+
 @Component
 export struct MathView {
   @StorageProp('tinybot.appearance.style') @Watch('refresh') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.appearance.dark') @Watch('refresh') private dark: boolean = false;
   @Prop @Watch('refresh') content: string = '';
   @Prop @Watch('refresh') display: boolean = false;
-  @Prop @Watch('rebuild') fontSize: number = 16;
+  @Prop @Watch('refresh') fontSize: number = 16;
   @Prop bold: boolean = false;
   @Prop @Watch('refresh') color: ResourceColor = $r('app.color.text_primary');
   @Prop selectable: boolean = true;
@@ -33,8 +40,10 @@ export struct MathView {
   private images: Map<string, MathImage> = new Map();
   private failed: Set<string> = new Set();
   private palette: string = '';
+  private emPixels: number = 0;
   private mounted: boolean = false;
   private visible: boolean = false;
+  private layoutScheduled: boolean = false;
   private generation: number = 0;
 
   aboutToAppear(): void {
@@ -47,6 +56,7 @@ export struct MathView {
     this.generation++;
     this.mounted = false;
     this.visible = false;
+    this.layoutScheduled = false;
     this.clear();
   }
 
@@ -66,7 +76,10 @@ export struct MathView {
   private refresh(): void {
     if (!this.mounted) { return; }
     const palette = this.rgb() + (this.display ? ':display' : '');
-    if (this.palette !== palette) { this.clear(); this.palette = palette; }
+    const emPixels = Math.ceil(this.getUIContext().fp2px(this.fontSize) * (this.display ? 1.18 : 1));
+    if (this.palette !== palette || this.emPixels !== emPixels) {
+      this.clear(); this.palette = palette; this.emPixels = emPixels;
+    }
     this.source = this.display ? [{ text: this.content, kind: 'math', url: '' }] : markdownSpans(this.content);
     const wanted = new Set<string>();
     this.source.forEach((span: MarkdownSpan) => { if (span.kind === 'math') { wanted.add(span.text); } });
@@ -83,21 +96,20 @@ export struct MathView {
 
   private request(): void {
     if (!this.visible || !this.mounted) { return; }
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     const color = this.palette.slice(0, 7);
     this.source.forEach((span: MarkdownSpan) => {
       if (span.kind !== 'math' || this.leases.has(span.text)) { return; }
       const tex = span.text;
-      const lease = acquireMath(context.cacheDir, tex, this.display, color);
+      const lease = acquireMath(tex, this.display, color, this.emPixels);
       this.leases.set(tex, lease);
       lease.result.then((image: MathImage) => {
         if (this.leases.get(tex) !== lease) { return; }
         this.images.set(tex, image);
-        this.rebuild();
+        this.scheduleLayout();
       }, () => {
         if (this.leases.get(tex) !== lease) { return; }
         this.failed.add(tex);
-        this.rebuild();
+        this.scheduleLayout();
       });
     });
   }
@@ -120,6 +132,17 @@ export struct MathView {
   private imageWidth(image: MathImage): number { return Math.max(1, image.width * this.em()); }
   private imageHeight(image: MathImage): number { return Math.max(1, image.height * this.em()); }
 
+  private scheduleLayout(): void {
+    if (this.layoutScheduled || !this.mounted) { return; }
+    this.layoutScheduled = true;
+    const generation = this.generation;
+    this.getUIContext().postFrameCallback(new MathLayoutFrame(() => {
+      if (this.generation !== generation) { return; }
+      this.layoutScheduled = false;
+      this.rebuild();
+    }));
+  }
+
   private rebuild(): void {
     if (!this.mounted) { return; }
     const rows: MathRow[] = [];
@@ -138,30 +161,13 @@ export struct MathView {
     this.rows = rows;
   }
 
-  private async imageFailed(tex: string, uri: string): Promise<void> {
-    const lease = this.leases.get(tex);
-    if (!lease || this.images.get(tex)?.uri !== uri || this.failed.has(tex)) { return; }
-    this.failed.add(tex);
-    try {
-      // The storage cleanup page can remove a previously rendered SVG.
-      if (await forgetMissingMath(tex, this.display, this.palette.slice(0, 7), uri)) {
-        if (this.leases.get(tex) === lease) {
-          lease.release();
-          this.leases.delete(tex); this.images.delete(tex); this.failed.delete(tex);
-          this.rebuild(); this.request();
-        }
-        return;
-      }
-    } catch (error) {
-      Diagnostics.log('warn', 'math', 'cache_read_failed', undefined, error as Error);
-    }
-    if (this.leases.get(tex) !== lease) { return; }
-    Diagnostics.log('warn', 'math', 'image_decode_failed');
-    this.rebuild();
-  }
-
-  private onImageError(tex: string, uri: string): () => void {
-    return () => { this.imageFailed(tex, uri); };
+  private onImageError(tex: string, id: number): () => void {
+    return () => {
+      if (this.images.get(tex)?.id !== id || this.failed.has(tex)) { return; }
+      this.failed.add(tex);
+      Diagnostics.log('warn', 'math', 'bitmap_display_failed');
+      this.scheduleLayout();
+    };
   }
 
   private async open(url: string): Promise<void> {
@@ -174,12 +180,12 @@ export struct MathView {
 
   @Builder
   blockImage(index: number) {
-    Image(this.rows[index].spans[0].image!.uri)
+    Image(this.rows[index].spans[0].image!.pixelMap)
       .width(this.imageWidth(this.rows[index].spans[0].image!))
       .height(this.imageHeight(this.rows[index].spans[0].image!))
       .objectFit(ImageFit.Fill)
       .accessibilityText(this.rows[index].spans[0].text)
-      .onError(this.onImageError(this.rows[index].spans[0].text, this.rows[index].spans[0].image!.uri))
+      .onError(this.onImageError(this.rows[index].spans[0].text, this.rows[index].spans[0].image!.id))
   }
 
   @Builder
@@ -206,12 +212,12 @@ export struct MathView {
     Text() {
       ForEach(this.rows[index].spans, (span: MathSpan) => {
         if (span.image) {
-          ImageSpan(span.image.uri)
+          ImageSpan(span.image.pixelMap)
             .width(this.imageWidth(span.image)).height(this.imageHeight(span.image))
             .objectFit(ImageFit.Fill).verticalAlign(ImageSpanAlignment.BASELINE)
             .baselineOffset(LengthMetrics.vp(-span.image.descent * this.em()))
             .accessibilityText(span.text)
-            .onError(this.onImageError(span.text, span.image.uri))
+            .onError(this.onImageError(span.text, span.image.id))
         } else if (span.kind === 'code') {
           Span('\u00a0' + span.text + '\u00a0').fontFamily('monospace').fontSize(this.fontSize - 2)
             .textBackgroundStyle({ color: $r('app.color.surface_variant'), radius: 4 })
@@ -223,7 +229,7 @@ export struct MathView {
               span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None })
             .onClick(() => { if (span.url) { this.open(span.url); } })
         }
-      }, (span: MathSpan, offset: number) => JSON.stringify([offset, span.kind, span.text, span.url, span.image?.uri, span.failed]))
+      }, (span: MathSpan, offset: number) => JSON.stringify([offset, span.kind, span.text, span.url, span.image?.id, span.failed]))
     }.fontFamily(this.appearance.fontFamily).fontSize(this.fontSize).fontColor(this.color)
       .lineSpacing(LengthMetrics.vp(3), { onlyBetweenLines: true })
       .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).width('100%')
@@ -240,7 +246,7 @@ export struct MathView {
         Promise.resolve().then(() => {
           if (this.mounted && generation === this.generation && Number(area.width) !== this.availableWidth) {
             this.availableWidth = Number(area.width);
-            this.rebuild();
+            if (!this.display && this.images.size) { this.scheduleLayout(); }
           }
         });
       })

@@ -30,6 +30,19 @@ async function main() {
           return { contents, loader: 'js' };
         });
       },
+    }, {
+      name: 'reuse-mathtools-tag-key',
+      setup(builder) {
+        builder.onLoad({ filter: /mathjax-full[\\/]js[\\/]input[\\/]tex[\\/]mathtools[\\/]MathtoolsTags\.js$/ }, ({ path: filename }) => {
+          const source = fs.readFileSync(filename, 'utf8');
+          const uniqueKey = /tagID\+\+;\s+var tagName = 'MathtoolsTags-' \+ tagID;/g;
+          assert.equal([...source.matchAll(uniqueKey)].length, 1, 'MathJax Mathtools tag registration changed');
+          // Conversion is synchronous. Replacing the registry entry lets the
+          // previous TeX parser go while each expression still gets fresh tags.
+          const contents = source.replace(uniqueKey, "var tagName = 'MathtoolsTags';");
+          return { contents, loader: 'js' };
+        });
+      },
     }],
     write: false,
   });

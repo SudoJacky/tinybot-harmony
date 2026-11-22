@@ -1,5 +1,6 @@
 import { mathjax } from 'mathjax-full/js/mathjax.js';
 import { TeX } from 'mathjax-full/js/input/tex.js';
+import { TagsFactory } from 'mathjax-full/js/input/tex/Tags.js';
 import { SVG } from 'mathjax-full/js/output/svg.js';
 import { SVGWrapperFactory } from 'mathjax-full/js/output/svg/WrapperFactory.js';
 import { SVGmtable } from 'mathjax-full/js/output/svg/Wrappers/mtable.js';
@@ -32,6 +33,9 @@ const output = new SVG({ fontCache: 'none', wrapperFactory });
 
 export function typesetMath(tex, display, color) {
   // Keep macro definitions and equation labels local to this expression.
+  // Textmacros reads the global tag default during setup. Resetting it here
+  // keeps its tag instance from capturing the previous Mathtools parser.
+  TagsFactory.setDefault('none');
   const input = new TeX({
     packages: ['base', 'ams', 'boldsymbol', 'cancel', 'color', 'mathtools', 'newcommand', 'textmacros'],
     maxBuffer: 8192,

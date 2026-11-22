@@ -1,10 +1,11 @@
 import { worker, MessageEvents } from '@kit.ArkTS';
-import { fileIo as fs } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
 import { Diagnostics } from '../model/Diagnostics';
 import { MathDimensions, MathRequest, MathResponse } from '../model/MathContent';
 
 export interface MathImage extends MathDimensions {
-  uri: string;
+  id: number;
+  pixelMap: image.PixelMap;
 }
 
 export interface MathLease {
@@ -21,23 +22,19 @@ interface Entry {
   users: number;
   bytes: number;
   done: boolean;
+  pixelMap?: image.PixelMap;
 }
 
-const CACHE_BYTES: number = 8 * 1024 * 1024;
+// Visible views pin their bitmaps. Evict least recently used unpinned bitmaps as needed.
+const CACHE_BYTES: number = 32 * 1024 * 1024;
 const CACHE_ENTRIES: number = 384;
 const entries = new Map<string, Entry>();
 const waiting = new Map<string, Entry>();
 let renderer: worker.ThreadWorker | undefined;
 let active: Entry | undefined;
-let initialized: boolean = false;
 let timeout: number = -1;
 let sequence: number = 0;
 let bytes: number = 0;
-
-function unlink(path: string): void {
-  fs.access(path).then(async (exists: boolean) => { if (exists) { await fs.unlink(path); } })
-    .catch(() => Diagnostics.log('warn', 'math', 'cache_remove_failed'));
-}
 
 function trim(): void {
   for (const key of entries.keys()) {
@@ -46,7 +43,7 @@ function trim(): void {
     if (!entry.done || entry.users) { continue; }
     entries.delete(key);
     bytes -= entry.bytes;
-    if (entry.bytes) { unlink(entry.job.path); }
+    entry.pixelMap?.release().catch((error: Error) => Diagnostics.log('warn', 'math', 'bitmap_release_failed', undefined, error));
   }
 }
 
@@ -55,16 +52,14 @@ function complete(response?: MathResponse, failure: string = 'worker_failed'): v
   if (!entry) { return; }
   clearTimeout(timeout); timeout = -1; active = undefined;
   entry.done = true;
-  if (response && !response.error) {
+  if (response?.pixelMap && !response.error) {
+    entry.pixelMap = response.pixelMap;
     entry.bytes = response.bytes; bytes += response.bytes;
-    entry.resolve({ uri: 'file://' + entry.job.path, width: response.width, height: response.height, descent: response.descent });
+    entry.resolve({ id: ++sequence, pixelMap: response.pixelMap, width: response.width, height: response.height, descent: response.descent });
   } else {
     const code = response?.error || failure;
-    if (code === 'cache_write_failed' || !response) {
-      entries.delete(entry.key);
-      unlink(entry.job.path);
-    }
-    Diagnostics.log('warn', 'math', code);
+    if (code !== 'invalid_formula' && code !== 'formula_too_large') { entries.delete(entry.key); }
+    Diagnostics.log('warn', 'math', code, { code: response?.nativeCode });
     entry.reject(new Error(code));
   }
   trim();
@@ -78,13 +73,7 @@ function restart(code: string): void {
   complete(undefined, code);
 }
 
-async function dispatch(entry: Entry): Promise<void> {
-  if (!initialized) {
-    const directory = entry.job.path.slice(0, entry.job.path.lastIndexOf('/'));
-    if (await fs.access(directory)) { await fs.rmdir(directory); }
-    await fs.mkdir(directory);
-    initialized = true;
-  }
+function dispatch(entry: Entry): void {
   if (!renderer) {
     const thread = new worker.ThreadWorker('entry/ets/workers/MathWorker.ets');
     renderer = thread;
@@ -107,28 +96,17 @@ function next(): void {
     const entry = waiting.get(key)!;
     waiting.delete(key);
     active = entry;
-    dispatch(entry).catch((error: Error) => {
-      Diagnostics.log('warn', 'math', 'worker_dispatch_failed', undefined, error);
+    try { dispatch(entry); }
+    catch (error) {
+      Diagnostics.log('warn', 'math', 'worker_dispatch_failed', undefined, error as Error);
       restart('worker_dispatch_failed');
-    });
+    }
     return;
   }
 }
 
-export async function forgetMissingMath(tex: string, display: boolean, color: string, uri: string): Promise<boolean> {
-  const key = JSON.stringify([tex, display, color]);
-  const path = uri.slice('file://'.length);
-  if (await fs.access(path)) { return false; }
-  const entry = entries.get(key);
-  if (entry?.job.path === path) {
-    entries.delete(key);
-    bytes -= entry.bytes;
-  }
-  return true;
-}
-
-export function acquireMath(cacheDir: string, tex: string, display: boolean, color: string): MathLease {
-  const key = JSON.stringify([tex, display, color]);
+export function acquireMath(tex: string, display: boolean, color: string, emPixels: number): MathLease {
+  const key = JSON.stringify([tex, display, color, emPixels]);
   let entry = entries.get(key);
   if (entry) {
     entries.delete(key);
@@ -136,8 +114,7 @@ export function acquireMath(cacheDir: string, tex: string, display: boolean, col
     let resolve: (image: MathImage) => void = () => {};
     let reject: (error: Error) => void = () => {};
     const result = new Promise<MathImage>((answer, fail) => { resolve = answer; reject = fail; });
-    const path = cacheDir + '/math-svg/' + (++sequence) + '.svg';
-    const job: MathRequest = { tex: tex, display: display, color: color, path: path };
+    const job: MathRequest = { tex: tex, display: display, color: color, emPixels: emPixels };
     entry = { key: key, job: job, result: result, resolve: resolve, reject: reject, users: 0, bytes: 0, done: false };
     waiting.set(key, entry);
   }
