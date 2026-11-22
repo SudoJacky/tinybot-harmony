@@ -22,12 +22,14 @@ export struct MarkdownView {
   private refresh(): void {
     if (this.disposed) { return; }
     const mark = Diagnostics.begin(this.perfId);
-    const update = this.document.update(this.content);
+    const update = this.document.update(this.content, !this.streaming);
     if (Diagnostics.recording) {
       Diagnostics.measure('markdown.sourceChars', this.content.length, 'UTF16');
-      Diagnostics.end('markdown.parse', mark, { sourceChars: this.content.length, changedBlocks: update.blocks.length, startBlock: update.start });
+      Diagnostics.end(update.cached ? 'markdown.cacheRestore' : 'markdown.parse', mark,
+        { sourceChars: this.content.length, changedBlocks: update.blocks.length, startBlock: update.start });
     }
     if (!update.blocks.length && update.start === this.blocks.length) {
+      if (!this.streaming) { this.document.retainComplete(this.blocks); }
       if (this.renderTimer === -1) { this.syncChunks(this.chunks.length); }
       return;
     }
@@ -37,6 +39,7 @@ export struct MarkdownView {
         previous.fenceClosed === block.fenceClosed && JSON.stringify(previous.rows) === JSON.stringify(block.rows) ? previous : block;
     });
     this.blocks.splice(update.start, this.blocks.length - update.start, ...next);
+    if (!this.streaming) { this.document.retainComplete(this.blocks); }
     this.syncChunks(Math.floor(update.start / MARKDOWN_CHUNK_BLOCKS));
   }
   private syncChunks(start: number): void {

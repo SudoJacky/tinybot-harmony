@@ -40,6 +40,29 @@ for (const source of documents) {
     }
   }
 }
+
+const longReply = Array.from({ length: 92 }, (_, i) => `### Section ${i}\n\n${documents[i % documents.length]}`).join('\n\n');
+const streamingDocument = new MarkdownDocument();
+const savedBlocks = streamingDocument.update(longReply).blocks;
+assert.equal(new MarkdownDocument().update(longReply, true).cached, undefined, 'A partial stream does not populate the cache');
+streamingDocument.retainComplete(savedBlocks);
+const reopenedDocument = new MarkdownDocument();
+const reopened = reopenedDocument.update(longReply, true);
+assert.equal(reopened.cached, true);
+assert.equal(reopened.blocks[0], savedBlocks[0]);
+assert.deepEqual(plain(reopened.blocks), plain(markdownBlocks(longReply)));
+const edited = longReply + '\n\n**More detail**';
+const edit = reopenedDocument.update(edited);
+assert.deepEqual(plain(reopened.blocks.slice(0, edit.start).concat(edit.blocks)), plain(markdownBlocks(edited)),
+  'A cached document can resume incremental parsing without modifying the cached blocks');
+for (let i = 0; i < 90; i++) {
+  const reply = `Revision ${i}\n\n` + longReply;
+  const document = new MarkdownDocument();
+  document.retainComplete(document.update(reply).blocks);
+}
+assert.equal(new MarkdownDocument().update(longReply, true).cached, undefined, 'Old completed replies are evicted');
+assert.equal(new MarkdownDocument().update('Revision 89\n\n' + longReply, true).cached, true);
+
 // Actual emitted ArkUI methods: exercise cache lifetime, clipped highlighting,
 // streaming completion, code expansion, offscreen clocks and disposal.
 function methods(file, name, names) {
@@ -143,6 +166,15 @@ documentView.content += '~~~'; documentView.refresh();
 const closedDiagram = documentView.chunks[0].blocks[0];
 assert.equal(isMermaidBlock(closedDiagram), true);
 assert.notEqual(closedDiagram, pendingDiagram, 'Closing a fence updates the chunk even when the source does not change');
+const completedLiveReply = '# Live reply\n\n' + longReply;
+documentView.content = completedLiveReply;
+documentView.refresh();
+assert.equal(new MarkdownDocument().update(completedLiveReply, true).cached, undefined);
+documentView.streaming = false;
+documentView.refresh();
+assert.equal(new MarkdownDocument().update(completedLiveReply, true).cached, true,
+  'The actual renderer caches a live reply as soon as the stream completes');
+documentView.streaming = true;
 assert.equal(isMermaidBlock(markdownBlocks('```mermaid\nflowchart LR\nA --> B\n```extra')[0]), false);
 assert.equal(isMermaidBlock(markdownBlocks('```js\nflowchart LR\nA --> B\n```')[0]), false);
 // Stream through several group boundaries using the actual document view.
