@@ -10,7 +10,8 @@ function load(name) {
   const exports = {}; cache.set(file, exports);
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS, experimentalDecorators: true
-  } }).outputText, { exports, Observed: c => c, require: id => load(path.resolve(path.dirname(file), id)) });
+  } }).outputText, { exports, Observed: c => c, DataOperationType: { ADD: 'add', RELOAD: 'reload' },
+    require: id => load(path.resolve(path.dirname(file), id)) });
   return exports;
 }
 const from = name => load(path.join(srcRoot, name));
@@ -63,7 +64,12 @@ console.log('PASS repeated and failed publications, distinct artifacts, immutabl
 
 const data = { id: 'thread', title: 'Test', updatedAt: 0, messages: messages.map(m => ({ ...m, role: 'assistant', content: '', status: 'complete', error: '' })) };
 const thread = new ThreadViewModel(data), source = new MessageListSource();
-let reloads = 0; const listener = { onDataReloaded() { reloads++; } };
+let reloads = 0;
+const additions = [];
+const listener = { onDatasetChange([operation]) {
+  if (operation.type === 'reload') { reloads++; }
+  else { additions.push([operation.index, operation.count]); }
+} };
 source.registerDataChangeListener(listener); source.update(thread.id, thread.messages);
 source.update(thread.id, thread.messages.slice()); assert.equal(reloads, 1, 'Streaming must not reload identical lazy rows');
 const retained = source.getData(0); retained.disclosures.get('preview').open = true;
@@ -71,9 +77,41 @@ retained.uiPresentation.webHeights.set('0:1/web', 640);
 thread.update(data); source.update(thread.id, thread.messages);
 assert.equal(reloads, 1); assert.equal(source.getData(0), retained); assert.equal(retained.uiPresentation.webHeights.get('0:1/web'), 640);
 assert.equal(retained.disclosures.get('preview').open, true);
-source.update('other-thread', thread.messages); assert.equal(reloads, 2);
-source.unregisterDataChangeListener(listener); source.update('third-thread', []); assert.equal(reloads, 2);
+source.update(thread.id, [{ id: 'older' }, ...thread.messages]);
+assert.deepEqual(additions, [[0, 1]]);
+assert.equal(source.getData(1), retained, 'prepending keeps mounted row identities');
+source.update(thread.id, [{ id: 'older' }, ...thread.messages]);
+assert.equal(reloads, 2, 'replaced rows require key reconciliation');
+const previous = [source.getData(0), ...thread.messages];
+source.update(thread.id, [...previous, { id: 'last' }]);
+assert.deepEqual(additions, [[0, 1], [previous.length, 1]]);
+source.update('other-thread', thread.messages); assert.equal(reloads, 3);
+source.unregisterDataChangeListener(listener); source.update('third-thread', []); assert.equal(reloads, 3);
 console.log('PASS lazy row identity, retained disclosure/height state, thread switch and listener cleanup');
+
+{
+  let starts = 0;
+  const timers = new Set();
+  const Mermaid = native('MermaidView', 'MermaidView', ['aboutToAppear', 'activate', 'aboutToDisappear'], {
+    webview: { WebviewController: class { constructor() { starts++; } } },
+    setTimeout() { const id = starts; timers.add(id); return id; },
+    clearTimeout(id) { timers.delete(id); }
+  });
+  const chart = Object.assign(new Mermaid(), { lifetime: 0, revision: 0, foreground: true, visible: false, scrolling: true, timeout: -1 });
+  chart.aboutToAppear();
+  chart.activate();
+  chart.visible = true;
+  chart.activate();
+  assert.equal(starts, 0, 'scrolling past a chart must not initialize ArkWeb');
+  chart.scrolling = false;
+  chart.activate();
+  chart.activate();
+  assert.equal(starts, 1);
+  assert.equal(timers.size, 1);
+  chart.aboutToDisappear();
+  assert.equal(chart.controller, undefined);
+  assert.equal(timers.size, 0, 'leaving a chart cancels pending startup');
+}
 
 let now = 0, sequence = 0, controllers = 0; const timers = new Map();
 const logs = [], context = { Diagnostics: from('model/Diagnostics').Diagnostics,

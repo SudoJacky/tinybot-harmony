@@ -574,11 +574,18 @@ export class SessionService {
     await this.send(); return true;
   }
   async selectThread(id: string): Promise<boolean> {
+    if (this.data.activeThreadId === id) { return this.canNavigate; }
     if (this.data.threads.some((thread) => thread.id === id && thread.sideChatContext !== undefined)) { return false; }
     return this.mutate(t("打开对话失败："), async () => {
       const thread = this.requireThread(id); await this.ensureThreadWorkspace(thread);
-      this.data.activeThreadId = id; await this.persist();
-    }, 'snapshot', 'navigation');
+      const candidate = copyAppMetadata(this.data);
+      candidate.activeThreadId = id;
+      const draftRevision = this.draftRevision;
+      await this.commitCandidate(candidate, () => {
+        this.data.activeThreadId = id;
+        if (this.draftRevision === draftRevision) { this.dirtyDrafts.clear(); }
+      }, this.draftWriteIds());
+    }, 'selection', 'navigation');
   }
   async deleteThread(id: string): Promise<boolean> {
     return this.deleteThreads([id]);
@@ -1591,7 +1598,7 @@ export class SessionService {
     await previous;
     try { return await action(); } finally { release(); }
   }
-  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'preferences' | 'state' = 'snapshot', scope: 'shared' | 'thread' | 'navigation' = 'shared'): Promise<boolean> {
+  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'selection' | 'preferences' | 'state' = 'snapshot', scope: 'shared' | 'thread' | 'navigation' = 'shared'): Promise<boolean> {
     if (!(scope === 'shared' ? this.canMutateShared : scope === 'navigation' ? this.canNavigate : this.canMutate)) { return false; }
     const startedAt = Date.now();
     const draftRevision = this.draftRevision;
@@ -1712,9 +1719,15 @@ export class SessionService {
     this.emit({ kind: 'teams', state: this.state, threadId: thread.id,
       teams: JSON.parse(JSON.stringify(thread.teams || [])) as TeamRun[] });
   }
-  private publish(kind: 'snapshot' | 'state' | 'preferences'): void {
+  private publish(kind: 'snapshot' | 'selection' | 'state' | 'preferences'): void {
     const diagnosticMark = Diagnostics.begin();
     try {
+      if (kind === 'selection') {
+        const thread = this.active;
+        this.emit({ kind: kind, state: this.state, threadId: thread.id,
+          teams: JSON.parse(JSON.stringify(thread.teams || [])) as TeamRun[] });
+        return;
+      }
       const data = kind === 'snapshot' ? this.snapshot() : undefined;
       if (data) {
         for (const thread of data.threads) {

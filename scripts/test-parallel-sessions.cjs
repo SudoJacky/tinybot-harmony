@@ -41,9 +41,10 @@ async function fixture(configure = () => {}, approval) {
     messages: [], draft: '', pendingInputs: [], modelRef: { providerId: 'test', modelId: 'model-a' } }));
   data.activeThreadId = 'a';
   configure(data);
-  let sequence = 0, pending = Promise.resolve(); const errors = [], requests = [];
+  let sequence = 0, pending = Promise.resolve(); const errors = [], requests = [], writeScopes = [];
   const repository = { saved: JSON.stringify(data), beforeSave: async () => {}, load: async () => parseAppData(repository.saved),
-    save(value) {
+    save(value, threadIds) {
+      writeScopes.push(threadIds === undefined ? undefined : Array.from(threadIds));
       const captured = JSON.stringify(value);
       const result = pending.catch(() => {}).then(async () => { await repository.beforeSave(JSON.parse(captured)); repository.saved = captured; });
       pending = result; return result;
@@ -63,7 +64,7 @@ async function fixture(configure = () => {}, approval) {
     tools: () => ({ definitions: () => [], execute: async () => 'ok' }) };
   const session = new SessionService(repository, new AgentRuntime(providers, credentials), credentials, resources, approval);
   const app = new ChatViewModel(); await app.initialize(session);
-  return { session, app, repository, requests, resources, errors };
+  return { session, app, repository, requests, resources, errors, writeScopes };
 }
 function thread(f, id, saved = false) { return (saved ? JSON.parse(f.repository.saved) : f.session.snapshot()).threads.find(t => t.id === id); }
 async function start(f, id, prompt = id) {
@@ -72,6 +73,36 @@ async function start(f, id, prompt = id) {
   return { done: f.session.send() };
 }
 async function main() {
+  {
+    const f = await fixture(data => {
+      data.threads[0].messages = [
+        { id: 'user', role: 'user', content: 'Question', status: 'complete', error: '' },
+        { id: 'answer', role: 'assistant', content: 'Answer', status: 'complete', error: '' },
+      ];
+    });
+    const threads = f.app.threads;
+    const messages = threads[0].messages;
+    const events = [];
+    f.session.subscribe(event => events.push(event));
+    f.session.setDraft('keep this draft', 'a');
+    assert.equal(await f.app.selectThread('b'), true);
+    assert.deepEqual(f.writeScopes.at(-1), ['a']);
+    assert.equal(JSON.parse(f.repository.saved).activeThreadId, 'b');
+    assert.equal(thread(f, 'a', true).draft, 'keep this draft');
+    assert.equal(f.app.threads, threads);
+    assert.equal(threads[0].messages, messages);
+    assert.equal(f.app.active.id, 'b');
+    assert.ok(events.some(event => event.kind === 'selection'));
+    assert.ok(events.every(event => event.data === undefined));
+    const writes = f.writeScopes.length;
+    assert.equal(await f.app.selectThread('b'), true);
+    assert.equal(f.writeScopes.length, writes);
+    f.repository.beforeSave = async () => { throw Error('injected index failure'); };
+    assert.equal(await f.app.selectThread('a'), false);
+    assert.equal(f.app.active.id, 'b');
+    assert.match(f.app.error, /injected index failure/);
+    console.log('PASS thread selection saves the index and dirty drafts, retains transcript views, and rolls back on write failure');
+  }
   {
     const f = await fixture(data => {
       data.threads[0].messages = [

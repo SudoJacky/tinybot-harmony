@@ -77,9 +77,9 @@ export interface ReasoningSelection {
   config?: ModelConfig;
 }
 
-// Structural changes carry detached snapshots; preference changes omit transcripts.
+// Structural changes carry detached snapshots. Selection and preference events omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
+  kind: 'snapshot' | 'selection' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
   reasoningSelection?: ReasoningSelection;

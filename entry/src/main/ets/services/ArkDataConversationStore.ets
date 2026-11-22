@@ -1,9 +1,10 @@
-import { AppData, ThreadData, parseAppData } from '../model/Conversation';
+import { AppData, ThreadData, normalizeAppData } from '../model/Conversation';
 import { ConversationCapture, CapturedConversation } from '../model/ConversationCapture';
 import { SessionRepository, ThreadCheckpoint } from './SessionContracts';
 import { ArkDataRecords, StoredRecord } from './ArkDataRecords';
 
 interface ConversationIndex { metadata: string; threadIds: string[]; }
+const READ_BATCH: number = 8;
 
 export function conversationRecords(snapshot: CapturedConversation): StoredRecord[] {
   const index: ConversationIndex = { metadata: snapshot.header, threadIds: Array.from(snapshot.threads.keys()) };
@@ -32,14 +33,18 @@ export class ArkDataConversationStore implements SessionRepository {
     }
     const data = JSON.parse(index.metadata) as AppData;
     const saved = new Map<string, string>();
-    for (const id of index.threadIds) {
-      const text = await db.read('thread', id);
-      if (text === undefined) { throw new Error('ArkData conversation is missing'); }
-      const thread = JSON.parse(text) as ThreadData;
-      if (thread.id !== id) { throw new Error('ArkData conversation does not match its index'); }
-      data.threads.push(thread); saved.set(id, text);
+    for (let start = 0; start < index.threadIds.length; start += READ_BATCH) {
+      const ids = index.threadIds.slice(start, start + READ_BATCH);
+      const records = await Promise.all(ids.map((id: string) => db.read('thread', id)));
+      records.forEach((text: string | undefined, offset: number) => {
+        const id = ids[offset];
+        if (text === undefined) { throw new Error('ArkData conversation is missing'); }
+        const thread = JSON.parse(text) as ThreadData;
+        if (thread.id !== id) { throw new Error('ArkData conversation does not match its index'); }
+        data.threads.push(thread); saved.set(id, text);
+      });
     }
-    const loaded = parseAppData(JSON.stringify(data));
+    const loaded = normalizeAppData(data);
     this.index = raw; this.saved = saved;
     this.capture.clear(); this.capture.capture(loaded); this.failed = false;
     return loaded;

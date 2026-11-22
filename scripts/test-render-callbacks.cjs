@@ -24,9 +24,10 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     if (key === 'onChange' || key === 'onTextSelectionChange') editorEvents.at(-1)[key] = args[0];
   } });
   const Panel = compile(methods('views/ChatPanel', ['composerChanged', 'composerSelectionChanged', 'speechActive', 'composerEditor', 'updateScrollState',
-    'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest']), {
+    'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest', 'loadEarlierMessages']), {
     TextArea: editor, Context: { animation() {} }, Motion: {}, Font: {}, Color: {}, Alignment: {}, Visibility: {},
-    ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end' }, Diagnostics: { recording: false },
+    ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end', START: 'start' }, Diagnostics: { recording: false },
+    Space: { sm: 8 }, LengthMetrics: { vp: value => value },
     ChatLayoutFrame: class { constructor(action) { this.action = action; } onIdle() { this.action(); } }
   });
   let building = false, changes = 0, selectionWrites = 0;
@@ -87,10 +88,13 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
 
   const frames = [], jumps = [];
   let sourceReady = false, layoutReady = false;
+  let currentRows = [];
   Object.assign(panel, { positionedThreadId: '', followOutput: true,
     getUIContext: () => ({ postFrameCallback: frame => frames.push(frame) }),
-    messageSource: { update() { assert.equal(building, false); sourceReady = true; } },
-    scroller: { scrollToIndex(...args) {
+    topInset: 60,
+    messageSource: { update(_id, rows) { assert.equal(building, false); sourceReady = true; currentRows = rows; },
+      getData(index) { return currentRows[index]; }, totalCount() { return currentRows.length; } },
+    scroller: { getItemRect(index) { assert.equal(index, 1); return { y: 112, height: 50 }; }, scrollToIndex(...args) {
       assert.ok(sourceReady && layoutReady, 'Position only after data reload and native layout'); jumps.push(args);
     } } });
   const render = () => { layoutReady = true; frames.splice(0).forEach(frame => frame.onIdle()); };
@@ -100,8 +104,13 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   await drain(); assert.equal(jumps.length, 0); assert.equal(frames.length, 1);
   render(); assert.deepEqual(jumps.pop(), [60, false, 'end'], 'Cold start targets the unmounted tail, accounting for the earlier-messages row');
   assert.equal(panel.followOutput, true);
-  panel.followOutput = false; panel.app.visibleMessageCount = 120; panel.app.visibleMessages = panel.thread.messages;
-  panel.syncMessages(); await drain(); render(); assert.equal(jumps.length, 0, 'Loading history preserves the reading position');
+  panel.loadEarlierMessages();
+  assert.equal(panel.app.visibleMessageCount, 120); assert.equal(panel.followOutput, false);
+  panel.app.visibleMessages = panel.thread.messages;
+  panel.syncMessages(); await drain(); render();
+  const restored = jumps.pop();
+  assert.deepEqual(restored.slice(0, 3), [60, false, 'start'], 'Last page restores the original message without the removed header');
+  assert.equal(restored[3].extraOffset, -44, 'History insertion preserves the old message position');
   const open = async id => { panel.thread.id = panel.app.active.id = id; panel.syncMessages(); await drain(); };
   panel.app.teams = [{ ownerMessageId: '' }];
   await open('with-team'); render(); assert.deepEqual(jumps.pop(), [120, false, 'end'], 'Include a trailing team card');

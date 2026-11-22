@@ -74,6 +74,7 @@ class ChatLayoutFrame extends FrameCallback {
 }
 
 interface PendingComposerAction { owner: number; threadId: string; run: () => void; }
+interface HistoryPageAnchor { threadId: string; messageId: string; y: number; }
 
 const PHONE_COMPOSER_ACTION_SIZE: number = 44;
 const ATTACHMENT_FOLDER_WIDTH: number = 104;
@@ -115,11 +116,45 @@ export struct ChatPanel {
   private messageSource: MessageListSource = new MessageListSource();
   private messageSyncRevision: number = 0;
   private positionedThreadId: string = '';
+  private earlierAnchor?: HistoryPageAnchor;
+
+  private loadEarlierMessages(): void {
+    if (this.app.visibleMessageCount >= this.thread.messages.length) { return; }
+    const first = this.messageSource.getData(0);
+    if (first) {
+      const rect = this.scroller.getItemRect(1); // The earlier-history button occupies index zero.
+      this.earlierAnchor = { threadId: this.thread.id, messageId: first.id,
+        y: rect.height > 0 ? rect.y : this.topInset + Space.sm };
+    }
+    this.followOutput = false;
+    clearTimeout(this.scrollTimer); this.scrollTimer = -1;
+    this.app.visibleMessageCount = Math.min(this.thread.messages.length, this.app.visibleMessageCount + 60);
+  }
+
   private syncMessages(): void {
     const revision = ++this.messageSyncRevision;
     this.afterRender(() => {
       if (revision !== this.messageSyncRevision) { return; }
-      this.messageSource.update(this.thread.id, this.app.visibleMessages);
+      const visible = this.app.visibleMessages;
+      this.messageSource.update(this.thread.id, visible);
+      const anchor = this.earlierAnchor;
+      if (anchor) {
+        this.earlierAnchor = undefined;
+        if (anchor.threadId === this.thread.id) {
+          const index = visible.findIndex((message) => message.id === anchor.messageId);
+          if (index >= 0) {
+            const destination = index + (visible.length < this.thread.messages.length ? 1 : 0);
+            const lifetime = this.lifecycle;
+            // Anchor to the previous message, even when the button itself stayed visible.
+            this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
+              if (!this.composerMounted || this.lifecycle !== lifetime || this.thread.id !== anchor.threadId ||
+                this.messageSource.totalCount() !== visible.length || this.app.searchMessageId) { return; }
+              this.scroller.scrollToIndex(destination, false, ScrollAlign.START,
+                { extraOffset: LengthMetrics.vp(this.topInset + Space.sm - anchor.y) });
+            }));
+          }
+        }
+      }
       if (this.showBrowserAnnotations && (this.positionedThreadId !== this.thread.id ||
         !this.thread.attachments.some((item) => !!item.browserAnnotation))) {
         this.showBrowserAnnotations = false;
@@ -128,7 +163,7 @@ export struct ChatPanel {
       this.positionedThreadId = this.thread.id;
       this.inspectingOutput = false;
       this.followOutput = !this.app.searchMessageId;
-      if (this.app.visibleMessages.length === 0 || this.app.searchMessageId) { return; }
+      if (visible.length === 0 || this.app.searchMessageId) { return; }
       const threadId = this.thread.id;
       const lifecycle = this.lifecycle;
       // LazyForEach has not mounted the tail yet, so its area callback cannot initiate this jump.
@@ -1041,7 +1076,7 @@ export struct ChatPanel {
         if (this.app.visibleMessageCount < this.thread.messages.length) {
           ListItem() {
             Button(t("加载更早的消息")).fontFamily(this.appearance.fontFamily).id('load-earlier-messages').attributeModifier(Btn.textSmall)
-              .onClick(() => { this.app.visibleMessageCount += 60; })
+              .onClick(() => this.loadEarlierMessages())
           }.width('100%')
         }
         LazyForEach(this.messageSource, (message: MessageViewModel) => {

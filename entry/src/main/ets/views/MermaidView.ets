@@ -16,26 +16,43 @@ interface MermaidInput {
 @Component
 export struct MermaidView {
   @StorageProp('tinybot.appearance.dark') @Watch('render') private dark: boolean = false;
+  @StorageProp('tinybot.foreground') @Watch('activate') private foreground: boolean = true;
+  @StorageProp('tinybot.chat.scrolling') @Watch('activate') private scrolling: boolean = false;
   @Prop @Watch('render') content: string = '';
   @Prop @Watch('render') selectable: boolean = true;
   @State private diagramHeight: number = 40;
   @State private hostFailed: boolean = false;
-  private controller: webview.WebviewController = new webview.WebviewController();
+  @State private showHost: boolean = false;
+  private controller?: webview.WebviewController;
   private mounted: boolean = false;
+  private visible: boolean = false;
+  private lifetime: number = 0;
   private ready: boolean = false;
   private revision: number = 0;
   private timeout: number = -1;
 
   aboutToAppear(): void {
+    this.lifetime++;
     this.mounted = true;
-    this.timeout = setTimeout(() => this.fail('startup_timeout'), 15000);
   }
 
   aboutToDisappear(): void {
+    this.lifetime++;
     this.mounted = false;
+    this.visible = false;
     this.ready = false;
     this.revision++;
     clearTimeout(this.timeout);
+    this.timeout = -1;
+    this.showHost = false;
+    this.controller = undefined;
+  }
+
+  private activate(): void {
+    if (!this.mounted || !this.visible || !this.foreground || this.scrolling || this.showHost || this.hostFailed) { return; }
+    this.controller = new webview.WebviewController();
+    this.showHost = true;
+    this.timeout = setTimeout(() => this.fail('startup_timeout'), 15000);
   }
 
   private fail(event: string, error?: Error | string): void {
@@ -46,7 +63,7 @@ export struct MermaidView {
   }
 
   private async render(): Promise<void> {
-    if (!this.mounted || !this.ready || this.hostFailed) { return; }
+    if (!this.mounted || !this.ready || this.hostFailed || !this.controller) { return; }
     const input: MermaidInput = { revision: ++this.revision, source: this.content, dark: this.dark,
       selectable: this.selectable, errorLabel: t('Mermaid 图表渲染失败') };
     clearTimeout(this.timeout);
@@ -76,14 +93,15 @@ export struct MermaidView {
   }
 
   build() {
-    if (this.hostFailed) {
-      Column({ space: Space.xs }) {
-        Text(t('Mermaid 图表渲染失败')).fontSize(12).fontColor($r('app.color.danger'))
-        Text(this.content).fontSize(13).fontFamily('monospace').fontColor($r('app.color.text_primary'))
-          .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None)
+    Column() {
+      if (this.hostFailed) {
+        Column({ space: Space.xs }) {
+          Text(t('Mermaid 图表渲染失败')).fontSize(12).fontColor($r('app.color.danger'))
+          Text(this.content).fontSize(13).fontFamily('monospace').fontColor($r('app.color.text_primary'))
+            .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None)
       }.width('100%').padding(Space.md).alignItems(HorizontalAlign.Start)
-    } else {
-      Web({ src: MERMAID_HOST, controller: this.controller })
+    } else if (this.showHost) {
+      Web({ src: MERMAID_HOST, controller: this.controller! })
         .width('100%').height(this.diagramHeight).backgroundColor(Color.Transparent)
         .javaScriptAccess(true).domStorageAccess(false).databaseAccess(false).fileAccess(false)
         .onlineImageAccess(false).blockNetwork(true).multiWindowAccess(false).zoomAccess(false)
@@ -102,6 +120,17 @@ export struct MermaidView {
           if (event.request.isMainFrame()) { this.fail('page_failed', event.error.getErrorInfo()); }
         })
         .onRenderExited(() => this.fail('process_exited'))
+    } else {
+      Blank().width('100%').height(this.diagramHeight)
     }
+    }.width('100%')
+      .onVisibleAreaChange([0], (visible: boolean) => {
+        const lifetime = this.lifetime;
+        Promise.resolve().then(() => {
+          if (!this.mounted || this.lifetime !== lifetime) { return; }
+          this.visible = visible;
+          this.activate();
+        });
+      })
   }
 }

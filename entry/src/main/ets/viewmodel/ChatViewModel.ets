@@ -117,6 +117,7 @@ export class ChatViewModel {
     try {
       this.projectState(event.state);
       if (event.data) { this.projectData(event.data); }
+      if (event.kind === 'selection' && event.threadId) { this.projectSelection(event.threadId, event.teams || []); }
       if (event.preferences) {
         this.config = event.preferences.config; this.extensions = event.preferences.extensions;
         this.productivity = event.preferences.productivity; this.selectedConfig = this.requireSession().currentConfig;
@@ -164,7 +165,7 @@ export class ChatViewModel {
           message.updateText(event.content || '', event.step || 0, event.stepContent || '');
         }
       }
-      if (['text', 'reasoning', 'message', 'tool', 'snapshot', 'thread', 'teams'].includes(event.kind)) {
+      if (['text', 'reasoning', 'message', 'tool', 'snapshot', 'selection', 'thread', 'teams'].includes(event.kind)) {
         if (!event.threadId || event.threadId === this.active.id) { this.outputs.get(this.active.id)?.(); }
       }
     } finally { if (Diagnostics.recording) { Diagnostics.end('viewmodel.project', diagnosticMark); } }
@@ -192,7 +193,6 @@ export class ChatViewModel {
   }
   private projectData(data: AppData): void {
     this.projects = data.projects || [];
-    this.teams = data.threads.find((thread) => thread.id === data.activeThreadId)?.teams || [];
     this.productivity = data.productivity || defaultProductivity();
     this.config = data.config; this.extensions = data.extensions || defaultExtensions(); this.providerProfiles = data.providerProfiles || [];
     const existing = new Map<string, ThreadViewModel>();
@@ -202,7 +202,11 @@ export class ChatViewModel {
       if (view) { view.update(thread); return view; }
       return new ThreadViewModel(thread);
     });
-    const active = this.threads.find((thread) => thread.id === data.activeThreadId);
+    this.projectSelection(data.activeThreadId, data.threads.find((thread) => thread.id === data.activeThreadId)?.teams || []);
+  }
+  private projectSelection(id: string, teams: TeamRun[]): void {
+    this.teams = teams;
+    const active = this.threads.find((thread) => thread.id === id);
     if (active) {
       if (this.active.id !== active.id) { this.visibleMessageCount = 60; this.searchQuery = ''; this.searchMessageId = ''; }
       this.active = active; this.draft = active.draft;
