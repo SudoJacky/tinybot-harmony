@@ -60,7 +60,6 @@ function methods(file, name, names) {
 let parseCalls = 0, highlightChars = 0, clock = 1000, timers = new Map(), nextTimer = 0;
 const sandbox = { Diagnostics: load('model/Diagnostics').Diagnostics, exports: {}, StreamReveal, MarkdownDocument, MarkdownChunkModel, MARKDOWN_CHUNK_BLOCKS,
   isMermaidBlock,
-  hasMath: load('model/MathContent').hasMath,
   markdownSpans: text => { parseCalls++; return load('model/Markdown').markdownSpans(text); },
   highlightCode: (text, language) => { highlightChars += text.length; return highlightCode(text, language); },
   codeTokenColor: kind => kind,
@@ -80,7 +79,7 @@ Object.assign(sandbox, { Text: noop, ForEach: noop, Column: column, Blank: blank
   Image: imageNode, ImageViewer: noop, ModalTransition: { ALPHA: 0 }, IMAGE_HEIGHT: 220, t: text => text, TextOverflow: {}, ImageFit: {}, FlexAlign: {},
   CopyOptions: { LocalDevice: 1, None: 0 }, Space: {}, Radius: {}, Alignment: {}, BarState: {}, ScrollDirection: {}, Color: {}, FontWeight: {}, FontStyle: {}, TextDecorationType: {} });
 const source = methods('MarkdownView', 'DocumentView', ['refresh', 'syncChunks', 'aboutToAppear', 'aboutToDisappear']) + '\n' +
-  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'inlineSpans', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'revealColor', 'columnWidths', 'scheduleReveal', 'afterRender', 'image', 'imageAlt', 'imageUrl', 'imagePreviewBuilder', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
+  methods('MarkdownChunkView', 'BlockView', ['refresh', 'refreshCode', 'refreshReveal', 'inlineSpans', 'proseHasMath', 'proseText', 'prose', 'initialRender', 'invalidateMeasure', 'codeBlock', 'codeShown', 'codeLines', 'revealColor', 'columnWidths', 'scheduleReveal', 'afterRender', 'image', 'imageAlt', 'imageUrl', 'imagePreviewBuilder', 'aboutToAppear', 'aboutToDisappear']) + '\n' + methods('ChatPanel', 'ChatLayout', ['messageAreaChanged']);
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, sandbox);
 const makeBlock = (block, animate = false) => Object.assign(new sandbox.exports.BlockView(), {
   model: new MarkdownChunkModel([block], animate), streaming: true, index: 0, mounted: false, disposed: false, generation: 0, visible: true,
@@ -88,6 +87,16 @@ const makeBlock = (block, animate = false) => Object.assign(new sandbox.exports.
   previewing: false, previewSource: '', revealTimer: -1, copyTimer: -1
 });
 const paragraph = '普通 **粗体** `代码`🙂';
+const history = makeBlock(markdownBlocks('内容 $x^2$，接着是正文')[0]);
+history.streaming = false;
+const beforeHistory = parseCalls;
+history.aboutToAppear();
+assert.equal(parseCalls, beforeHistory, 'history must not parse prose while preparing unused reveal data');
+assert.equal(history.proseHasMath('0'), true);
+const inlineMath = history.inlineSpans(history.proseText('0'));
+assert.equal(parseCalls - beforeHistory, 1, 'formula detection and rendering share the parsed spans');
+assert.equal(history.reveal.spans('0', inlineMath, clock), inlineMath, 'static spans are rendered directly');
+history.aboutToDisappear();
 const row = makeBlock(markdownBlocks(paragraph)[0]); row.aboutToAppear();
 const spans = row.inlineSpans(paragraph), calls = parseCalls;
 assert.equal(row.inlineSpans(paragraph), spans); assert.equal(parseCalls, calls);
@@ -105,7 +114,7 @@ while (timers.size) {
   assert.ok(revealTicks++ < 20, 'completion must stop scheduling once the fade settles');
   const [id, tick] = timers.entries().next().value; timers.delete(id); clock += 16; tick();
 }
-assert.equal(row.reveal.spans('0', row.inlineSpans(paragraph + '新'), clock).at(-1).opacity, 1);
+assert.equal(row.reveal.spans('0', row.inlineSpans(paragraph + '新'), clock).at(-1).opacity ?? 1, 1);
 assert.equal(row.reveal.active(clock), false); assert.equal(row.revealTimer, -1);
 row.streaming = true; row.visible = false; clock += 10; row.model.update(markdownBlocks(paragraph + '新尾')); row.refresh();
 assert.equal(timers.size, 0, 'offscreen updates must not schedule reveal clocks');

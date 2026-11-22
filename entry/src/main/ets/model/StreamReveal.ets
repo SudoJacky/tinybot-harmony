@@ -3,7 +3,7 @@ import { MarkdownSpan } from './Markdown';
 export const STREAM_REVEAL_MS: number = 240;
 interface RevealRange { start: number; end: number; born: number; }
 interface RevealText { text: string; ranges: RevealRange[]; }
-export interface RevealSpan { text: string; kind: string; url: string; opacity: number; }
+export interface RevealSpan extends MarkdownSpan { opacity?: number; }
 
 // Track arrival times independently of Markdown styling. Closing ** or a link must
 // not fade the already readable prefix again. Only recent suffix ranges are kept.
@@ -50,7 +50,8 @@ export class StreamReveal {
   }
 
   spans(key: string, spans: MarkdownSpan[], now: number): RevealSpan[] {
-    const ranges = this.entries.get(key)?.ranges || [];
+    const ranges = this.entries.get(key)?.ranges;
+    if (!ranges?.length) { return spans; }
     const result: RevealSpan[] = [];
     let offset = 0;
     for (const span of spans) {

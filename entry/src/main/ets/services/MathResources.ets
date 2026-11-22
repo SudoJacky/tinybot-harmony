@@ -10,6 +10,7 @@ export interface MathImage extends MathDimensions {
 
 export interface MathLease {
   result: Promise<MathImage>;
+  image?: MathImage;
   release: () => void;
 }
 
@@ -22,7 +23,7 @@ interface Entry {
   users: number;
   bytes: number;
   done: boolean;
-  pixelMap?: image.PixelMap;
+  image?: MathImage;
 }
 
 // Visible views pin their bitmaps. Evict least recently used unpinned bitmaps as needed.
@@ -43,7 +44,7 @@ function trim(): void {
     if (!entry.done || entry.users) { continue; }
     entries.delete(key);
     bytes -= entry.bytes;
-    entry.pixelMap?.release().catch((error: Error) => Diagnostics.log('warn', 'math', 'bitmap_release_failed', undefined, error));
+    entry.image?.pixelMap.release().catch((error: Error) => Diagnostics.log('warn', 'math', 'bitmap_release_failed', undefined, error));
   }
 }
 
@@ -53,9 +54,9 @@ function complete(response?: MathResponse, failure: string = 'worker_failed'): v
   clearTimeout(timeout); timeout = -1; active = undefined;
   entry.done = true;
   if (response?.pixelMap && !response.error) {
-    entry.pixelMap = response.pixelMap;
     entry.bytes = response.bytes; bytes += response.bytes;
-    entry.resolve({ id: ++sequence, pixelMap: response.pixelMap, width: response.width, height: response.height, descent: response.descent });
+    entry.image = { id: ++sequence, pixelMap: response.pixelMap, width: response.width, height: response.height, descent: response.descent };
+    entry.resolve(entry.image);
   } else {
     const code = response?.error || failure;
     if (code !== 'invalid_formula' && code !== 'formula_too_large') { entries.delete(entry.key); }
@@ -105,12 +106,19 @@ function next(): void {
   }
 }
 
+function mathKey(tex: string, display: boolean, color: string, emPixels: number): string {
+  return JSON.stringify([tex, display, color, emPixels]);
+}
+
+export function acquireCachedMath(tex: string, display: boolean, color: string, emPixels: number): MathLease | undefined {
+  const entry = entries.get(mathKey(tex, display, color, emPixels));
+  return entry?.image ? pin(entry) : undefined;
+}
+
 export function acquireMath(tex: string, display: boolean, color: string, emPixels: number): MathLease {
-  const key = JSON.stringify([tex, display, color, emPixels]);
+  const key = mathKey(tex, display, color, emPixels);
   let entry = entries.get(key);
-  if (entry) {
-    entries.delete(key);
-  } else {
+  if (!entry) {
     let resolve: (image: MathImage) => void = () => {};
     let reject: (error: Error) => void = () => {};
     const result = new Promise<MathImage>((answer, fail) => { resolve = answer; reject = fail; });
@@ -118,12 +126,18 @@ export function acquireMath(tex: string, display: boolean, color: string, emPixe
     entry = { key: key, job: job, result: result, resolve: resolve, reject: reject, users: 0, bytes: 0, done: false };
     waiting.set(key, entry);
   }
-  const leased = entry;
-  leased.users++;
-  entries.set(key, leased);
+  const lease = pin(entry);
   next();
+  return lease;
+}
+
+function pin(leased: Entry): MathLease {
+  const key = leased.key;
+  leased.users++;
+  entries.delete(key);
+  entries.set(key, leased);
   let released = false;
-  return { result: leased.result, release: () => {
+  return { result: leased.result, image: leased.image, release: () => {
     if (released) { return; }
     released = true;
     leased.users--;

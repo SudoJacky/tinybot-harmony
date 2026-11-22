@@ -17,7 +17,8 @@ const spans = text => [{ text, kind: 'text', url: '' }];
 const shown = (text, now) => reveal.spans('0', spans(text), now);
 
 reveal.update('0', '旧内容', 1000, false);
-assert.equal(shown('旧内容', 1000)[0].opacity, 1);
+const history = spans('旧内容');
+assert.equal(reveal.spans('0', history, 1000), history, 'static text can reuse the original spans');
 reveal.update('0', '旧内容新增', 1100, true);
 let parts = shown('旧内容新增', 1100);
 assert.equal(parts[0].text, '旧内容');
@@ -32,19 +33,19 @@ assert.equal(parts[1].opacity, priorOpacity, 'another chunk must not restart an 
 assert.ok(parts[2].opacity < parts[1].opacity);
 assert.equal(parts.map(p => p.text).join(''), '旧内容新增文字');
 assert.equal(reveal.active(1180 + STREAM_REVEAL_MS), false);
-assert.ok(shown('旧内容新增文字', 1400).every(p => p.opacity === 1));
+assert.ok(shown('旧内容新增文字', 1400).every(p => (p.opacity ?? 1) === 1));
 
 // Restyling a readable prefix preserves its arrival time and link metadata.
 reveal.update('0', '旧内容新增文字', 1400, true);
 const styled = reveal.spans('0', [{ text: '旧内容', kind: 'bold', url: '' },
   { text: '新增文字', kind: 'link', url: 'https://example.com' }], 1400);
-assert.equal(styled[0].opacity, 1);
+assert.equal(styled[0].opacity ?? 1, 1);
 assert.equal(styled[1].url, 'https://example.com');
 reveal.update('0', '旧内容🙂', 1410, true);
 assert.equal(shown('旧内容🙂', 1410).map(p => p.text).join(''), '旧内容🙂');
 reveal.update('0', '旧内容🙃', 1420, true);
 assert.equal(shown('旧内容🙃', 1420).map(p => p.text).join(''), '旧内容🙃');
-assert.ok(shown('旧内容🙃', 1420).every(p => p.opacity === 1));
+assert.ok(shown('旧内容🙃', 1420).every(p => (p.opacity ?? 1) === 1));
 
 const markdownFile = path.resolve(__dirname, '../entry/src/main/ets/model/Markdown.ets');
 const markdownExports = {};
@@ -55,14 +56,14 @@ for (const [before, after] of [['**hello', '**hello**'], ['[hello](https://examp
   const plain = source => markdownExports.markdownSpans(source).map(p => p.text).join('');
   reveal.update('format', plain(before), 1420, false);
   reveal.update('format', plain(after), 1421, true);
-  assert.ok(reveal.spans('format', markdownExports.markdownSpans(after), 1421).every(p => p.opacity === 1),
+  assert.ok(reveal.spans('format', markdownExports.markdownSpans(after), 1421).every(p => (p.opacity ?? 1) === 1),
     'closing Markdown syntax must not replay the readable text');
 }
 
 // Stop/completion and removed blocks cannot leave text faded or timers active.
 reveal.update('0', '旧内容🙃', 1430, false);
 assert.equal(reveal.active(1430), false);
-assert.equal(shown('旧内容🙃', 1430)[0].opacity, 1);
+assert.equal(shown('旧内容🙃', 1430)[0].opacity ?? 1, 1);
 reveal.update('1', 'new block', 1440, true);
 assert.equal(reveal.active(1440), true);
 reveal.retain(['0']);

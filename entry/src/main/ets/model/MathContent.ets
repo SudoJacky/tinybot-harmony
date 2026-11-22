@@ -1,9 +1,4 @@
 import { image } from '@kit.ImageKit';
-import { MarkdownSpan, markdownSpans } from './Markdown';
-
-export function hasMath(text: string): boolean {
-  return (text.includes('$') || text.includes('\\(')) && markdownSpans(text).some((span: MarkdownSpan) => span.kind === 'math');
-}
 export interface MathDimensions {
   width: number;
   height: number;

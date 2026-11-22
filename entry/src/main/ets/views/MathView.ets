@@ -3,8 +3,8 @@ import { ColorMetrics, FrameCallback, LengthMetrics } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
-import { MarkdownSpan, markdownSpans } from '../model/Markdown';
-import { acquireMath, MathImage, MathLease } from '../services/MathResources';
+import { MarkdownSpan } from '../model/Markdown';
+import { acquireCachedMath, acquireMath, MathImage, MathLease } from '../services/MathResources';
 
 interface MathSpan extends MarkdownSpan {
   image?: MathImage;
@@ -33,6 +33,7 @@ export struct MathView {
   @Prop bold: boolean = false;
   @Prop @Watch('refresh') color: ResourceColor = $r('app.color.text_primary');
   @Prop selectable: boolean = true;
+  inlineSpans: (source: string) => MarkdownSpan[] = () => [];
   @State private rows: MathRow[] = [];
   @State private availableWidth: number = 0;
   private source: MarkdownSpan[] = [];
@@ -41,6 +42,7 @@ export struct MathView {
   private failed: Set<string> = new Set();
   private palette: string = '';
   private emPixels: number = 0;
+  private emVp: number = 0;
   private mounted: boolean = false;
   private visible: boolean = false;
   private layoutScheduled: boolean = false;
@@ -76,19 +78,33 @@ export struct MathView {
   private refresh(): void {
     if (!this.mounted) { return; }
     const palette = this.rgb() + (this.display ? ':display' : '');
-    const emPixels = Math.ceil(this.getUIContext().fp2px(this.fontSize) * (this.display ? 1.18 : 1));
+    const ui = this.getUIContext();
+    const pixels = ui.fp2px(this.fontSize) * (this.display ? 1.18 : 1);
+    const emPixels = Math.ceil(pixels);
+    this.emVp = ui.px2vp(pixels);
     if (this.palette !== palette || this.emPixels !== emPixels) {
       this.clear(); this.palette = palette; this.emPixels = emPixels;
     }
-    this.source = this.display ? [{ text: this.content, kind: 'math', url: '' }] : markdownSpans(this.content);
-    const wanted = new Set<string>();
-    this.source.forEach((span: MarkdownSpan) => { if (span.kind === 'math') { wanted.add(span.text); } });
-    this.leases.forEach((lease: MathLease, tex: string) => {
-      if (wanted.has(tex)) { return; }
-      this.leases.delete(tex);
-      this.images.delete(tex);
-      this.failed.delete(tex);
-      lease.release();
+    this.source = this.display ? [{ text: this.content, kind: 'math', url: '' }] : this.inlineSpans(this.content);
+    if (this.leases.size) {
+      const wanted = new Set<string>();
+      this.source.forEach((span: MarkdownSpan) => { if (span.kind === 'math') { wanted.add(span.text); } });
+      this.leases.forEach((lease: MathLease, tex: string) => {
+        if (wanted.has(tex)) { return; }
+        this.leases.delete(tex);
+        this.images.delete(tex);
+        this.failed.delete(tex);
+        lease.release();
+      });
+    }
+    const color = this.palette.slice(0, 7);
+    // A warm formula can take part in the first layout. Misses still wait for visibility.
+    this.source.forEach((span: MarkdownSpan) => {
+      if (span.kind !== 'math' || this.leases.has(span.text)) { return; }
+      const hit = acquireCachedMath(span.text, this.display, color, this.emPixels);
+      if (!hit) { return; }
+      this.leases.set(span.text, hit);
+      this.images.set(span.text, hit.image!);
     });
     this.rebuild();
     this.request();
@@ -124,13 +140,8 @@ export struct MathView {
     });
   }
 
-  private em(): number {
-    const ui = this.getUIContext();
-    return ui.px2vp(ui.fp2px(this.fontSize)) * (this.display ? 1.18 : 1);
-  }
-
-  private imageWidth(image: MathImage): number { return Math.max(1, image.width * this.em()); }
-  private imageHeight(image: MathImage): number { return Math.max(1, image.height * this.em()); }
+  private imageWidth(image: MathImage): number { return Math.max(1, image.width * this.emVp); }
+  private imageHeight(image: MathImage): number { return Math.max(1, image.height * this.emVp); }
 
   private scheduleLayout(): void {
     if (this.layoutScheduled || !this.mounted) { return; }
@@ -215,11 +226,11 @@ export struct MathView {
           ImageSpan(span.image.pixelMap)
             .width(this.imageWidth(span.image)).height(this.imageHeight(span.image))
             .objectFit(ImageFit.Fill).verticalAlign(ImageSpanAlignment.BASELINE)
-            .baselineOffset(LengthMetrics.vp(-span.image.descent * this.em()))
+            .baselineOffset(LengthMetrics.vp(-span.image.descent * this.emVp))
             .accessibilityText(span.text)
             .onError(this.onImageError(span.text, span.image.id))
         } else if (span.kind === 'code') {
-          Span('\u00a0' + span.text + '\u00a0').fontFamily('monospace').fontSize(this.fontSize - 2)
+          Span(span.text).fontFamily('monospace').fontSize(this.fontSize - 2)
             .textBackgroundStyle({ color: $r('app.color.surface_variant'), radius: 4 })
         } else {
           Span(span.text).fontWeight(this.bold || span.kind === 'bold' ? FontWeight.Bold : FontWeight.Normal)
@@ -237,15 +248,21 @@ export struct MathView {
 
   build() {
     Column({ space: 4 }) {
-      ForEach(this.rows, (_row: MathRow, index: number) => {
-        if (this.rows[index].block) { this.block(index) } else { this.prose(index) }
-      }, (_row: MathRow, index: number) => `${index}`)
+      if (this.display && this.rows.length) {
+        this.block(0)
+      } else {
+        ForEach(this.rows, (_row: MathRow, index: number) => {
+          if (this.rows[index].block) { this.block(index) } else { this.prose(index) }
+        }, (_row: MathRow, index: number) => `${index}`)
+      }
     }.width('100%').alignItems(HorizontalAlign.Start)
-      .onAreaChange((_previous: Area, area: Area) => {
+      .onAreaChange((previous: Area, area: Area) => {
+        const width = Number(area.width);
+        if (previous.width === area.width && width === this.availableWidth) { return; }
         const generation = this.generation;
         Promise.resolve().then(() => {
-          if (this.mounted && generation === this.generation && Number(area.width) !== this.availableWidth) {
-            this.availableWidth = Number(area.width);
+          if (this.mounted && generation === this.generation && width !== this.availableWidth) {
+            this.availableWidth = width;
             if (!this.display && this.images.size) { this.scheduleLayout(); }
           }
         });

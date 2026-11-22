@@ -11,7 +11,6 @@ import { codeTokenColor, Radius, Space } from '../common/Theme';
 import { RevealSpan, StreamReveal } from '../model/StreamReveal';
 import { MarkdownChunkModel } from '../viewmodel/MarkdownChunkModel';
 import { ImageViewer } from './ImageViewer';
-import { hasMath } from '../model/MathContent';
 import { MathView } from './MathView';
 import { MermaidView } from './MermaidView';
 
@@ -48,6 +47,7 @@ export struct MarkdownChunkView {
   private copyTimer: number = -1;
   @State private revealTime: number = 0;
   private reveal: StreamReveal = new StreamReveal();
+  private revealTracked: boolean = false;
   private revealTimer: number = -1;
   private mounted: boolean = false;
   private disposed: boolean = false;
@@ -77,9 +77,22 @@ export struct MarkdownChunkView {
       if (failed.length !== this.imageFailed.length) { this.imageFailed = failed; }
     }
     this.inlineCache.clear();
+    if (this.streaming || this.revealTracked) {
+      this.refreshReveal(blocks, now);
+      this.revealTracked = true;
+    }
+    this.refreshCode();
+    this.tableWidths = blocks.map((block: MarkdownBlock): number[] => block.kind === 'table' ? this.columnWidths(block) : []);
+    this.revealTime = now;
+    clearTimeout(this.revealTimer); this.revealTimer = -1;
+    this.scheduleReveal();
+    if (Diagnostics.recording) { Diagnostics.end('render.chunkRefresh', mark, { blocks: blocks.length, visible: this.visible ? 1 : 0, blockOffset: this.blockOffset }); }
+  }
+  private refreshReveal(blocks: MarkdownBlock[], now: number): void {
     const keys: string[] = [];
-    // A completed response still finishes its pending fade; history mounts stay static.
-    const animate = (this.mounted || this.model.animate) && this.visible && (this.streaming || this.reveal.active(now));
+    // Seed previously displayed text on first use and preserve any final streaming fade.
+    const animate = ((this.mounted && this.revealTracked) || this.model.animate) && this.visible &&
+      (this.streaming || this.reveal.active(now));
     blocks.forEach((block: MarkdownBlock, index: number) => {
       if (block.kind === 'table') {
         block.rows.forEach((row: string[], r: number) => {
@@ -88,19 +101,14 @@ export struct MarkdownChunkView {
             this.reveal.update(key, this.inlineSpans(cell).map((span: MarkdownSpan) => span.text).join(''), now, animate);
           });
         });
-      } else if (block.kind !== 'image' && !isMermaidBlock(block)) {
+      } else if (block.kind !== 'image' && block.kind !== 'math' && block.kind !== 'math-pending' &&
+        block.kind !== 'rule' && !isMermaidBlock(block)) {
         const key = `${index}`; keys.push(key);
         const text = block.kind === 'code' ? block.text : this.inlineSpans(block.text).map((span: MarkdownSpan) => span.text).join('');
         this.reveal.update(key, text, now, animate);
       }
     });
     this.reveal.retain(keys);
-    this.refreshCode();
-    this.tableWidths = blocks.map((block: MarkdownBlock): number[] => block.kind === 'table' ? this.columnWidths(block) : []);
-    this.revealTime = now;
-    clearTimeout(this.revealTimer); this.revealTimer = -1;
-    this.scheduleReveal();
-    if (Diagnostics.recording) { Diagnostics.end('render.chunkRefresh', mark, { blocks: blocks.length, visible: this.visible ? 1 : 0, blockOffset: this.blockOffset }); }
   }
   private invalidateMeasure(): void { if (!this.disposed) { this.measuredHeight = 0; } }
   private refreshCode(): void {
@@ -143,11 +151,14 @@ export struct MarkdownChunkView {
     if (cached) { if (Diagnostics.recording) { Diagnostics.measure('markdown.inlineCacheHit', 1, 'count'); } return cached; }
     const mark = Diagnostics.begin(this.perfId);
     const spans = markdownSpans(text).map((span: MarkdownSpan): MarkdownSpan => {
-      return { text: span.kind === 'code' ? NBSP + span.text + NBSP : span.text, kind: span.kind, url: span.url };
+      return span.kind === 'code' ? { text: NBSP + span.text + NBSP, kind: span.kind, url: span.url } : span;
     });
     this.inlineCache.set(text, spans);
     if (Diagnostics.recording) { Diagnostics.end('markdown.inline', mark, { chars: text.length, spans: spans.length }); }
     return spans;
+  }
+  private proseHasMath(key: string): boolean {
+    return this.inlineSpans(this.proseText(key)).some((span: MarkdownSpan) => span.kind === 'math');
   }
   private async open(url: string): Promise<void> {
     if (!/^https?:\/\//.test(url)) { return; }
@@ -202,21 +213,22 @@ export struct MarkdownChunkView {
   // Keyed builders retain their original arguments; read changing text from the model.
   @Builder
   prose(text: string, size: number, bold: boolean, color: ResourceColor, key: string) {
-    if (hasMath(this.proseText(key))) {
-      MathView({ content: this.proseText(key), fontSize: size, bold: bold, color: color, selectable: this.selectable })
+    if (this.proseHasMath(key)) {
+      MathView({ content: this.proseText(key), inlineSpans: (source: string) => this.inlineSpans(source),
+        fontSize: size, bold: bold, color: color, selectable: this.selectable })
     } else {
     Text() {
       ForEach(this.reveal.spans(key, this.inlineSpans(this.proseText(key)), this.revealTime), (span: RevealSpan) => {
         if (span.kind === 'code') {
           Span(span.text).fontFamily('monospace').fontSize(size - 2)
-            .fontColor(this.revealColor(this.appearance.onAccentContainer, span.opacity))
+            .fontColor(this.revealColor(this.appearance.onAccentContainer, span.opacity ?? 1))
             .textBackgroundStyle({ color: $r('app.color.surface_variant'), radius: 4 })
         } else {
           Span(span.text).fontWeight(bold || span.kind === 'bold' ? FontWeight.Bold : FontWeight.Normal)
             .fontStyle(span.kind === 'italic' ? FontStyle.Italic : FontStyle.Normal)
-            .fontColor(this.revealColor(span.kind === 'link' ? this.appearance.accent : color, span.opacity))
+            .fontColor(this.revealColor(span.kind === 'link' ? this.appearance.accent : color, span.opacity ?? 1))
             .decoration({ type: span.kind === 'link' ? TextDecorationType.Underline :
-              span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None, color: this.revealColor(span.kind === 'link' ? this.appearance.accent : color, span.opacity) })
+              span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None, color: this.revealColor(span.kind === 'link' ? this.appearance.accent : color, span.opacity ?? 1) })
             .onClick(() => { if (span.url) { this.open(span.url); } })
         }
       })
@@ -256,7 +268,7 @@ export struct MarkdownChunkView {
       Scroll() {
         Text() {
           ForEach(this.reveal.spans(`${index}`, this.codeTokens[index], this.revealTime), (span: RevealSpan) => {
-            Span(span.text).fontColor(this.revealColor(codeTokenColor(span.kind), span.opacity))
+            Span(span.text).fontColor(this.revealColor(codeTokenColor(span.kind), span.opacity ?? 1))
           })
         }.fontSize(13).lineHeight(20).fontFamily('monospace')
           .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).fontColor($r('app.color.text_primary'))
@@ -373,26 +385,33 @@ export struct MarkdownChunkView {
             }
           }, (_block: MarkdownBlock, index: number) => `${index}`)
         }.width('100%').alignItems(HorizontalAlign.Start)
-        .onAreaChange((previous: Area, area: Area) => this.afterRender(() => {
+        .onAreaChange((previous: Area, area: Area) => {
           const height = Number(area.height);
-          if (this.measuredHeight !== height) { this.measuredHeight = height; }
-          if (Diagnostics.recording) {
-            Diagnostics.measure('layout.chunkCallback', 1, 'count');
-            if (previous.height !== area.height || previous.width !== area.width) {
-              Diagnostics.event('layout.chunk', { heightVp: this.measuredHeight, widthVp: Number(area.width), offset: this.blockOffset }, this.perfId);
+          if (!Diagnostics.recording && previous.height === area.height && this.measuredHeight === height) { return; }
+          this.afterRender(() => {
+            if (this.measuredHeight !== height) { this.measuredHeight = height; }
+            if (Diagnostics.recording) {
+              Diagnostics.measure('layout.chunkCallback', 1, 'count');
+              if (previous.height !== area.height || previous.width !== area.width) {
+                Diagnostics.event('layout.chunk', { heightVp: this.measuredHeight, widthVp: Number(area.width), offset: this.blockOffset }, this.perfId);
+              }
             }
-          } }))
+          });
+        })
       } else {
         // Preserve the exact measured extent while releasing offscreen Text/Span nodes.
         Blank().width('100%').height(this.measuredHeight)
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
     .bindContentCover($$this.previewing, this.imagePreviewBuilder, { modalTransition: ModalTransition.ALPHA })
-    .onAreaChange((_previous: Area, area: Area) => this.afterRender(() => {
+    .onAreaChange((previous: Area, area: Area) => {
       const width = Number(area.width);
-      if (this.measuredWidth > 0 && width !== this.measuredWidth) { this.invalidateMeasure(); }
-      this.measuredWidth = width;
-    }))
+      if (previous.width === area.width && width === this.measuredWidth) { return; }
+      this.afterRender(() => {
+        if (this.measuredWidth > 0 && width !== this.measuredWidth) { this.invalidateMeasure(); }
+        this.measuredWidth = width;
+      });
+    })
     .onVisibleAreaChange([0], (visible: boolean) => this.afterRender(() => {
       if (Diagnostics.recording) { Diagnostics.event('render.visibility', { visible: visible ? 1 : 0, heightVp: this.measuredHeight }, this.perfId); }
       if (this.visible !== visible) { this.visible = visible; }

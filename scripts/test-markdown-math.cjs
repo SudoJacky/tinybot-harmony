@@ -11,14 +11,14 @@ function load(name, modules = {}) {
   return exports;
 }
 const { markdownSpans, markdownBlocks, MarkdownDocument } = load('model/Markdown');
-const { hasMath, mathBitmapSize } = load('model/MathContent');
+const { mathBitmapSize } = load('model/MathContent');
 const plain = value => JSON.parse(JSON.stringify(value));
 const math = text => plain(markdownSpans(text).filter(span => span.kind === 'math').map(span => span.text));
 assert.deepEqual(math('质能 $E=mc^2$，以及 \\(a^2+b^2=c^2\\)。'), ['E=mc^2', 'a^2+b^2=c^2']);
 assert.deepEqual(math('**结论 $x=2$ 成立**'), ['x=2']);
 assert.deepEqual(math('括号允许空格 \\( x^2 \\)'), [' x^2 ']);
 assert.deepEqual(math('价格 $5 和 $10，转义 \\$x\\$，`$code$`，``$other$``，[链接 $x$](https://example.com/$y$)'), []);
-assert.equal(hasMath('$unfinished'), false);
+assert.deepEqual(math('$unfinished'), []);
 assert.deepEqual(math('$2+2$ 与 $x_1$'), ['2+2', 'x_1']);
 assert.deepEqual(math('$a*b*c$ 和 \\(\\text{use `code`}\\)'), ['a*b*c', '\\text{use `code`}']);
 assert.deepEqual(math('$x$2'), []);
@@ -93,10 +93,12 @@ async function checkWorkerCache() {
       this.onmessage({ data: { bytes, width: 2, height: 1, descent: 0.2, pixelMap } });
     }
   }
-  const { acquireMath } = load('services/MathResources', {
+  const { acquireCachedMath, acquireMath } = load('services/MathResources', {
     '@kit.ArkTS': { worker: { ThreadWorker } },
     '../model/Diagnostics': { Diagnostics: { log: () => {} } },
   });
+  assert.equal(acquireCachedMath('a', false, '#000000', 56), undefined);
+  assert.equal(posts.length, 0, 'cold first layout must not enqueue offscreen work');
   const first = acquireMath('a', false, '#000000', 56);
   const same = acquireMath('a', false, '#000000', 56);
   const offscreen = acquireMath('b', false, '#000000', 56);
@@ -107,7 +109,8 @@ async function checkWorkerCache() {
   thread.finish();
   assert.equal((await first.result).pixelMap, (await same.result).pixelMap);
   first.release(); same.release();
-  const reused = acquireMath('a', false, '#000000', 56);
+  const reused = acquireCachedMath('a', false, '#000000', 56);
+  assert.equal(reused.image, await first.result, 'warm first layout gets dimensions and the existing bitmap immediately');
   assert.equal((await reused.result).pixelMap, (await first.result).pixelMap);
   assert.equal(posts.length, 1, 'returning to a rendered formula reuses the image');
   reused.release();
@@ -125,8 +128,11 @@ async function checkWorkerCache() {
   assert.notEqual((await larger.result).pixelMap, (await display.result).pixelMap);
   larger.release();
 
-  const pinned = acquireMath('visible', false, '#000000', 56);
+  const loaded = acquireMath('visible', false, '#000000', 56);
   thread.finish();
+  await loaded.result;
+  loaded.release();
+  const pinned = acquireCachedMath('visible', false, '#000000', 56);
   const pinnedBitmap = (await pinned.result).pixelMap;
   for (let i = 0; i < 20; i++) {
     const unused = acquireMath('x_' + i, false, '#000000', 56);
