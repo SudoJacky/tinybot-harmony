@@ -1,10 +1,9 @@
-import { BusinessError } from '@kit.BasicServicesKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { vibrator } from '@kit.SensorServiceKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Motion, Radius, Space } from '../common/Theme';
 import { Banner, Segmented } from '../common/Widgets';
 import { APPEARANCE_MODES, AppearanceMode, AppearanceOptions, copyAppearance, defaultAppearance } from '../model/Appearance';
+import { Diagnostics } from '../model/Diagnostics';
 import { AppLanguage, t } from '../model/I18n';
 import { ProviderInfo } from '../model/Provider';
 import { isSupportedProtocol } from '../model/ProviderEndpoint';
@@ -127,8 +126,8 @@ export struct OnboardingPanel {
         await vibrator.startVibration({ type: 'preset', effectId }, { usage: 'touch' });
       }
     } catch (error) {
-      hilog.warn(0x0000, 'TinybotOnboarding', 'Haptic %{public}s failed (%{public}d)',
-        effectId, (error as BusinessError).code);
+      Diagnostics.log('warn', 'onboarding', 'haptic_failed',
+        { operation: completed ? 'haptic_complete' : 'haptic_step' }, error as Error);
     }
   }
 
