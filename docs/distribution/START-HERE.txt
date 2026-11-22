@@ -1,9 +1,9 @@
-Tinybot v1.3.3 · 发布准备说明
-更新日期：2026-11-19
+Tinybot v1.3.3-rc.3 · 发布准备说明
+更新日期 2026-11-22
 
 一、版本与产物
 
-本版产物从 v1.3.3 对应源码构建。
+本版产物从 v1.3.3-rc.3 标签所指的候选提交构建。提交和包的 SHA-256 见 package-info.json 和 SHA256SUMS.txt。
 
 包名：com.sudojacky.tinybot
 版本：1.3.3，versionCode=1003003
@@ -16,7 +16,7 @@ Tinybot v1.3.3 · 发布准备说明
 - PDF 文字提取依赖系统 PDFKit；API 20 未提供该模块，仍可保留 PDF 原件，读取时明确提示不支持文字提取，不生成空白文本。
 - 携带凭据的网络请求在 API 20 上同样不跟随重定向。
 
-1.3.3 改进文档批注、网页元素编辑、聊天预览和二合一窗口交互。新版云备份保存配置，会话及工作区文件通过可信设备间传输，旧版完整备份仍可恢复。版本变更见 RELEASE-NOTES.txt，验证记录和提交前待办见 CLOUD-TEST.txt、RELEASE-GAPS.txt。
+RC.3 优化公式和长会话渲染、Mermaid 回看、生成期间的界面更新，并纳入首次使用引导和存储总览改动。RC.2 的完整备份和云备份改动随本候选保留。版本变更见 RELEASE-NOTES.txt，验证记录和提交前待办见 CLOUD-TEST.txt、RELEASE-GAPS.txt。
 
 运行 scripts/prepare-distribution.ps1 后生成独立目录及 ZIP：
 packages/Tinybot-1.3.3-1003003-release-UNSIGNED.app：待云签名的完整发布包。
