@@ -327,23 +327,31 @@ function panel() {
     }
   };
   const account = { ready: true, signedIn: false, async signIn() { events.push('sign-in'); } };
+  const haptics = [];
+  const vibrator = {
+    HapticFeedback: { EFFECT_SOFT: 'soft', EFFECT_NOTICE_SUCCESS: 'success' },
+    isSupportEffectSync: () => true,
+    async startVibration(effect, attribute) { haptics.push([effect.effectId, attribute.usage]); }
+  };
   const view = Object.assign(probe('views/OnboardingPanel', 'OnboardingPanel', [
-    't', 'aboutToAppear', 'aboutToDisappear', 'visibleStep', 'blocked', 'move', 'goBack', 'backRequested', 'pause',
+    't', 'aboutToAppear', 'aboutToDisappear', 'visibleStep', 'blocked', 'move', 'playStepHaptic',
+    'goBack', 'backRequested', 'editableStep', 'pause',
     'canContinue', 'primaryAction', 'clearValidation', 'setLanguage', 'setMode', 'presets', 'chooseProvider', 'clearProviderDraft', 'saveProvider'
   ], {
     Edge: { Top: 0 }, CUSTOM_PROVIDER: 'custom', isSupportedProtocol: protocol => protocol === 'chat-completions',
     LanguagePreferences: { select: value => events.push(['language', value]) },
     AppearancePreferences: { select: value => events.push(['appearance', value.mode]) },
-    copyAppearance: value => ({ ...value })
+    copyAppearance: value => ({ ...value }), vibrator
   }), {
     initialStep: 1, active: true, foreground: true, account, app, options: { mode: 'system' }, language: 'system',
+    appearance: { effectStrength: 0 },
     scroller: { scrollEdge() {} },
     getUIContext: () => ({ getFocusController: () => ({ clearFocus() {} }) }),
     onMove: (step, forward) => events.push(['step', step, forward]),
     onClose: completed => events.push(['close', completed])
   });
   view.aboutToAppear();
-  return { view, events, account, app, editor };
+  return { view, events, account, app, editor, haptics };
 }
 
 async function testPanel() {
@@ -380,11 +388,22 @@ async function testPanel() {
     ['model', 'saved', 'second'], ['step', 4, true]
   ]);
   assert.equal(p.editor.apiKey, '');
+  p.view.goBack(3);
+  assert.equal(p.view.visibleStep(), 4, 'Completed steps no longer open editing from the finish screen');
   p.view.backRequested();
-  assert.equal(p.view.visibleStep(), 3);
-  await p.view.primaryAction();
-  await p.view.primaryAction();
   assert.deepEqual(p.events.at(-1), ['close', true]);
+  assert.deepEqual(p.haptics, [], 'Effects off skips step haptics');
+
+  p = panel();
+  p.account.signedIn = true;
+  p.app.configured = true;
+  p.view.appearance.effectStrength = 1;
+  await p.view.primaryAction();
+  p.view.goBack(1);
+  await p.view.primaryAction();
+  await p.view.primaryAction();
+  await p.view.primaryAction();
+  assert.deepEqual(p.haptics, [['soft', 'touch'], ['soft', 'touch'], ['soft', 'touch'], ['success', 'touch']]);
 
   p = panel();
   p.view.step = 4;

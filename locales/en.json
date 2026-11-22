@@ -3070,5 +3070,7 @@
   "选择已有模型": "Choose an existing model",
   "配置模型服务": "Set up a model provider",
   "默认模型": "Default model",
-  "默认模型：{0}": "Default model: {0}"
+  "默认模型：{0}": "Default model: {0}",
+  "按你的习惯来，之后随时可以在设置里调整。": "Make it yours. You can change these anytime in Settings.",
+  "可以用它开始对话、整理资料或起草内容。": "Start a chat, organize your notes, or draft something."
 }
