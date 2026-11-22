@@ -22,15 +22,18 @@ function checkCompiledPanel(f) {
     SectionHeader: Child, GroupCard: Child, SwitchRow: Child, NavRow: Child, RowDivider: Child, Banner: Child, IconButton: Child,
     ViewPU: { create() {} }, Space: {}, Radius: {}, BarState: { Off: 0 }, Alignment: { Top: 0 }, VerticalAlign: { Top: 0 } });
   const actions = [];
-  const panel = Object.assign(new exports.Probe(), { devices: [], automatic: f.service, app: { sharedBusy: false }, busy: false, status: '', error: '', backupDate: '', cloud: value => actions.push(value), chooseRestore:()=>actions.push('versions'), appearance: {},
+  const panel = Object.assign(new exports.Probe(), { devices: [], automatic: f.service, app: { sharedBusy: false }, busy: false, status: '', error: '', backupDate: '', cloud: value => actions.push(value), chooseRestore:()=>actions.push('versions'),
+    localBackup: restore => actions.push(restore ? 'import-file' : 'export-file'), appearance: {},
     observeComponentCreation2: callback => callback(1, true), ifElseBranchUpdateFunction: (_branch, callback) => callback(),
     forEachUpdateFunction: (_element, items, callback) => items.forEach(callback) });
   panel.backupTab();
-  assert.deepEqual([...nodes.keys()].sort(), ['create-cloud-backup', 'device-sync-receive', 'device-sync-send', 'restore-cloud-backup', 'webdav-backup-settings']); assert.ok(texts.includes(f.service.status));
+  assert.deepEqual([...nodes.keys()].sort(), ['create-cloud-backup', 'device-sync-receive', 'device-sync-send', 'export-local-backup', 'import-local-backup', 'restore-cloud-backup', 'webdav-backup-settings']); assert.ok(texts.includes(f.service.status));
   assert.equal(nodes.get('create-cloud-backup').title, '备份'); assert.equal(nodes.get('restore-cloud-backup').title, '恢复备份');
   nodes.get('create-cloud-backup').onTap(); nodes.get('restore-cloud-backup').onTap(); assert.deepEqual(actions, [false, 'versions']);
-  panel.busy = true; panel.backupTab(); assert.equal(nodes.get('create-cloud-backup').disabled, true); assert.equal(nodes.get('restore-cloud-backup').disabled, true);
-  console.log('PASS compiled backup page shows WebDAV, version selection, automatic status and busy guards');
+  nodes.get('export-local-backup').onTap(); nodes.get('import-local-backup').onTap(); assert.deepEqual(actions.slice(2), ['export-file', 'import-file']);
+  panel.busy = true; panel.backupTab();
+  for (const id of ['create-cloud-backup', 'restore-cloud-backup', 'export-local-backup', 'import-local-backup']) assert.equal(nodes.get(id).disabled, true);
+  console.log('PASS compiled backup page shows file and cloud actions, automatic status and busy guards');
 }
 function fixture() {
   let usable = true, ready = true, location = 1, failure, pending, writes = 0, uploads = 0, snapshots = 0, failFlush = false, leaseError, releaseError;
@@ -45,8 +48,16 @@ function fixture() {
   const store = { getSync: (k, d) => prefs.has(k) ? prefs.get(k) : d, putSync: (k, v) => prefs.set(k, v),
     flushSync() { if (failFlush) throw Error('disk full'); for (const [k, v] of prefs) saved.set(k, v); } };
   const cloud = { busy: false, available: async () => usable,
-    async create(context, snapshot, options) { writes++; calls.push({ context, snapshot, options }); if (failure) throw failure; if (pending) await pending; options.cancellation.check(); options.onStaged?.(); return location === 3; },
-    async list() { return writes ? [{ name: calls.at(-1).options.name, createdAt: 1000000, location }] : []; },
+    async create(context, snapshot, options) {
+      const name = 'tinybot-config-' + id + '-' + (1800000000000 + ++writes) + '-' + id + '.tinybot';
+      calls.push({ context, snapshot, options, name });
+      if (failure) throw failure;
+      if (pending) await pending;
+      options.cancellation.check();
+      options.onStaged?.(name);
+      return location === 3 ? 'uploaded' : 'pending';
+    },
+    async list() { return writes ? [{ name: calls.at(-1).name, createdAt: 1000000, location }] : []; },
     async retryUpload(_context, options) { return cloud.sync(options.cancellation); },
     async sync(cancellation) { uploads++; if (failure) throw failure; cancellation.check(); return location === 3; } };
   const cancelExports = {};
@@ -54,7 +65,6 @@ function fixture() {
     target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
   } }).outputText, { exports: cancelExports, require: () => ({ ToolFailure: class extends Error { constructor(code, message) { super(message); this.code = code; } } }) });
   const imports = {
-    './BackupSnapshotNames': { newBackupSnapshot: () => 'tinybot-config-' + id + '-' + Date.now() + '-' + id + '.tinybot' },
     '../model/BackupChanges': { BackupChanges: changes },
     '@kit.ArkData': { preferences: { getPreferencesSync: () => store } }, '@kit.ArkTS': { util: { generateRandomUUID: () => id } },
     '@kit.BackgroundTasksKit': { backgroundTaskManager: {
@@ -64,7 +74,9 @@ function fixture() {
     '../model/Diagnostics': { Diagnostics: { log: (...args) => logs.push(args) } },
     '../model/I18n': { getLocale: () => 'en-US', t: (s, args = []) => s.replace(/\{(\d+)\}/g, (_, i) => args[i]) },
     '../model/Onboarding': { isOnboardingCandidate: d => !d.threads.some(t => t.messages.length) && !d.providerProfiles.length },
-    './CloudBackup': { CloudBackup: cloud, CLOUD_BACKUP_NAME: 'tinybot-latest.tinybot', cloudBackupError: e => e.message }, './HostedPrivacy': { hostedPrivacy: privacy },
+    './CloudBackup': { CloudBackup: cloud, cloudBackupError: e => e.message,
+      latestCloudConfiguration: items => items.find(item => item.location === 2 || item.location === 3) },
+    './HostedPrivacy': { hostedPrivacy: privacy },
     './HuaweiAccount': { BackupLoginRequired, huaweiAccount: account }, './NativeWorkspaceFiles': { NativeWorkspaceFiles: workspace }, './Cancellation': cancelExports
   };
   const exports = {};
@@ -100,7 +112,7 @@ function fixture() {
   assert.equal(f.writes, 0); assert.equal(f.leases.length, 0, 'Startup, foreground and edits do not start a backup');
   f.service.onBackground(); assert.equal(f.leases.length, 1, 'Lease is acquired synchronously before any async preparation'); await tick();
   assert.equal(f.writes, 1); assert.equal(f.service.state, 'pending'); assert.deepEqual(f.released, [1]);
-  assert.equal(f.calls[0].options.openID, 'fixture-openid'); assert.match(f.calls[0].options.name, /^tinybot-config-/, 'Automatic saves use a device-owned snapshot');
+  assert.equal(f.calls[0].options.openID, 'fixture-openid'); assert.match(f.calls[0].name, /^tinybot-config-/, 'The cloud service assigns the snapshot name');
   f.location = 3; await f.leave(); assert.equal(f.uploads, 1); assert.equal(f.writes, 1, 'Pending upload retries do not reserialize unchanged data');
   assert.equal(f.service.state, 'uploaded'); const leases = f.leases.length; await f.leave(); assert.equal(f.leases.length, leases, 'Unchanged uploaded data needs no task');
   f.workspace.contentRevision++; await f.leave(); assert.equal(f.writes, 1, 'Workspace writes do not publish cloud settings');
@@ -124,6 +136,12 @@ function fixture() {
   await f.leave();assert.equal(f.service.state,'failed');assert.equal(f.writes,1);
   f.cloud.create=create;f.location=3;await f.leave();assert.equal(f.service.state,'uploaded');
   assert.equal(f.writes,1,'Failed uploads retry the already staged snapshot instead of creating repeated archives');assert.equal(f.uploads,1);f.service.dispose();
+  f = fixture(); const stage = f.cloud.create.bind(f.cloud);
+  f.cloud.create = async () => 'blocked';
+  await f.leave(); assert.equal(f.service.state, 'pending'); assert.equal(f.writes, 0);
+  f.cloud.create = stage; f.location = 3;
+  await f.leave(); assert.equal(f.writes, 1, 'A blocked backup must still stage the current settings later');
+  assert.equal(f.service.state, 'uploaded'); f.service.dispose();
   f = fixture(); let finish; f.pending = new Promise(resolve => finish = resolve); await f.leave();
   f.service.onBackground(); assert.equal(f.leases.length, 1, 'One in-flight archive owns one short task');
   f.leases[0](); assert.equal(f.calls[0].options.cancellation.cancelled, true); assert.deepEqual(f.released, [1]);
@@ -137,18 +155,28 @@ function fixture() {
   f.releaseError = undefined; f.service.setForeground(true); assert.deepEqual(f.released, [1], 'Failed native cleanup remains retryable'); f.service.dispose();
   console.log('PASS background-only triggering, no periodic work, synchronous lease, change detection, pending sync, eligibility, quota failure, expiry cancellation, cleanup retries and stale completions');
   f = fixture(); await f.leave(); assert.equal(f.service.state, 'pending');
-  const automaticName = f.calls[0].options.name;
+  const automaticName = f.calls[0].name;
   f.service.confirmUploaded([{ name: 'tinybot-auto-' + id + '.tinybot', location: 3, createdAt: 2000 }]);
   f.service.confirmUploaded([{ name: automaticName, location: 1, createdAt: 2000 }]);
   assert.equal(f.service.state, 'pending', 'Another snapshot or a local-only copy cannot confirm this upload');
   f.service.confirmUploaded([{ name: automaticName, location: 3, createdAt: 3000 }]);
   assert.equal(f.service.state, 'uploaded'); assert.equal(f.service.lastUploadedAt, 3000);
   assert.equal(f.writes, 1); assert.equal(f.leases.length, 1, 'A metadata refresh cannot start another archive or background task');
+  f.location = 3; await f.leave(); assert.equal(f.uploads, 1); assert.equal(f.writes, 1);
+  await f.leave(); assert.equal(f.uploads, 1, 'Maintenance for an upload confirmed in the foreground runs once');
   f.service.setEnabled(false); f.service.confirmUploaded([{ name: automaticName, location: 3, createdAt: 4000 }]);
   assert.equal(f.service.state, 'disabled'); f.service.dispose();
   f = fixture(); f.failure = Error('network unavailable'); await f.leave();
-  f.service.confirmUploaded([{ name: f.calls[0].options.name, location: 3, createdAt: 5000 }]);
+  f.service.confirmUploaded([{ name: f.calls[0].name, location: 3, createdAt: 5000 }]);
   assert.equal(f.service.state, 'failed', 'A metadata refresh must preserve a failed backup for diagnosis'); f.service.dispose();
+  f = fixture(); await f.leave();
+  const newer = { name: 'tinybot-config-' + id + '-1800000000002-' + id + '.tinybot', location: 2, createdAt: 1800000000002 };
+  f.cloud.list = async () => [newer];
+  await f.leave(); assert.equal(f.service.state, 'pending', 'Cloud metadata alone cannot complete a failed retry');
+  f.location = 3;
+  await f.leave(); assert.equal(f.service.state, 'uploaded'); assert.equal(f.service.lastUploadedAt, newer.createdAt);
+  await f.leave(); assert.equal(f.uploads, 2); assert.equal(f.writes, 1, 'A newer backup can supersede a staged upload without causing a backup loop');
+  f.service.dispose();
   console.log('PASS cloud metadata reconciles a completed pending upload without timers, repacking, or clearing failure/opt-out states');
   if (process.argv.includes('--ui')) { const ui = fixture(); checkCompiledPanel(ui); ui.service.dispose(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
