@@ -32,9 +32,10 @@ function fixture(name, names, state) {
 }
 const checks = [];
 function check(name, action) { checks.push({ name, action }); }
-const searchMethods = ['searchRequested', 'searchAvailabilityChanged', 'searchVisibilityChanged', 'aboutToAppear', 'aboutToDisappear', 'closeCloudPicker', 'locked'];
+const searchMethods = ['searchRequested', 'searchAvailabilityChanged', 'searchVisibilityChanged', 'aboutToAppear', 'aboutToDisappear',
+  'closeCloudPicker', 'locked', 'searchInputChanged', 'updateQuery'];
 function search() { return fixture('ThreadList', searchMethods, { mounted: true, foreground: true, active: true,
-  searchOpen: false, focusRequest: 0, searchRequest: 0, app: { canNavigate: true } }); }
+  searchOpen: false, focusRequest: 0, searchRequest: 0, searchInputRevision: 0, query: '', app: { canNavigate: true } }); }
 check('search waits for render instead of a timer and does not swallow failures', () => {
   const f = search(); f.panel.searchRequested(); f.timers(); assert.deepEqual(f.focus, []);
   f.render(); assert.deepEqual(f.focus, ['search-threads']);
@@ -48,6 +49,22 @@ check('search cancels locked, hidden, destroyed and close/reopen callbacks', () 
     p => { p.active = false; p.searchAvailabilityChanged(); p.active = true; }]) {
     const f = search(); f.nativeReady(); f.panel.searchRequested(); change(f.panel); f.timers(); f.render(); assert.deepEqual(f.focus, []);
   }
+});
+check('native search input defers render-time callbacks and ignores obsolete text', async () => {
+  const { panel } = search();
+  panel.searchOpen = true;
+  panel.searchInputChanged('first'); panel.searchInputChanged('latest');
+  assert.equal(panel.query, '');
+  await Promise.resolve();
+  assert.equal(panel.query, 'latest');
+  panel.searchInputChanged('closed editor');
+  panel.searchOpen = false; panel.searchVisibilityChanged();
+  panel.searchOpen = true;
+  await Promise.resolve();
+  assert.equal(panel.query, 'latest');
+  panel.searchInputChanged('unmounted editor'); panel.aboutToDisappear();
+  await Promise.resolve();
+  assert.equal(panel.query, 'latest');
 });
 const providerMethods = ['save', 'locked', 'focusField', 'focusAvailabilityChanged', 'advancedChanged', 'aboutToDisappear'];
 function provider(field = 'context') { return fixture('ProviderEditorPanel', providerMethods, {

@@ -134,21 +134,21 @@ export struct ChatPanel {
   private syncMessages(): void {
     const revision = ++this.messageSyncRevision;
     this.afterRender(() => {
-      if (revision !== this.messageSyncRevision) { return; }
-      const visible = this.app.visibleMessages;
-      this.messageSource.update(this.thread.id, visible);
+      if (revision !== this.messageSyncRevision || this.thread.id !== this.app.active.id) { return; }
+      this.messageSource.update(this.thread.id, this.thread.messages, this.app.visibleMessageCount);
+      const visibleCount = this.messageSource.totalCount();
       const anchor = this.earlierAnchor;
       if (anchor) {
         this.earlierAnchor = undefined;
         if (anchor.threadId === this.thread.id) {
-          const index = visible.findIndex((message) => message.id === anchor.messageId);
+          const index = this.messageSource.indexOf(anchor.messageId);
           if (index >= 0) {
-            const destination = index + (visible.length < this.thread.messages.length ? 1 : 0);
+            const destination = index + (visibleCount < this.thread.messages.length ? 1 : 0);
             const lifetime = this.lifecycle;
             // Anchor to the previous message, even when the button itself stayed visible.
             this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
               if (!this.composerMounted || this.lifecycle !== lifetime || this.thread.id !== anchor.threadId ||
-                this.messageSource.totalCount() !== visible.length || this.app.searchMessageId) { return; }
+                this.messageSource.totalCount() !== visibleCount || this.app.searchMessageId) { return; }
               this.scroller.scrollToIndex(destination, false, ScrollAlign.START,
                 { extraOffset: LengthMetrics.vp(this.topInset + Space.sm - anchor.y) });
             }));
@@ -163,14 +163,14 @@ export struct ChatPanel {
       this.positionedThreadId = this.thread.id;
       this.inspectingOutput = false;
       this.followOutput = !this.app.searchMessageId;
-      if (visible.length === 0 || this.app.searchMessageId) { return; }
+      if (visibleCount === 0 || this.app.searchMessageId) { return; }
       const threadId = this.thread.id;
       const lifecycle = this.lifecycle;
       // LazyForEach has not mounted the tail yet, so its area callback cannot initiate this jump.
       this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
         if (!this.composerMounted || this.lifecycle !== lifecycle || this.thread.id !== threadId ||
           !this.followOutput || this.app.searchMessageId) { return; }
-        if (Diagnostics.recording) { Diagnostics.event('scroll.open', { rows: this.app.visibleMessages.length }); }
+        if (Diagnostics.recording) { Diagnostics.event('scroll.open', { rows: this.messageSource.totalCount() }); }
         this.scrollToLatest(false);
       }));
     });
@@ -325,7 +325,7 @@ export struct ChatPanel {
     return message.role === 'user' ? Motion.rise(0, 16) : Motion.rise(2, 10);
   }
   private locate(): void {
-    const index = this.app.visibleMessages.findIndex((item) => item.id === this.app.searchMessageId);
+    const index = this.messageSource.indexOf(this.app.searchMessageId);
     if (index >= 0) { this.followOutput = false; this.scroller.scrollToIndex(index + (this.thread.messages.length > this.app.visibleMessageCount ? 1 : 0), false, ScrollAlign.CENTER); }
   }
 
@@ -341,6 +341,10 @@ export struct ChatPanel {
   aboutToAppear(): void {
     this.lifecycle++;
     this.composerMounted = true;
+    // The initial index must refer to rows already present in the data source.
+    if (this.thread.id === this.app.active.id) {
+      this.messageSource.update(this.thread.id, this.thread.messages, this.app.visibleMessageCount);
+    }
     this.syncMessages();
     this.messageSearchChanged();
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
@@ -600,15 +604,26 @@ export struct ChatPanel {
   }
 
   private scrollToLatest(smooth: boolean = true): void {
+    const lastIndex = this.lastMessageListIndex();
+    if (lastIndex < 0) { return; }
+    if (smooth) {
+      const tail = this.scroller.getItemRect(lastIndex);
+      // ArkUI measures every row crossed by an animated scrollToIndex.
+      smooth = tail.height > 0 && tail.y + tail.height <= this.panelHeight * 2;
+    }
     this.inspectingOutput = false;
     // Resume following at onReachEnd so streaming updates cannot interrupt the native spring's soft landing.
     this.followOutput = !smooth;
     clearTimeout(this.scrollTimer); this.scrollTimer = -1;
-    const earlier = this.app.visibleMessageCount < this.thread.messages.length ? 1 : 0;
-    const team = this.app.teams.some((run) => !run.ownerMessageId) ? 1 : 0;
-    const lastIndex = earlier + this.app.visibleMessages.length + team - 1;
     this.scroller.scrollToIndex(lastIndex, smooth, ScrollAlign.END);
   }
+  private lastMessageListIndex(): number {
+    const visible = this.messageSource.totalCount();
+    const earlier = visible < this.thread.messages.length ? 1 : 0;
+    const team = this.app.teams.some((run) => !run.ownerMessageId) ? 1 : 0;
+    return earlier + visible + team - 1;
+  }
+
   private updateScrollState(reachedEnd: boolean = false): void {
     const threadId = this.thread.id;
     // Native layout/snapshot flushes can invoke scrolling callbacks inside a render.
@@ -1072,7 +1087,8 @@ export struct ChatPanel {
   @Builder
   messageList() {
     Stack({ alignContent: Alignment.Bottom }) {
-      List({ space: 22, scroller: this.scroller }) {
+      List({ space: 22, scroller: this.scroller,
+        initialIndex: this.app.searchMessageId ? 0 : Math.max(0, this.lastMessageListIndex()) }) {
         if (this.app.visibleMessageCount < this.thread.messages.length) {
           ListItem() {
             Button(t("加载更早的消息")).fontFamily(this.appearance.fontFamily).id('load-earlier-messages').attributeModifier(Btn.textSmall)

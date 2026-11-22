@@ -90,6 +90,31 @@ source.unregisterDataChangeListener(listener); source.update('third-thread', [])
 console.log('PASS lazy row identity, retained disclosure/height state, thread switch and listener cleanup');
 
 {
+  let rowReads = 0;
+  const rows = new Proxy(Array.from({ length: 2400 }, (_, id) => ({ id: String(id) })), {
+    get(target, key) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) rowReads++;
+      return Reflect.get(target, key);
+    }
+  });
+  const source = new MessageListSource();
+  const operations = [];
+  source.registerDataChangeListener({ onDatasetChange([change]) { operations.push(change); } });
+  source.update('long', rows, 60);
+  assert.equal(source.totalCount(), 60);
+  assert.equal(source.getData(0).id, '2340');
+  assert.equal(source.getData(-1), undefined);
+  assert.equal(source.indexOf('2300'), -1);
+  source.update('long', rows, 120);
+  assert.deepEqual([operations.at(-1).type, operations.at(-1).index, operations.at(-1).count], ['add', 0, 60]);
+  assert.equal(source.indexOf('2340'), 60);
+  source.update('long', rows, rows.length);
+  rowReads = 0;
+  for (let i = 0; i < 50; i++) source.update('long', rows, rows.length);
+  assert.equal(rowReads, 0, 'Unrelated chat state changes must not scan the full search window');
+}
+
+{
   let starts = 0;
   const timers = new Set();
   const Mermaid = native('MermaidView', 'MermaidView', ['aboutToAppear', 'activate', 'aboutToDisappear'], {

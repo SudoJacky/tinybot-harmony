@@ -253,6 +253,7 @@ export struct ThreadList {
   @State private toolbarWidth: number = 44;
   private mounted: boolean = false;
   private focusRequest: number = 0;
+  private searchInputRevision: number = 0;
   onNewChat: (projectId?: string) => void = () => {};
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink app: ChatViewModel;
@@ -289,9 +290,9 @@ export struct ThreadList {
     this.mounted = true;
     if (this.searchRequest > 0) { this.searchRequested(); }
   }
-  aboutToDisappear(): void { this.mounted = false; this.focusRequest++; this.closeCloudPicker(); }
+  aboutToDisappear(): void { this.mounted = false; this.focusRequest++; this.searchInputRevision++; this.closeCloudPicker(); }
   private searchAvailabilityChanged(): void { if (!this.active || !this.foreground) { this.focusRequest++; } }
-  private searchVisibilityChanged(): void { if (!this.searchOpen) { this.focusRequest++; } }
+  private searchVisibilityChanged(): void { if (!this.searchOpen) { this.focusRequest++; this.searchInputRevision++; } }
 
   // The rail can mount the search field and request its focus in the same frame.
   private searchRequested(): void {
@@ -311,6 +312,14 @@ export struct ThreadList {
     this.searchOpen = false;
     this.getUIContext().getFocusController().clearFocus();
     this.updateQuery('');
+  }
+
+  private searchInputChanged(value: string): void {
+    const revision = ++this.searchInputRevision;
+    // The native editor can deliver a pending change during another view update.
+    Promise.resolve().then(() => {
+      if (this.mounted && this.searchOpen && revision === this.searchInputRevision) { this.updateQuery(value); }
+    });
   }
 
   private updateQuery(query: string): void {
@@ -790,20 +799,18 @@ export struct ThreadList {
             .onClick(() => this.searchRequested())
         }
       }.width(this.searchHeight()).height(this.searchHeight()).flexShrink(0)
-      TextInput({ text: this.query, placeholder: t('搜索对话') })
-        .id('search-threads').layoutWeight(1).height(this.searchHeight()).padding(0)
-        .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
-        .backgroundColor(Color.Transparent).enabled(this.searchOpen && !this.locked())
-        .focusable(this.searchOpen)
-        .visibility(this.searchOpen ? Visibility.Visible : Visibility.None).accessibilityText(t('搜索对话'))
-        .onChange((value: string) => { if (this.searchOpen) { this.updateQuery(value); } })
-        .onKeyEvent((event: KeyEvent) => {
-          if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
-            this.closeSearch();
-            event.stopPropagation();
-          }
-        })
       if (this.searchOpen) {
+        TextInput({ placeholder: t('搜索对话') })
+          .id('search-threads').layoutWeight(1).height(this.searchHeight()).padding(0)
+          .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
+          .backgroundColor(Color.Transparent).enabled(!this.locked()).accessibilityText(t('搜索对话'))
+          .onChange((value: string) => this.searchInputChanged(value))
+          .onKeyEvent((event: KeyEvent) => {
+            if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
+              this.closeSearch();
+              event.stopPropagation();
+            }
+          })
         IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭搜索'), compId: 'close-thread-search',
           diameter: this.searchHeight(), iconSize: 15, onTap: () => this.closeSearch() })
       }

@@ -30,6 +30,12 @@ import { MessageViewModel, ThreadViewModel } from './SessionViewModels';
 
 export { AgentStepViewModel, MessageViewModel, ThreadViewModel, ToolExecutionViewModel } from './SessionViewModels';
 
+interface ThreadSearchCache {
+  query: string;
+  archived: boolean;
+  results?: ThreadViewModel[];
+}
+
 @Observed
 export class SettingsViewModel {
   userDocument: string = '';
@@ -87,6 +93,7 @@ export class ChatViewModel {
   visibleMessageCount: number = 60;
   config: ModelConfig = defaultConfig();
   threads: ThreadViewModel[] = [];
+  private readonly threadSearch: ThreadSearchCache = { query: '', archived: false };
   active: ThreadViewModel = new ThreadViewModel({ id: '', title: '新对话', updatedAt: 0, messages: [] });
   settings: SettingsViewModel = new SettingsViewModel();
   providerEditor: ProviderEditorViewModel = new ProviderEditorViewModel();
@@ -115,6 +122,9 @@ export class ChatViewModel {
   private project(event: SessionEvent): void {
     const diagnosticMark = Diagnostics.begin();
     try {
+      if (event.data || event.kind === 'thread' || event.kind === 'message' || event.kind === 'text') {
+        this.threadSearch.results = undefined;
+      }
       this.projectState(event.state);
       if (event.data) { this.projectData(event.data); }
       if (event.kind === 'selection' && event.threadId) { this.projectSelection(event.threadId, event.teams || []); }
@@ -223,7 +233,6 @@ export class ChatViewModel {
     const name = this.providerProfiles.find((item) => item.id === ref.providerId)?.name || t('已删除服务');
     return name + ' · ' + ref.modelId + (this.configured ? '' : t(' · 不可用'));
   }
-  get visibleMessages(): MessageViewModel[] { return this.active.messages.slice(-this.visibleMessageCount); }
   get contextDraft(): ContextTokenItem[] { return draftBreakdown(this.draft,
     referenceContext(this.active.references) + (this.active.panelContext || '') + fileAnnotationContext(this.active.annotations), this.active.attachments); }
   get contextDetails(): ContextTokenItem[] { return this.contextItems.concat(this.contextDraft); }
@@ -234,7 +243,12 @@ export class ChatViewModel {
     return this.canNavigate && !this.active.archived && (this.phase === 'idle' || this.phase === 'running');
   }
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] {
-    return matchingThreads(this.threads.filter((thread) => !thread.sideChat), query, archived) as ThreadViewModel[];
+    const search = query.trim();
+    const cache = this.threadSearch;
+    if (search && cache.query === search && cache.archived === archived && cache.results) { return cache.results; }
+    const results = matchingThreads(this.threads.filter((thread) => !thread.sideChat), search, archived) as ThreadViewModel[];
+    if (search) { cache.query = search; cache.archived = archived; cache.results = results; }
+    return results;
   }
 
   changeMcp(request: McpSettingsCommand, cancellation: Cancellation): Promise<McpSettingsResult> { return this.requireSession().changeMcp(request, cancellation); }

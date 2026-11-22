@@ -91,12 +91,12 @@ for (const name of ['Alignment','Space','Font','FontWeight','TextOverflow','Colo
   uiGlobals[name] = {};
 }
 const Toolbar = probe('views/ThreadList', 'ThreadList', ['historyToolbar','scopeMenu','searchControl','searchRequested','closeSearch',
-  'updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected','searchHeight','modifySelection'], uiGlobals);
+  'searchInputChanged','updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected','searchHeight','modifySelection'], uiGlobals);
 const focus = [], newChats = [];
 let boardOpens = 0;
 const toolbar = Object.assign(new Toolbar(), {
   active: true, mounted: true, foreground: true, searchOpen: false, toolbarWidth: 280, workbench: true,
-  query: '', visibleCounts: {}, focusRequest: 0, selecting: false, selectedIds: [], archived: false, projectFilter: null,
+  query: '', visibleCounts: {}, focusRequest: 0, searchInputRevision: 0, selecting: false, selectedIds: [], archived: false, projectFilter: null,
   appearance: {}, app: { ready: true, activeProject: { id: 'current' }, projects: [{ id: 'project', name: 'Project' }], filteredThreads: () => [
     { id: 'one', projectId: 'project' }, { id: 'two' }, { id: 'old', projectId: 'deleted' }
   ] },
@@ -128,13 +128,12 @@ assert.equal(buttonActions.has('thread-search-toggle'), false);
 requestFrame();
 assert.deepEqual(focus, ['search-threads']);
 inputChanged('test');
-assert.equal(toolbar.query, 'test');
+assert.equal(toolbar.query, '', 'Search input must defer writes until the render callback returns');
 icons.get('close-thread-search').onTap();
 assert.equal(toolbar.searchOpen, false);
 assert.equal(toolbar.query, '');
 assert.equal(focus.at(-1), null);
 inputChanged('late IME update');
-assert.equal(toolbar.query, '', 'A closed field must ignore late text updates');
 
 toolbar.setScope(false, 'project');
 assert.deepEqual(toolbar.filtered().map(thread => thread.id), ['one']);
@@ -198,6 +197,8 @@ for (const initial of [true, false]) {
 }
 const NavigationPage = probe('pages/Index', 'Index', ['createChat', 'revealChat'], {t: value => value, Diagnostics: { log() {} }});
 (async () => {
+  await Promise.resolve();
+  assert.equal(toolbar.query, '', 'A closed field must ignore late text updates');
   let cleared = 0, drawerClosed = 0, created = 0;
   const toasts = [];
   const nav = Object.assign(new NavigationPage(), {paths: {clear(){cleared++;}, size: () => 0}, appearance: {},

@@ -154,6 +154,14 @@ async function testWorkspacePicker() {
   assert.equal(revoked.length, 1, 'The final project removal revokes the unused system grant');
   console.log('PASS project tree: membership, ordinary chats, duplicate names, empty projects, pin order, search, archive, collapse, independent pagination and new-chat destinations');
 
+  const results = app.filteredThreads('Find this', false);
+  assert.deepEqual(Array.from(results, item => item.id), ['a1']);
+  app.filteredThreads('', true);
+  assert.equal(app.filteredThreads('Find this', false), results, 'Repeated grouped lookups reuse the result of scanning the transcript');
+  assert.equal(await app.renameThread('a1', 'Renamed conversation'), true);
+  assert.equal(app.filteredThreads('Find this', false).length, 0, 'Metadata edits invalidate cached matches');
+  assert.deepEqual(Array.from(app.filteredThreads('Renamed conversation', false), item => item.id), ['a1']);
+
   const empty = seed(); empty.threads[0].title = '新对话';
   const headerFixture = new Fixture(empty), headerApp = new ChatViewModel(); await headerApp.initialize(headerFixture.session);
   const toasts = [];

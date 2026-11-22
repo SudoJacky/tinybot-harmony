@@ -24,7 +24,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     if (key === 'onChange' || key === 'onTextSelectionChange') editorEvents.at(-1)[key] = args[0];
   } });
   const Panel = compile(methods('views/ChatPanel', ['composerChanged', 'composerSelectionChanged', 'speechActive', 'composerEditor', 'updateScrollState',
-    'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest', 'loadEarlierMessages']), {
+    'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest', 'lastMessageListIndex', 'loadEarlierMessages']), {
     TextArea: editor, Context: { animation() {} }, Motion: {}, Font: {}, Color: {}, Alignment: {}, Visibility: {},
     ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end', START: 'start' }, Diagnostics: { recording: false },
     Space: { sm: 8 }, LengthMetrics: { vp: value => value },
@@ -78,8 +78,8 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     focusOwner: 0, messageSyncRevision: 0, sendingMessageId: '',
     cancelPlusAction() { assert.equal(building, false); }, cancelAttachmentDrop() { assert.equal(building, false); },
     reading: { stop() { assert.equal(building, false); } },
-    messageSource: { update() { assert.equal(building, false); } } });
-  panel.thread.id = panel.app.active.id = 'c'; panel.app.visibleMessages = [];
+    messageSource: { update() { assert.equal(building, false); }, totalCount() { return 0; } } });
+  panel.thread.id = panel.app.active.id = 'c'; panel.thread.messages = [];
   building = true; panel.speechThreadChanged(); panel.syncMessages();
   assert.equal(panel.composerSelectionStart, 5, 'Prop watches cannot synchronously reset selection during a render');
   building = false; await drain(); assert.equal(panel.composerSelectionStart, -1);
@@ -89,24 +89,25 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   const frames = [], jumps = [];
   let sourceReady = false, layoutReady = false;
   let currentRows = [];
+  let itemRect = { y: 112, height: 50 };
   Object.assign(panel, { positionedThreadId: '', followOutput: true,
     getUIContext: () => ({ postFrameCallback: frame => frames.push(frame) }),
-    topInset: 60,
-    messageSource: { update(_id, rows) { assert.equal(building, false); sourceReady = true; currentRows = rows; },
-      getData(index) { return currentRows[index]; }, totalCount() { return currentRows.length; } },
-    scroller: { getItemRect(index) { assert.equal(index, 1); return { y: 112, height: 50 }; }, scrollToIndex(...args) {
-      assert.ok(sourceReady && layoutReady, 'Position only after data reload and native layout'); jumps.push(args);
+    topInset: 60, panelHeight: 500,
+    messageSource: { update(_id, rows, limit) { assert.equal(building, false); sourceReady = true; currentRows = rows.slice(rows.length - Math.min(rows.length, limit)); },
+      getData(index) { return currentRows[index]; }, totalCount() { return currentRows.length; },
+      indexOf(id) { return currentRows.findIndex(row => row.id === id); } },
+    scroller: { getItemRect() { return itemRect; }, scrollToIndex(...args) {
+      assert.ok(sourceReady && layoutReady, 'Position after the data source is ready'); jumps.push(args);
     } } });
   const render = () => { layoutReady = true; frames.splice(0).forEach(frame => frame.onIdle()); };
   panel.thread.messages = Array.from({ length: 120 }, (_, id) => ({ id }));
-  Object.assign(panel.app, { visibleMessages: panel.thread.messages.slice(-60), visibleMessageCount: 60, teams: [], searchMessageId: '' });
+  Object.assign(panel.app, { visibleMessageCount: 60, teams: [], searchMessageId: '' });
   building = true; panel.syncMessages(); panel.syncMessages(); building = false;
   await drain(); assert.equal(jumps.length, 0); assert.equal(frames.length, 1);
   render(); assert.deepEqual(jumps.pop(), [60, false, 'end'], 'Cold start targets the unmounted tail, accounting for the earlier-messages row');
   assert.equal(panel.followOutput, true);
   panel.loadEarlierMessages();
   assert.equal(panel.app.visibleMessageCount, 120); assert.equal(panel.followOutput, false);
-  panel.app.visibleMessages = panel.thread.messages;
   panel.syncMessages(); await drain(); render();
   const restored = jumps.pop();
   assert.deepEqual(restored.slice(0, 3), [60, false, 'start'], 'Last page restores the original message without the removed header');
@@ -120,12 +121,16 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   render(); assert.equal(jumps.length, 0);
   panel.app.searchMessageId = ''; await open('stale'); panel.thread.id = 'different'; render(); assert.equal(jumps.length, 0);
   await open('disposed'); panel.lifecycle++; render(); assert.equal(jumps.length, 0, 'Disposal cancels pending positioning');
-  panel.app.visibleMessages = []; panel.thread.messages = []; panel.app.teams = [];
+  panel.thread.messages = []; panel.app.teams = [];
   await open('empty'); assert.equal(frames.length, 0);
-  panel.thread.messages = panel.app.visibleMessages = [{ id: 'first' }];
+  panel.thread.messages = [{ id: 'first' }];
   panel.syncMessages(); await drain(); assert.equal(frames.length, 0, 'First send remains owned by send motion');
   await open('short'); render(); assert.deepEqual(jumps.pop(), [0, false, 'end']);
   panel.scrollToLatest(); assert.deepEqual(jumps.pop(), [0, true, 'end']); assert.equal(panel.followOutput, false);
+  itemRect = { y: 0, height: 2800 };
+  panel.scrollToLatest(); assert.deepEqual(jumps.pop(), [0, false, 'end']); assert.equal(panel.followOutput, true);
+  itemRect = { y: 0, height: 0 };
+  panel.scrollToLatest(); assert.deepEqual(jumps.pop(), [0, false, 'end'], 'An offscreen tail does not animate through intervening rows');
   console.log('PASS emitted chat positioning: cold start, lazy tail, history, team card, touch, search, stale callbacks, empty chat and manual jump');
 
   const ResponsiveIcon = compile(methods('common/Widgets', ['updateStateVars'], 'IconButton'));
