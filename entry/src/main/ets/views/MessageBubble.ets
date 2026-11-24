@@ -670,7 +670,8 @@ export struct MessageBubble {
               } else if (entry.kind === 'text') {
                 ForEach(this.answerParts(entry.step), (part: PublishedAnswerPart, partIndex: number) => {
                 if (this.answerParts(entry.step)[partIndex].kind === 'text') {
-                InteractiveAnswer({ content: this.answerParts(entry.step)[partIndex].content, step: entry.step, selectable: false, allowSurface: false,
+                InteractiveAnswer({ content: this.answerParts(entry.step)[partIndex].content, step: entry.step, selectable: false,
+                  allowSurface: false, chatSpacing: true,
                   validation: this.message.stepViews[entry.step]?.uiValidation || '',
                   saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi,
                   streaming: this.message.status === 'generating' && entry.step === this.message.stepViews.length - 1 })
@@ -709,7 +710,9 @@ export struct MessageBubble {
           Text(this.retryStatus()).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary')).id('request-retry-' + this.message.id)
         }
       } else if (this.message.content.length > 0) {
-        InteractiveAnswer({ content: this.message.content, saved: this.message.uiStates, presentation: this.message.uiPresentation, available: this.uiAvailable, onInteract: this.onUi, streaming: this.message.status === 'generating', selectable: false, allowSurface: false })
+        InteractiveAnswer({ content: this.message.content, saved: this.message.uiStates, presentation: this.message.uiPresentation,
+          available: this.uiAvailable, onInteract: this.onUi, streaming: this.message.status === 'generating',
+          selectable: false, allowSurface: false, chatSpacing: true })
       }
       if (this.hasExtra) {
         this.extra()

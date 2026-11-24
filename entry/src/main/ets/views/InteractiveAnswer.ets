@@ -302,6 +302,7 @@ export struct InteractiveAnswer {
   onWebReady: (id: string, error: string) => void = () => {};
   @Prop selectable: boolean = true;
   @Prop allowSurface: boolean = false;
+  @Prop chatSpacing: boolean = false;
   @Prop validation: string = '';
   @Prop @Watch('refresh') content: string = '';
   @Prop @Watch('refresh') streaming: boolean = false;
@@ -316,7 +317,10 @@ export struct InteractiveAnswer {
     Column({ space: Space.md }) {
       // ForEach retains keyed item closures. Read the current state by index so reused children receive new chunks.
       ForEach(this.parts, (part: UiPart, index: number) => {
-        if (part.kind === 'text') { MarkdownView({ content: this.parts[index].content, streaming: this.streaming, selectable: this.selectable }) }
+        if (part.kind === 'text') {
+          MarkdownView({ content: this.parts[index].content, streaming: this.streaming, selectable: this.selectable,
+            chatSpacing: this.chatSpacing })
+        }
         else if (!this.allowSurface) {
           Text('Unsupported preview format: tinybot-ui / JSONL. Use publish_preview with a .js, .html or .svg file.').fontFamily(this.appearance.fontFamily)
             .fontSize(13).fontColor($r('app.color.danger'))

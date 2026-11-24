@@ -242,12 +242,12 @@ export struct MathView {
         }
       }, (span: MathSpan, offset: number) => JSON.stringify([offset, span.kind, span.text, span.url, span.image?.id, span.failed]))
     }.fontFamily(this.appearance.fontFamily).fontSize(this.fontSize).fontColor(this.color)
-      .lineSpacing(LengthMetrics.vp(3), { onlyBetweenLines: true })
+      .lineSpacing(LengthMetrics.vp(7), { onlyBetweenLines: true })
       .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None).width('100%')
   }
 
   build() {
-    Column({ space: 4 }) {
+    Column({ space: 8 }) {
       if (this.display && this.rows.length) {
         this.block(0)
       } else {
@@ -256,6 +256,7 @@ export struct MathView {
         }, (_row: MathRow, index: number) => `${index}`)
       }
     }.width('100%').alignItems(HorizontalAlign.Start)
+      .padding({ top: this.display ? 6 : 3, bottom: this.display ? 6 : 3 })
       .onAreaChange((previous: Area, area: Area) => {
         const width = Number(area.width);
         if (previous.width === area.width && width === this.availableWidth) { return; }

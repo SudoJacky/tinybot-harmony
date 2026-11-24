@@ -2339,7 +2339,10 @@ export struct ChatPanel {
       Text(t('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
         .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         .textAlign(TextAlign.Center).width('100%')
-        .padding({ left: Space.sm + (this.workbench ? 24 : 10), right: Space.sm + (this.workbench ? 24 : 10), bottom: Space.sm })
+        .padding({ left: Space.sm + (this.workbench ? 24 : 10), right: Space.sm + (this.workbench ? 24 : 10),
+          bottom: this.workbench ? Space.sm : 2 })
+        // Let the notice use the top of the gesture inset while keeping the system handle clear.
+        .margin({ bottom: this.workbench ? 0 : -Math.min(Space.lg, Math.max(0, this.viewport.bottom - Space.md)) })
         .visibility(this.keyboardVisibleInLayout() ? Visibility.None : Visibility.Visible)
     }.height('100%').width('100%').padding({ top: this.centeredWelcome() ? this.topInset : 0 })
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { radius: Radius.sheet, title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,

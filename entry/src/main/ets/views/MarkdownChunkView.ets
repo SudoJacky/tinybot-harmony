@@ -24,6 +24,7 @@ export struct MarkdownChunkView {
   @StorageProp('tinybot.appearance.style') @Watch('invalidateMeasure') private appearance: AppearanceStyle = new AppearanceStyle();
   @ObjectLink @Watch('refresh') model: MarkdownChunkModel;
   @Prop @Watch('invalidateMeasure') fontSize: number = 16;
+  @Prop @Watch('invalidateMeasure') chatSpacing: boolean = false;
   @Prop selectable: boolean = true;
   blockOffset: number = 0;
   @State private visible: boolean = true;
@@ -145,7 +146,10 @@ export struct MarkdownChunkView {
     if (Diagnostics.recording) { Diagnostics.end('markdown.tableWidths', mark, { rows: block.rows.length, columns: widths.length }); }
     return widths;
   }
-  private headingSize(level: number): number { return level <= 1 ? this.fontSize + 5 : level === 2 ? this.fontSize + 3 : this.fontSize + 1; }
+  private headingSize(level: number): number {
+    const increment = level <= 1 ? 5 : level === 2 ? 3 : 1;
+    return this.fontSize + increment + (this.chatSpacing && level <= 2 ? 2 : 0);
+  }
   // Image blocks keep [alt, url] in rows; read it from the model because keyed builders keep their arguments.
   private imageAlt(index: number): string {
     const rows = this.model.blocks[index].rows;
@@ -295,7 +299,7 @@ export struct MarkdownChunkView {
   build() {
     Column() {
       if (this.visible || this.measuredHeight === 0) {
-        Column({ space: 10 }) {
+        Column({ space: this.chatSpacing ? Space.lg : 10 }) {
           ForEach(this.model.blocks, (block: MarkdownBlock, index: number) => {
             if (isMermaidBlock(this.model.blocks[index])) {
               this.mermaidBlock(index)
@@ -303,6 +307,7 @@ export struct MarkdownChunkView {
               this.codeBlock(this.model.blocks[index], index)
             } else if (this.model.blocks[index].kind === 'math') {
               MathView({ content: this.model.blocks[index].text, display: true, fontSize: this.fontSize, selectable: this.selectable })
+                .margin({ top: this.chatSpacing ? 6 : 0, bottom: this.chatSpacing ? 6 : 0 })
             } else if (this.model.blocks[index].kind === 'math-pending') {
               Text(this.model.blocks[index].text).fontSize(this.fontSize).fontColor($r('app.color.text_primary'))
                 .copyOption(this.selectable ? CopyOptions.LocalDevice : CopyOptions.None)
@@ -325,7 +330,7 @@ export struct MarkdownChunkView {
               }.width('100%').alignItems(VerticalAlign.Top).padding({ left: this.model.blocks[index].level * 18 }).margin({ top: -4 })
             } else if (this.model.blocks[index].kind === 'heading') {
               Column() { this.prose(this.model.blocks[index].text, this.headingSize(this.model.blocks[index].level), true, $r('app.color.text_primary'), `${index}`) }
-                .margin({ top: this.blockOffset + index > 0 ? 6 : 0 })
+                .margin({ top: this.blockOffset + index === 0 ? 0 : this.chatSpacing && this.model.blocks[index].level <= 2 ? Space.md : 6 })
             } else {
               this.prose(this.model.blocks[index].text, this.fontSize, false, $r('app.color.text_primary'), `${index}`)
             }
