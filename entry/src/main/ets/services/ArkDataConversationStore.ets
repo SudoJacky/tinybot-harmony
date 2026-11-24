@@ -1,9 +1,18 @@
-import { AppData, ThreadData, parseAppData } from '../model/Conversation';
-import { ConversationCapture, CapturedConversation } from '../model/ConversationCapture';
+import { AppData, MessageData, ThreadData, parseAppData } from '../model/Conversation';
+import { CapturedConversation } from '../model/ConversationCapture';
 import { SessionRepository, ThreadCheckpoint } from './SessionContracts';
-import { ArkDataRecords, StoredRecord } from './ArkDataRecords';
+import { ArkDataRecords, CONVERSATION_MESSAGE_SCOPE_PREFIX, StoredRecord } from './ArkDataRecords';
+import { Diagnostics } from '../model/Diagnostics';
 
-interface ConversationIndex { metadata: string; threadIds: string[]; }
+interface ConversationIndex { format?: number; header?: string; metadata?: string; threadIds: string[]; }
+interface StoredThread { metadata: ThreadData; messageCount: number; }
+interface StoredMessageSnapshot { source?: MessageData; text: string; }
+interface StoredThreadSnapshot { text: string; messages: StoredMessageSnapshot[]; }
+
+const SEPARATE_MESSAGES = 2;
+
+function messageScope(threadId: string): string { return CONVERSATION_MESSAGE_SCOPE_PREFIX + threadId; }
+function messagePosition(index: number): string { return index.toString().padStart(12, '0'); }
 
 export function conversationRecords(snapshot: CapturedConversation): StoredRecord[] {
   const index: ConversationIndex = { metadata: snapshot.header, threadIds: Array.from(snapshot.threads.keys()) };
@@ -14,8 +23,8 @@ export function conversationRecords(snapshot: CapturedConversation): StoredRecor
 
 export class ArkDataConversationStore implements SessionRepository {
   private database: () => Promise<ArkDataRecords>;
-  private capture: ConversationCapture = new ConversationCapture();
-  private saved: Map<string, string> = new Map();
+  private databaseSnapshot: Map<string, StoredThreadSnapshot> = new Map();
+  private captured: Map<string, StoredThreadSnapshot> = new Map();
   private index: string = '';
   private pending: Promise<void> = Promise.resolve();
   private failed: boolean = false;
@@ -27,39 +36,99 @@ export class ArkDataConversationStore implements SessionRepository {
     const db = await this.database(), raw = await db.read('app', 'index');
     if (raw === undefined) { throw new Error('ArkData conversation index is missing'); }
     const index = JSON.parse(raw) as ConversationIndex;
-    if (typeof index.metadata !== 'string' || !Array.isArray(index.threadIds) || new Set(index.threadIds).size !== index.threadIds.length) {
+    const legacy = index.format === undefined;
+    const header = legacy ? index.metadata : index.header;
+    if ((!legacy && index.format !== SEPARATE_MESSAGES) || typeof header !== 'string' || !Array.isArray(index.threadIds) ||
+      new Set(index.threadIds).size !== index.threadIds.length) {
       throw new Error('ArkData conversation index is invalid');
     }
-    const data = JSON.parse(index.metadata) as AppData;
-    const saved = new Map<string, string>();
+    const data = JSON.parse(header) as AppData;
+    const saved = new Map<string, StoredThreadSnapshot>();
     for (const id of index.threadIds) {
       const text = await db.read('thread', id);
       if (text === undefined) { throw new Error('ArkData conversation is missing'); }
-      const thread = JSON.parse(text) as ThreadData;
+      let thread: ThreadData;
+      if (legacy) { thread = JSON.parse(text) as ThreadData; }
+      else {
+        const stored = JSON.parse(text) as StoredThread;
+        thread = stored.metadata;
+        const records = await db.readScope(messageScope(id));
+        if (records.length !== stored.messageCount) { throw new Error('ArkData conversation message count does not match'); }
+        const messages = records.map((record, position): StoredMessageSnapshot => {
+          if (record.id !== messagePosition(position)) { throw new Error('ArkData conversation message position is invalid'); }
+          return { text: record.text };
+        });
+        thread.messages = messages.map((message): MessageData => JSON.parse(message.text) as MessageData);
+        saved.set(id, { text: text, messages: messages });
+      }
       if (thread.id !== id) { throw new Error('ArkData conversation does not match its index'); }
-      data.threads.push(thread); saved.set(id, text);
+      data.threads.push(thread);
     }
     const loaded = parseAppData(JSON.stringify(data));
-    this.index = raw; this.saved = saved;
-    this.capture.clear(); this.capture.capture(loaded); this.failed = false;
+    this.index = raw; this.databaseSnapshot = saved; this.captured.clear(); this.failed = false;
+    if (legacy) {
+      // Conversion and its format marker commit together. An older app rejects the new index
+      // instead of interpreting metadata-only thread records as empty chats.
+      await this.save(loaded);
+      Diagnostics.log('info', 'storage', 'conversation_message_records_migrated', { threads: loaded.threads.length });
+    } else { this.captured = this.capture(loaded); }
     return loaded;
   }
 
   save(data: AppData, changedThreadIds?: string[], checkpoint?: ThreadCheckpoint): Promise<void> {
-    if (this.failed) { this.capture.clear(); }
-    const snapshot = this.capture.capture(data, this.failed ? undefined : changedThreadIds, this.failed ? undefined : checkpoint);
+    if (this.failed) { this.captured.clear(); }
+    const snapshot = this.capture(data, this.failed ? undefined : changedThreadIds, this.failed ? undefined : checkpoint);
+    this.captured = snapshot;
+    const header = JSON.stringify(Object.assign({}, data, { threads: [] }));
+    const index: ConversationIndex = { format: SEPARATE_MESSAGES, header: header, threadIds: Array.from(snapshot.keys()) };
+    const text = JSON.stringify(index);
     this.failed = false;
     const result = this.pending.then(async () => {
       const db = await this.database();
-      const records = conversationRecords(snapshot);
-      const changed = records.filter((record) => record.scope === 'app' ? record.text !== this.index : record.text !== this.saved.get(record.id));
-      for (const id of this.saved.keys()) {
-        if (!snapshot.threads.has(id)) { changed.push({ scope: 'thread', id: id }); }
+      const changed: StoredRecord[] = [];
+      if (text !== this.index) { changed.push({ scope: 'app', id: 'index', text: text }); }
+      for (const [id, thread] of snapshot) {
+        const previous = this.databaseSnapshot.get(id);
+        if (thread === previous) { continue; }
+        if (thread.text !== previous?.text) { changed.push({ scope: 'thread', id: id, text: thread.text }); }
+        this.collectMessageChanges(changed, id, previous?.messages || [], thread.messages);
+      }
+      for (const [id, thread] of this.databaseSnapshot) {
+        if (snapshot.has(id)) { continue; }
+        changed.push({ scope: 'thread', id: id });
+        this.collectMessageChanges(changed, id, thread.messages, []);
       }
       await db.commit(changed);
-      this.index = records[0].text!; this.saved = snapshot.threads;
+      this.index = text; this.databaseSnapshot = snapshot;
     });
     this.pending = result.catch(() => { this.failed = true; });
     return result;
+  }
+
+  private capture(data: AppData, changedThreadIds?: string[], checkpoint?: ThreadCheckpoint): Map<string, StoredThreadSnapshot> {
+    const changed = changedThreadIds === undefined ? undefined : new Set(changedThreadIds);
+    const snapshot = new Map<string, StoredThreadSnapshot>();
+    for (const thread of data.threads) {
+      const previous = this.captured.get(thread.id);
+      if (previous && changed !== undefined && !changed.has(thread.id)) { snapshot.set(thread.id, previous); continue; }
+      const metadata = Object.assign({}, thread, { messages: [] }) as ThreadData;
+      const record: StoredThread = { metadata: metadata, messageCount: thread.messages.length };
+      const messages = thread.messages.map((message, index): StoredMessageSnapshot => {
+        const cached = previous?.messages[index];
+        return checkpoint?.threadId === thread.id && checkpoint.messageId !== message.id && cached?.source === message ?
+          cached : { source: message, text: JSON.stringify(message) };
+      });
+      snapshot.set(thread.id, { text: JSON.stringify(record), messages: messages });
+    }
+    return snapshot;
+  }
+
+  private collectMessageChanges(changed: StoredRecord[], threadId: string, previous: StoredMessageSnapshot[],
+    current: StoredMessageSnapshot[]): void {
+    const scope = messageScope(threadId);
+    for (let position = 0; position < Math.max(previous.length, current.length); position++) {
+      const text = current[position]?.text;
+      if (text !== previous[position]?.text) { changed.push({ scope: scope, id: messagePosition(position), text: text }); }
+    }
   }
 }

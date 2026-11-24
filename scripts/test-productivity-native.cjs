@@ -2907,7 +2907,8 @@ async function test(name, run) {
     const work = app + '/workspace/thread-one';
     for (const dir of [ability, context.cacheDir, target, work]) fs.mkdirSync(nativePath(dir), { recursive: true });
     const databases = new Map();
-    let failImport = true, unavailableDatabase;
+    let failImport = true, failConversationConversion = false, unavailableDatabase;
+    const writes = [];
     kits['@kit.ArkData'].relationalStore = {
       SecurityLevel: { S3: 3 },
       async getRdbStore(ctx, config) {
@@ -2928,6 +2929,8 @@ async function test(name, run) {
           sql.exec('BEGIN');
           return { querySql, async execute(text, args) {
             if (failImport && text.startsWith('INSERT') && args[1].endsWith('/board.json')) throw Error('injected ArkData write failure');
+            if (failConversationConversion && text.startsWith('INSERT') && args[0].startsWith('message:')) throw Error('injected conversion failure');
+            writes.push([args[0], args[1]]);
             sql.prepare(text).run(...args);
           }, async commit() { sql.exec('COMMIT'); }, async rollback() { sql.exec('ROLLBACK'); } };
         } };
@@ -2960,10 +2963,25 @@ async function test(name, run) {
     await assert.rejects(open(), /injected ArkData write failure/);
     assert.equal(databases.get(ability).prepare('SELECT COUNT(*) AS total FROM records').get().total, 0);
     failImport = false;
-    await open();
+    const store = await open();
+    const originalIndex = await store.read('app', 'index'), originalThread = await store.read('thread', 'thread-one');
+    failConversationConversion = true;
+    await assert.rejects(new ArkDataConversationStore(open).load(), /injected conversion failure/);
+    assert.equal(await store.read('app', 'index'), originalIndex);
+    assert.equal(await store.read('thread', 'thread-one'), originalThread);
+    assert.equal((await store.ids('message:thread-one')).length, 0);
+    failConversationConversion = false;
     const repository = new ArkDataConversationStore(open), loaded = await repository.load();
     assert.equal(loaded.config.userDocument, old.config.userDocument);
     assert.equal(loaded.threads[0].messages[1].content, large);
+    assert.equal(JSON.parse(await store.read('app', 'index')).format, 2);
+    assert.equal(JSON.parse(await store.read('thread', 'thread-one')).metadata.messages.length, 0);
+    assert.ok((await store.sizes('thread'))[0].bytes >= Buffer.byteLength(large));
+    writes.length = 0;
+    loaded.threads[0].messages[0].content = 'Updated question';
+    await repository.save(loaded, ['thread-one'], { threadId: 'thread-one', messageId: 'question' });
+    assert.deepEqual([...new Set(writes.map(item => item.join('/')))], ['message:thread-one/000000000000']);
+    assert.equal((await new ArkDataConversationStore(open).load()).threads[0].messages[0].content, 'Updated question');
     loaded.threads[0].title = 'ArkData title'; await repository.save(loaded, ['thread-one']);
     const boards = new LifeBoards(app), panels = new LifePanels(app);
     await boards.save('thread-one', 'dashboard', 'ArkData board', '');
@@ -3018,6 +3036,12 @@ async function test(name, run) {
     assert.equal(await cloudRecovery.legacyRecoverySource(), undefined);
     await cloudRecovery.recover(false);
     assert.deepEqual((await new ArkDataConversationStore(() => cloudRecovery.open()).load()).threads, []);
+
+    const originalRepository = new ArkDataConversationStore(() => recovered.open());
+    const deleted = await originalRepository.load(); deleted.threads = []; deleted.activeThreadId = '';
+    await originalRepository.save(deleted);
+    assert.deepEqual((await new ArkDataConversationStore(() => recovered.open()).load()).threads, []);
+    assert.equal((await (await recovered.open()).ids('message:thread-one')).length, 0);
     assert.equal(cloudRecovery.autoBackupReady(), false);
     for (const [file, bytes] of legacy) assert.deepEqual(fs.readFileSync(nativePath(file)), bytes, file);
   });

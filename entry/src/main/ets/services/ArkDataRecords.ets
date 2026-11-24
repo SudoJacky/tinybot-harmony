@@ -3,8 +3,10 @@ import { relationalStore } from '@kit.ArkData';
 
 export interface StoredRecord { scope: string; id: string; text?: string; }
 export interface RecordSize { id: string; bytes: number; }
+export interface RecordValue { id: string; text: string; }
 type WriteRecord = (record: StoredRecord) => Promise<void>;
 const CHUNK_LENGTH = 128 * 1024;
+export const CONVERSATION_MESSAGE_SCOPE_PREFIX = 'message:';
 export const LOCAL_DATABASE = 'tinybot.db';
 export const DATABASE_KEY_UNAVAILABLE = 14800020;
 
@@ -42,6 +44,28 @@ export class ArkDataRecords {
     return this.readParts(rows);
   }
 
+  async readScope(scope: string): Promise<RecordValue[]> {
+    const rows = await this.store.querySql('SELECT record_id, part, part_count, body FROM records WHERE scope = ? ORDER BY record_id, part',
+      [scope]);
+    try {
+      const values: RecordValue[] = [];
+      let id: string | undefined;
+      let count = 0;
+      let parts: string[] = [];
+      while (rows.goToNextRow()) {
+        const next = rows.getString(0);
+        if (id !== next) {
+          if (id !== undefined) { values.push({ id: id, text: this.joinParts(parts, count) }); }
+          id = next; count = rows.getLong(2); parts = [];
+        }
+        if (rows.getLong(1) !== parts.length || rows.getLong(2) !== count) { throw new Error('Invalid ArkData record chunks'); }
+        parts.push(rows.getString(3));
+      }
+      if (id !== undefined) { values.push({ id: id, text: this.joinParts(parts, count) }); }
+      return values;
+    } finally { rows.close(); }
+  }
+
   private readParts(rows: relationalStore.ResultSet): string | undefined {
     try {
       const parts: string[] = [];
@@ -51,9 +75,14 @@ export class ArkDataRecords {
         if (rows.getLong(0) !== parts.length || rows.getLong(1) !== count) { throw new Error('Invalid ArkData record chunks'); }
         parts.push(rows.getString(2));
       }
-      if (parts.length !== count) { throw new Error('Incomplete ArkData record'); }
-      return parts.length ? parts.join('') : undefined;
+      const text = this.joinParts(parts, count);
+      return parts.length ? text : undefined;
     } finally { rows.close(); }
+  }
+
+  private joinParts(parts: string[], count: number): string {
+    if (parts.length !== count) { throw new Error('Incomplete ArkData record'); }
+    return parts.join('');
   }
 
   async ids(scope: string): Promise<string[]> {
@@ -66,7 +95,12 @@ export class ArkDataRecords {
   }
 
   async sizes(scope: string): Promise<RecordSize[]> {
-    const rows = await this.store.querySql('SELECT record_id, SUM(length(CAST(body AS BLOB))) FROM records WHERE scope = ? GROUP BY record_id', [scope]);
+    const rows = scope === 'thread' ?
+      await this.store.querySql('SELECT id, SUM(bytes) FROM (' +
+        'SELECT record_id AS id, length(CAST(body AS BLOB)) AS bytes FROM records WHERE scope = ? UNION ALL ' +
+        'SELECT substr(scope, ?) AS id, length(CAST(body AS BLOB)) AS bytes FROM records WHERE substr(scope, 1, ?) = ?) GROUP BY id',
+        [scope, CONVERSATION_MESSAGE_SCOPE_PREFIX.length + 1, CONVERSATION_MESSAGE_SCOPE_PREFIX.length, CONVERSATION_MESSAGE_SCOPE_PREFIX]) :
+      await this.store.querySql('SELECT record_id, SUM(length(CAST(body AS BLOB))) FROM records WHERE scope = ? GROUP BY record_id', [scope]);
     try {
       const result: RecordSize[] = [];
       while (rows.goToNextRow()) { result.push({ id: rows.getString(0), bytes: rows.getLong(1) }); }
