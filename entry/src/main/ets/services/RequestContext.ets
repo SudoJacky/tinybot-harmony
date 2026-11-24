@@ -77,7 +77,7 @@ export class RequestContext {
       this.source.progress(recoverOverflow ? t('模型输入超出窗口，正在压缩后重试一次…') : t('正在压缩较早对话…'));
       const checkpoint = await compactContext(plan, settings, model, cancellation,
         (batch) => this.source.progress(t('正在压缩较早对话 · 第 {0} 批', [batch])),
-        { messages: this.summaryPrefix(messages, plan), tools: tools });
+        { messages: this.summaryPrefix(messages, entries, plan), tools: tools });
       cancellation.check();
       const candidate = assemble(checkpoint);
       if (estimateContextTokens(candidate, tools) >= estimateContextTokens(messages, tools)) {
@@ -127,10 +127,9 @@ export class RequestContext {
     return retained?.content === snapshot ? undefined : snapshot;
   }
 
-  private summaryPrefix(messages: ModelMessage[], plan: CompactionPlan): ModelMessage[] {
+  private summaryPrefix(messages: ModelMessage[], entries: ContextEntry[], plan: CompactionPlan): ModelMessage[] {
     // The shadowed region is the exact leading projected history, including an existing checkpoint.
     const system = messages.filter((message) => message.role === 'system');
-    const entries = this.source.entries();
     const cut = entries.findIndex((entry) => entry.messageId === plan.firstKeptMessageId && entry.step === plan.firstKeptStep);
     return system.concat(projectedHistory(entries.slice(0, cut), this.source.state.compaction));
   }

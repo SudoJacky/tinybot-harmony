@@ -33,6 +33,26 @@ function fixture() {
 }
 function source(thread, persist = async () => {}) { return sessionContextSource(thread, () => [{ name: 'rules', content: 'Follow the user.' }], persist, () => {}); }
 async function main() {
+  const retained = fixture();
+  const earlier = { id: 'u0', role: 'user', content: 'old and expensive', status: 'complete', error: '' };
+  retained.messages.unshift(earlier, { id: 'a0', role: 'assistant', content: 'historical answer', status: 'complete', error: '' });
+  retained.messages[3].status = 'complete';
+  retained.messages[3].steps = [{ content: 'retained response', tools: [] }];
+  let oldContentReads = 0;
+  Object.defineProperty(earlier, 'content', { get() { oldContentReads++; return 'old and expensive'; } });
+  for (const firstKeptStep of [undefined, 0, 1]) {
+    retained.compaction = { firstKeptMessageId: 'u1', firstKeptStep, summary: 'Summarized past', createdAt: 1, tokensBefore: 100 };
+    const baseline = { ...source(retained), entries: () => threadEntries(retained) };
+    const expected = new RequestContext(baseline, config()).inspect([]);
+    const readsAfterBaseline = oldContentReads;
+    const actual = new RequestContext(source(retained), config()).inspect([]);
+    assert.equal(oldContentReads, readsAfterBaseline, 'Compacted history must not project messages before its boundary');
+    assert.equal(JSON.stringify(actual), JSON.stringify(expected), 'Preserve exact prompt and attribution at message and step boundaries');
+  }
+  retained.compaction.firstKeptMessageId = 'missing';
+  assert.throws(() => new RequestContext(source(retained), config()).inspect([]), /checkpoint boundary is missing/);
+  console.log('PASS checkpoint-bounded projection matches full projection and skips older content');
+
   const detailThread = fixture(); detailThread.messages[1].status = 'complete';
   detailThread.messages[0].references = [{threadId:'other',title:'Other',content:'quoted context',capturedAt:1,truncated:false}];
   detailThread.messages[1].steps = [{ content:'answer',reasoningContent:'thinking',tools:[

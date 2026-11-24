@@ -18,7 +18,14 @@ export function sessionPromptSections(config: ModelConfig, extensions: Extension
 
 export function sessionContextSource(thread: ThreadData, sections: () => PromptSection[], persist: () => Promise<void>,
   progress: (status: string) => void): ContextSource {
-  return { state: thread, entries: () => threadEntries(thread), sections: sections, persist: persist, progress: progress };
+  return { state: thread, entries: () => {
+    const boundary = thread.compaction?.firstKeptMessageId;
+    if (boundary === undefined) { return threadEntries(thread); }
+    const start = thread.messages.findIndex((message) => message.id === boundary);
+    if (start < 0 || start % 2 !== 0) { throw new Error('Context checkpoint boundary is missing; original transcript preserved.'); }
+    // Keep the entire boundary turn so a step checkpoint can replay its exact user anchor.
+    return threadEntries(thread, start);
+  }, sections: sections, persist: persist, progress: progress };
 }
 
 // The caller owns the thread and commit boundary; this module owns budgeting and compaction policy.
