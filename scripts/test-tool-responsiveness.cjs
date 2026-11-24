@@ -29,6 +29,30 @@ let completed = false;
 process.on('beforeExit', () => { if (!completed) { console.error('Tool responsiveness regressions did not finish'); process.exitCode = 1; } });
 
 async function main() {
+  const { Fixture: StartupFixture } = load(path.join(root, 'test/SessionService.test'));
+  const { ChatViewModel: StartupView } = from('viewmodel/ChatViewModel');
+  const startupFixture = new StartupFixture(), startupView = new StartupView();
+  const loaded = await startupFixture.repository.load();
+  const restore = gate(), loadStarted = gate();
+  const preview = { threadId: loaded.activeThreadId, title: 'Preview before ready',
+    messages: [{ id: 'preview-message', role: 'user', content: 'Saved message' }] };
+  startupFixture.repository.loadStartupTranscript = async () => preview;
+  startupFixture.repository.load = async () => { loadStarted.open(); await restore.promise; return loaded; };
+  const starting = startupView.initialize(startupFixture.session);
+  await loadStarted.promise;
+  assert.equal(startupView.loading, true); assert.equal(startupView.ready, false);
+  assert.equal(startupView.canNavigate, false); assert.equal(startupView.startupTranscript, preview);
+  restore.open(); await starting;
+  assert.equal(startupView.ready, true); assert.equal(startupView.startupTranscript, undefined);
+  assert.equal(startupView.active.id, loaded.activeThreadId);
+  const failed = new StartupFixture(), failedView = new StartupView();
+  failed.repository.loadStartupTranscript = async () => preview;
+  failed.repository.load = async () => { throw Error('failure after preview'); };
+  await failedView.initialize(failed.session);
+  assert.equal(failedView.ready, false); assert.equal(failedView.startupTranscript, undefined);
+  assert.match(failedView.error, /failure after preview/);
+  console.log('PASS startup preview precedes full readiness and clears on success or failure');
+
   const { CheckpointQueue } = from('services/CheckpointQueue');
   let state = 0, active = 0, peak = 0; const saved = [], entered = gate(), release = gate();
   const queue = new CheckpointQueue(async () => {

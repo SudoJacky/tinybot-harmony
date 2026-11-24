@@ -22,7 +22,7 @@ import { ExtensionSettings, SkillData, defaultExtensions } from '../model/Skills
 import { SkillQuery, skillDraft } from '../model/SkillCompletion';
 import { InputMode } from '../model/PendingInput';
 import { matchingThreads } from '../model/SessionManagement';
-import { SessionEvent, SessionPhase, SessionState, SettingsToggle } from '../services/SessionContracts';
+import { SessionEvent, SessionPhase, SessionState, SettingsToggle, StartupTranscript } from '../services/SessionContracts';
 import { SessionService } from '../services/SessionService';
 import { ProviderEditorViewModel } from './ProviderEditorViewModel';
 import { SkillEditorViewModel } from './SkillEditorViewModel';
@@ -58,6 +58,7 @@ export class ChatViewModel {
   }
   productivity: ProductivityData = defaultProductivity();
   ready: boolean = false;
+  startupTranscript?: StartupTranscript;
   searchQuery: string = '';
   searchMessageId: string = '';
   messageSearchRequest: number = 0;
@@ -116,6 +117,7 @@ export class ChatViewModel {
     const diagnosticMark = Diagnostics.begin();
     try {
       this.projectState(event.state);
+      if (event.kind === 'startup-transcript' || event.kind === 'snapshot') { this.startupTranscript = event.startupTranscript; }
       if (event.data) { this.projectData(event.data); }
       if (event.preferences) {
         this.config = event.preferences.config; this.extensions = event.preferences.extensions;

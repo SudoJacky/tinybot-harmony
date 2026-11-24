@@ -88,6 +88,7 @@ import { autoCloudBackup } from '../services/AutoCloudBackup';
 import { announcements } from '../services/Announcements';
 import { AnnouncementDialog } from '../views/AnnouncementDialog';
 import { Diagnostics } from '../model/Diagnostics';
+import { StartupTranscript, StartupTranscriptMessage } from '../services/SessionContracts';
 import { WorkbenchLayout } from '../model/WorkbenchLayout';
 import { DesktopLayoutPreferences } from '../services/DesktopLayoutPreferences';
 import { KeyCode } from '@kit.InputKit';
@@ -1964,6 +1965,30 @@ struct Index {
       .onActionCancel(() => this.cancelDrawerDrag()))
   }
 
+  @Builder
+  private startupTranscript(transcript: StartupTranscript) {
+    Column({ space: Space.sm }) {
+      Text(transcript.title).fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      List({ space: Space.sm, initialIndex: transcript.messages.length - 1 }) {
+        ForEach(transcript.messages, (message: StartupTranscriptMessage) => {
+          ListItem() {
+            Row() {
+              Text(message.content).fontColor($r('app.color.text_primary')).maxLines(6).textOverflow({ overflow: TextOverflow.Ellipsis })
+                .constraintSize({ maxWidth: '82%' })
+            }.width('100%').justifyContent(message.role === 'user' ? FlexAlign.End : FlexAlign.Start)
+          }
+        }, (message: StartupTranscriptMessage): string => message.id)
+      }.layoutWeight(1).width('100%')
+      Row({ space: Space.sm }) {
+        LoadingProgress().width(20).height(20).color(this.appearance.accent)
+        Text(t("正在打开本地会话…")).fontColor($r('app.color.text_secondary'))
+      }
+    }.padding(Space.xl).layoutWeight(1).width('100%').constraintSize({ maxWidth: 800 })
+    .id('startup-transcript').onAppear(() => {
+      if (Diagnostics.recording) { Diagnostics.event('session.startup_transcript_visible', { rows: transcript.messages.length }); }
+    })
+  }
+
   build() {
     Stack() {
       Column().width('100%').height('100%').backgroundColor($r('app.color.page_background'))
@@ -2044,6 +2069,8 @@ struct Index {
                 previewInspectable: true, inspectedPreviewId: this.hasPreview() ? this.previewId : '',
                 onInspectPreview: (messageId: string, previewId: string) => this.openPreview(messageId, previewId) })
               .width('100%').constraintSize({ maxWidth: this.desktop ? 784 : 800 }).layoutWeight(1)
+          } else if (this.app.loading && this.app.startupTranscript) {
+            this.startupTranscript(this.app.startupTranscript)
           } else {
             Column({ space: Space.lg }) {
               if (this.app.loading) {

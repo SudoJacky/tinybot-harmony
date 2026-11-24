@@ -16,7 +16,11 @@ import { FileAnnotation } from '../model/FileAnnotation';
 
 export interface ThreadCheckpoint { threadId: string; messageId?: string; }
 
+export interface StartupTranscriptMessage { id: string; role: 'user' | 'assistant'; content: string; }
+export interface StartupTranscript { threadId: string; title: string; messages: StartupTranscriptMessage[]; }
+
 export interface SessionRepository {
+  loadStartupTranscript?(): Promise<StartupTranscript | undefined>;
   load(): Promise<AppData>;
   // Capture call-time values synchronously. Omitted IDs mean a full save; otherwise unchanged threads are reused.
   // A checkpoint can change only metadata, or one message in addition to metadata.
@@ -79,11 +83,12 @@ export interface ReasoningSelection {
 
 // Structural changes carry detached snapshots; preference changes omit transcripts.
 export interface SessionEvent {
-  kind: 'snapshot' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
+  kind: 'snapshot' | 'startup-transcript' | 'preferences' | 'reasoning-effort' | 'message' | 'tool' | 'text' | 'reasoning' | 'draft' | 'state' | 'thread' | 'teams' | 'task-complete';
   state: SessionState;
   preferences?: SessionPreferences;
   reasoningSelection?: ReasoningSelection;
   data?: AppData;
+  startupTranscript?: StartupTranscript;
   thread?: ThreadData;
   teams?: TeamRun[];
   threadId?: string;

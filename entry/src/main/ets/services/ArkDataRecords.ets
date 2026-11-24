@@ -4,6 +4,7 @@ import { relationalStore } from '@kit.ArkData';
 export interface StoredRecord { scope: string; id: string; text?: string; }
 export interface RecordSize { id: string; bytes: number; }
 export interface RecordValue { id: string; text: string; }
+export interface RecordRange { start: string; end: string; }
 type WriteRecord = (record: StoredRecord) => Promise<void>;
 const CHUNK_LENGTH = 128 * 1024;
 export const CONVERSATION_MESSAGE_SCOPE_PREFIX = 'message:';
@@ -44,9 +45,12 @@ export class ArkDataRecords {
     return this.readParts(rows);
   }
 
-  async readScope(scope: string): Promise<RecordValue[]> {
-    const rows = await this.store.querySql('SELECT record_id, part, part_count, body FROM records WHERE scope = ? ORDER BY record_id, part',
-      [scope]);
+  async readScope(scope: string, range?: RecordRange): Promise<RecordValue[]> {
+    const select = 'SELECT record_id, part, part_count, body FROM records WHERE scope = ?';
+    const order = ' ORDER BY record_id, part';
+    const rows = range ?
+      await this.store.querySql(select + ' AND record_id >= ? AND record_id < ?' + order, [scope, range.start, range.end]) :
+      await this.store.querySql(select + order, [scope]);
     try {
       const values: RecordValue[] = [];
       let id: string | undefined;

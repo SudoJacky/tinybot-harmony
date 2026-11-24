@@ -2908,7 +2908,7 @@ async function test(name, run) {
     for (const dir of [ability, context.cacheDir, target, work]) fs.mkdirSync(nativePath(dir), { recursive: true });
     const databases = new Map();
     let failImport = true, failConversationConversion = false, unavailableDatabase;
-    const writes = [];
+    const writes = [], queries = [];
     kits['@kit.ArkData'].relationalStore = {
       SecurityLevel: { S3: 3 },
       async getRdbStore(ctx, config) {
@@ -2920,6 +2920,7 @@ async function test(name, run) {
         if (!databases.has(key)) databases.set(key, new DatabaseSync(':memory:'));
         const sql = databases.get(key);
         const querySql = async (text, args) => {
+          queries.push({ text, args: Array.from(args) });
           const statement = sql.prepare(text); statement.setReturnArrays(true);
           const rows = statement.all(...args); let position = -1;
           return { goToNextRow: () => ++position < rows.length, getLong: column => rows[position][column],
@@ -3038,7 +3039,24 @@ async function test(name, run) {
     assert.deepEqual((await new ArkDataConversationStore(() => cloudRecovery.open()).load()).threads, []);
 
     const originalRepository = new ArkDataConversationStore(() => recovered.open());
-    const deleted = await originalRepository.load(); deleted.threads = []; deleted.activeThreadId = '';
+    const deleted = await originalRepository.load();
+    const chat = deleted.threads[0];
+    for (let i = 0; i < 34; i++) {
+      chat.messages.push({ id: 'user-' + i, role: 'user', status: 'complete', error: '', content: 'user ' + i },
+        { id: 'bot-' + i, role: 'assistant', status: 'complete', error: '', content: 'assistant ' + i });
+    }
+    await originalRepository.save(deleted, [chat.id]);
+    queries.length = 0;
+    const startup = await new ArkDataConversationStore(() => recovered.open()).loadStartupTranscript();
+    assert.equal(startup.threadId, chat.id);
+    assert.equal(startup.messages.length, 60);
+    assert.equal(startup.messages[0].id, 'user-4');
+    assert.equal(startup.messages.at(-1).id, 'bot-33');
+    assert.deepEqual(queries.map(({args}) => args), [
+      ['app', 'index'], ['thread', 'thread-one'], ['message:thread-one', '000000000010', '000000000070']
+    ], 'Before full load, ArkData reads only the index, selected thread metadata and indexed tail range');
+    assert.equal((await new ArkDataConversationStore(() => recovered.open()).load()).threads[0].messages.length, 70);
+    deleted.threads = []; deleted.activeThreadId = '';
     await originalRepository.save(deleted);
     assert.deepEqual((await new ArkDataConversationStore(() => recovered.open()).load()).threads, []);
     assert.equal((await (await recovered.open()).ids('message:thread-one')).length, 0);

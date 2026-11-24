@@ -257,6 +257,8 @@ export class SessionService {
     if (this.application.ready || this.application.phase !== 'idle') { return; }
     this.application.phase = 'loading'; this.application.error = ''; this.publish('state');
     try {
+      const preview = await this.repository.loadStartupTranscript?.();
+      if (preview) { this.emit({ kind: 'startup-transcript', state: this.state, startupTranscript: preview }); }
       const data = await this.repository.load();
       validateProjects(data);
       const migrate = data.providerProfiles === undefined;

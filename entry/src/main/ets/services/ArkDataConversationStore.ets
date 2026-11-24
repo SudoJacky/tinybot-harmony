@@ -1,6 +1,6 @@
 import { AppData, MessageData, ThreadData, parseAppData } from '../model/Conversation';
 import { CapturedConversation } from '../model/ConversationCapture';
-import { SessionRepository, ThreadCheckpoint } from './SessionContracts';
+import { SessionRepository, StartupTranscript, StartupTranscriptMessage, ThreadCheckpoint } from './SessionContracts';
 import { ArkDataRecords, CONVERSATION_MESSAGE_SCOPE_PREFIX, StoredRecord } from './ArkDataRecords';
 import { Diagnostics } from '../model/Diagnostics';
 
@@ -10,6 +10,8 @@ interface StoredMessageSnapshot { source?: MessageData; text: string; }
 interface StoredThreadSnapshot { text: string; messages: StoredMessageSnapshot[]; }
 
 const SEPARATE_MESSAGES = 2;
+const STARTUP_MESSAGE_LIMIT = 60;
+const STARTUP_CONTENT_LIMIT = 2048;
 
 function messageScope(threadId: string): string { return CONVERSATION_MESSAGE_SCOPE_PREFIX + threadId; }
 function messagePosition(index: number): string { return index.toString().padStart(12, '0'); }
@@ -40,6 +42,43 @@ export class ArkDataConversationStore implements SessionRepository {
   private failed: boolean = false;
 
   constructor(database: () => Promise<ArkDataRecords>) { this.database = database; }
+
+  async loadStartupTranscript(): Promise<StartupTranscript | undefined> {
+    await this.pending;
+    const db = await this.database(), raw = await db.read('app', 'index');
+    if (raw === undefined) { throw new Error('ArkData conversation index is missing'); }
+    const index = JSON.parse(raw) as ConversationIndex;
+    if (index.format === undefined) { return undefined; } // The full load migrates older records.
+    if (index.format !== SEPARATE_MESSAGES || typeof index.header !== 'string' || !Array.isArray(index.threadIds)) {
+      throw new Error('ArkData conversation index is invalid');
+    }
+    const threadId = (JSON.parse(index.header) as AppData).activeThreadId;
+    if (typeof threadId !== 'string') { throw new Error('ArkData active conversation ID is invalid'); }
+    if (!threadId) { return undefined; }
+    if (!index.threadIds.includes(threadId)) { throw new Error('ArkData active conversation is missing from its index'); }
+    const text = await db.read('thread', threadId);
+    if (text === undefined) { throw new Error('ArkData active conversation is missing'); }
+    const stored = JSON.parse(text) as StoredThread, thread = stored.metadata;
+    if (thread.id !== threadId || typeof thread.title !== 'string' || !Number.isSafeInteger(stored.messageCount) ||
+      stored.messageCount < 0 || stored.messageCount % 2 !== 0) {
+      throw new Error('ArkData active conversation metadata is invalid');
+    }
+    if (thread.archived || thread.sideChatContext !== undefined || stored.messageCount === 0) { return undefined; }
+    const start = Math.max(0, stored.messageCount - STARTUP_MESSAGE_LIMIT);
+    const records = await db.readScope(messageScope(threadId), { start: messagePosition(start), end: messagePosition(stored.messageCount) });
+    if (records.length !== stored.messageCount - start) { throw new Error('ArkData startup message page is incomplete'); }
+    const messages = records.map((record, offset): StartupTranscriptMessage => {
+      const position = start + offset;
+      const message = JSON.parse(record.text) as MessageData;
+      if (record.id !== messagePosition(position) || message.role !== (position % 2 === 0 ? 'user' : 'assistant') ||
+        typeof message.id !== 'string' || typeof message.content !== 'string') {
+        throw new Error('ArkData startup message is invalid');
+      }
+      const content = message.content.length > STARTUP_CONTENT_LIMIT ? message.content.slice(0, STARTUP_CONTENT_LIMIT) + '…' : message.content;
+      return { id: message.id, role: message.role, content: content };
+    });
+    return { threadId: threadId, title: thread.title, messages: messages };
+  }
 
   async load(): Promise<AppData> {
     await this.pending;
