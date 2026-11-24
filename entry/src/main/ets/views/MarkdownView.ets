@@ -1,3 +1,4 @@
+import { Space } from '../common/Theme';
 import { Diagnostics } from '../model/Diagnostics';
 import { MarkdownBlock, MarkdownDocument } from '../model/Markdown';
 import { MARKDOWN_CHUNK_BLOCKS, MarkdownChunkModel } from '../viewmodel/MarkdownChunkModel';
@@ -9,6 +10,7 @@ export struct MarkdownView {
   @Prop @Watch('refresh') streaming: boolean = false;
   @Prop fontSize: number = 16;
   @Prop selectable: boolean = true;
+  @Prop chatSpacing: boolean = false;
   @State private chunks: MarkdownChunkModel[] = [];
   private perfId: number = Diagnostics.nextId();
   private blocks: MarkdownBlock[] = [];
@@ -64,10 +66,10 @@ export struct MarkdownView {
     }
   }
   build() {
-    Column({ space: 10 }) {
+    Column({ space: this.chatSpacing ? Space.lg : 10 }) {
       ForEach(this.chunks, (chunk: MarkdownChunkModel, index: number) => {
         MarkdownChunkView({ model: chunk, blockOffset: index * MARKDOWN_CHUNK_BLOCKS,
-          fontSize: this.fontSize, selectable: this.selectable })
+          fontSize: this.fontSize, selectable: this.selectable, chatSpacing: this.chatSpacing })
       }, (_chunk: MarkdownChunkModel, index: number) => `${index}`)
     }.width('100%').alignItems(HorizontalAlign.Start)
   }

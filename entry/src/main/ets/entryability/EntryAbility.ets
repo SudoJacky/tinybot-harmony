@@ -89,7 +89,7 @@ export default class EntryAbility extends UIAbility {
     }
   };
 
-  // Pages extend their backgrounds under the system bars, so match the status bar text to the theme.
+  // Pages paint under the status bar. Keep it transparent so the background follows system transitions.
   private applySystemBars(): void {
     if (!this.mainWindow) {
       return;
@@ -97,7 +97,7 @@ export default class EntryAbility extends UIAbility {
     const dark = AppStorage.get<boolean>('tinybot.appearance.dark') === true;
     try { this.mainWindow.setWindowBackgroundColor(dark ? '#151719' : '#F7F8FA'); }
     catch (error) { Diagnostics.log('error', 'app', 'bar_failed', undefined, error as Error); }
-    this.mainWindow.setWindowSystemBarProperties({ statusBarColor: dark ? '#151719' : '#F7F8FA',
+    this.mainWindow.setWindowSystemBarProperties({ statusBarColor: '#00000000',
       navigationBarColor: dark ? '#151719' : '#F7F8FA', statusBarContentColor: dark ? '#FFFFFF' : '#000000' })
       .catch((err: Error) => Diagnostics.log('error', 'app', 'bar_failed', undefined, err));
   }
