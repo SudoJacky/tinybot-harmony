@@ -14,6 +14,16 @@ const SEPARATE_MESSAGES = 2;
 function messageScope(threadId: string): string { return CONVERSATION_MESSAGE_SCOPE_PREFIX + threadId; }
 function messagePosition(index: number): string { return index.toString().padStart(12, '0'); }
 
+function encodeMetadata(data: Object, collection: string): string {
+  const fields = data as Record<string, Object>;
+  const encoded: string[] = [];
+  for (const key of Object.keys(data)) {
+    const value = key === collection ? '[]' : JSON.stringify(fields[key]);
+    if (value !== undefined) { encoded.push(JSON.stringify(key) + ':' + value); }
+  }
+  return '{' + encoded.join(',') + '}';
+}
+
 export function conversationRecords(snapshot: CapturedConversation): StoredRecord[] {
   const index: ConversationIndex = { metadata: snapshot.header, threadIds: Array.from(snapshot.threads.keys()) };
   const records: StoredRecord[] = [{ scope: 'app', id: 'index', text: JSON.stringify(index) }];
@@ -79,7 +89,7 @@ export class ArkDataConversationStore implements SessionRepository {
     if (this.failed) { this.captured.clear(); }
     const snapshot = this.capture(data, this.failed ? undefined : changedThreadIds, this.failed ? undefined : checkpoint);
     this.captured = snapshot;
-    const header = JSON.stringify(Object.assign({}, data, { threads: [] }));
+    const header = encodeMetadata(data, 'threads');
     const index: ConversationIndex = { format: SEPARATE_MESSAGES, header: header, threadIds: Array.from(snapshot.keys()) };
     const text = JSON.stringify(index);
     this.failed = false;
@@ -87,17 +97,17 @@ export class ArkDataConversationStore implements SessionRepository {
       const db = await this.database();
       const changed: StoredRecord[] = [];
       if (text !== this.index) { changed.push({ scope: 'app', id: 'index', text: text }); }
-      for (const [id, thread] of snapshot) {
+      snapshot.forEach((thread, id) => {
         const previous = this.databaseSnapshot.get(id);
-        if (thread === previous) { continue; }
+        if (thread === previous) { return; }
         if (thread.text !== previous?.text) { changed.push({ scope: 'thread', id: id, text: thread.text }); }
         this.collectMessageChanges(changed, id, previous?.messages || [], thread.messages);
-      }
-      for (const [id, thread] of this.databaseSnapshot) {
-        if (snapshot.has(id)) { continue; }
+      });
+      this.databaseSnapshot.forEach((thread, id) => {
+        if (snapshot.has(id)) { return; }
         changed.push({ scope: 'thread', id: id });
         this.collectMessageChanges(changed, id, thread.messages, []);
-      }
+      });
       await db.commit(changed);
       this.index = text; this.databaseSnapshot = snapshot;
     });
@@ -111,14 +121,13 @@ export class ArkDataConversationStore implements SessionRepository {
     for (const thread of data.threads) {
       const previous = this.captured.get(thread.id);
       if (previous && changed !== undefined && !changed.has(thread.id)) { snapshot.set(thread.id, previous); continue; }
-      const metadata = Object.assign({}, thread, { messages: [] }) as ThreadData;
-      const record: StoredThread = { metadata: metadata, messageCount: thread.messages.length };
       const messages = thread.messages.map((message, index): StoredMessageSnapshot => {
         const cached = previous?.messages[index];
         return checkpoint?.threadId === thread.id && checkpoint.messageId !== message.id && cached?.source === message ?
           cached : { source: message, text: JSON.stringify(message) };
       });
-      snapshot.set(thread.id, { text: JSON.stringify(record), messages: messages });
+      const text = '{"metadata":' + encodeMetadata(thread, 'messages') + ',"messageCount":' + messages.length + '}';
+      snapshot.set(thread.id, { text: text, messages: messages });
     }
     return snapshot;
   }
