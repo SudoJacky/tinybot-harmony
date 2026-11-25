@@ -14,7 +14,7 @@ import { referenceContext } from '../model/ThreadReferences';
 import { FileAnnotationTarget, fileAnnotationContext } from '../model/FileAnnotation';
 import { TeamRun } from '../model/Team';
 import { Attachment, ProductivityData, defaultProductivity } from '../model/Productivity';
-import { AppData, ModelConfig, defaultConfig, copyModelConfig } from '../model/Conversation';
+import { AppData, ModelConfig, ThreadData, defaultConfig, copyModelConfig } from '../model/Conversation';
 import { contextSettings } from '../model/ContextSettings';
 import { ImageGenerationConfig, ModelChoice, ProviderProfile, availableModels } from '../model/ProviderProfiles';
 import { ProviderInfo, builtinProviderInfos } from '../model/Provider';
@@ -271,6 +271,9 @@ export class ChatViewModel {
   exportSnapshot(): AppData { return this.requireSession().snapshot(); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return this.requireSession().attributeUsage(records); }
   importSnapshot(data: AppData): Promise<boolean> { return this.requireSession().importSnapshot(data); }
+  importDeepSeek(threads: ThreadData[], prepare: (added: ThreadData[]) => Promise<() => Promise<void>>): Promise<number> {
+    return this.requireSession().importDeepSeek(threads, prepare);
+  }
   setThreadMcp(id: string, enabled: boolean): Promise<boolean> { return this.requireSession().setThreadMcp(id, enabled); }
   setAttachments(items: Attachment[]): Promise<boolean> { return this.requireSession().setAttachments(items); }
   appendDraftAttachment(threadId: string, item: Attachment): Promise<void> { return this.requireSession().appendDraftAttachment(threadId, item); }
@@ -350,9 +353,18 @@ export class ChatViewModel {
   }
 
   openSettings(): void { this.settings.reset(this.config, this.extensions.webEnabled); }
+  private pendingSettingsToggle?: Promise<boolean>;
   async setSettingsToggle(kind: SettingsToggle, value: boolean): Promise<boolean> {
-    const saved = await this.requireSession().setSettingsToggle(kind, value);
-    this.settings.error = saved ? '' : this.error || t("设置未保存，请稍后重试。"); return saved;
+    // The settings categories stay mounted and share one save order.
+    const save = async (): Promise<boolean> => {
+      const saved = await this.requireSession().setSettingsToggle(kind, value);
+      this.settings.error = saved ? '' : this.error || t("设置未保存，请稍后重试。");
+      return saved;
+    };
+    const pending = this.pendingSettingsToggle ? this.pendingSettingsToggle.then(save, save) : save();
+    this.pendingSettingsToggle = pending;
+    try { return await pending; }
+    finally { if (this.pendingSettingsToggle === pending) { this.pendingSettingsToggle = undefined; } }
   }
   async saveSettings(): Promise<boolean> {
     const saved = await this.requireSession().saveSettings(this.settings.userDocument, this.settings.autoCompact, this.settings.webEnabled);

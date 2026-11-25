@@ -87,17 +87,31 @@ const uiGlobals = {
   SymbolGlyphModifier: class {}
 };
 for (const name of ['If','Stack','Blank','SymbolGlyph','__Common__','ViewStackProcessor','Menu','MenuItemGroup','ForEach']) uiGlobals[name] = noop;
-for (const name of ['Alignment','Space','Font','FontWeight','TextOverflow','Color','ButtonType','Visibility','Motion']) {
+for (const name of ['Alignment','Space','Font','FontWeight','TextOverflow','Color','ButtonType','Visibility','Motion',
+  'Radius','SheetSize','SheetKeyboardAvoidMode']) {
   uiGlobals[name] = {};
 }
+const Pill = probe('common/SearchPill', 'SearchPill', ['launcher', 'initialRender'], {
+  ...uiGlobals, Flex: uiGlobals.Row, FlexDirection: { Row: 'right', RowReverse: 'left' }, ItemAlign: {}, EnterKeyType: {}
+});
+uiGlobals.SearchPill = class extends Pill {
+  constructor(parent, props) {
+    super();
+    Object.assign(this, props, { appearance: parent.appearance,
+      observeComponentCreation2: parent.observeComponentCreation2, ifElseBranchUpdateFunction: parent.ifElseBranchUpdateFunction });
+  }
+};
+uiGlobals.ViewPU.create = component => { if (component instanceof Pill) component.initialRender(); };
 const Toolbar = probe('views/ThreadList', 'ThreadList', ['historyToolbar','scopeMenu','searchControl','searchRequested','closeSearch',
-  'searchInputChanged','updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected','searchHeight','modifySelection'], uiGlobals);
+  'searchInputChanged','updateQuery','filtered','threadProject','setScope','endSelection','selectThread','selectAll','allSelected','searchHeight','modifySelection',
+  'submitDeepSeekImport','deepSeekSheetClosed','importDeepSeek'],
+  { ...uiGlobals, DEEPSEEK_IMPORT_GROUP: '@imported', chooseDeepSeekArchive: async () => 2 });
 const focus = [], newChats = [];
 let boardOpens = 0;
 const toolbar = Object.assign(new Toolbar(), {
   active: true, mounted: true, foreground: true, searchOpen: false, toolbarWidth: 280, workbench: true,
   query: '', visibleCounts: {}, focusRequest: 0, searchInputRevision: 0, selecting: false, selectedIds: [], archived: false, projectFilter: null,
-  appearance: {}, app: { ready: true, activeProject: { id: 'current' }, projects: [{ id: 'project', name: 'Project' }], filteredThreads: () => [
+  appearance: {}, app: { ready: true, activeProject: { id: 'current' }, projects: [{ id: 'project', name: 'Project' }], threads: [], filteredThreads: () => [
     { id: 'one', projectId: 'project' }, { id: 'two' }, { id: 'old', projectId: 'deleted' }
   ] },
   locked: () => false, onNewChat: projectId => newChats.push(projectId), onLifePanels: () => boardOpens++,
@@ -109,6 +123,22 @@ const toolbar = Object.assign(new Toolbar(), {
   observeComponentCreation2(callback) { callback(1, true); },
   ifElseBranchUpdateFunction(_branch, render) { render(); }
 });
+const submitted = [];
+const sheet = Object.assign(new Toolbar(), { mounted: true, deepSeekImportOpen: true, deepSeekLink: '  https://fixture.example/export  ',
+  importDeepSeek: value => submitted.push(value), onProjectSheetVisibility: () => {} });
+sheet.submitDeepSeekImport(true);
+assert.equal(sheet.deepSeekImportOpen, false);
+assert.deepEqual(submitted, [], 'Wait for the import sheet to close before starting the download');
+assert.equal(sheet.deepSeekLink, '');
+sheet.deepSeekSheetClosed();
+assert.deepEqual(submitted, ['https://fixture.example/export']);
+sheet.deepSeekLink = 'abandoned input';
+sheet.deepSeekSheetClosed();
+assert.equal(sheet.deepSeekLink, '');
+assert.equal(submitted.length, 1, 'Dismissing without submitting cannot start a download');
+sheet.submitDeepSeekImport(false); sheet.deepSeekSheetClosed();
+assert.equal(submitted.at(-1), '', 'The same sheet can launch the local ZIP picker');
+console.log('PASS DeepSeek sheet clears pasted links and starts the selected import only after closing');
 function renderToolbar() {
   icons.clear(); buttonActions.clear(); widths.clear(); labels.length = 0;
   toolbar.historyToolbar();
@@ -199,6 +229,17 @@ const NavigationPage = probe('pages/Index', 'Index', ['createChat', 'revealChat'
 (async () => {
   await Promise.resolve();
   assert.equal(toolbar.query, '', 'A closed field must ignore late text updates');
+  const imported = Object.assign(new Toolbar(), {
+    mounted: true, archived: true, projectFilter: 'project', collapsedProjects: ['project', '@imported'],
+    app: {}, appearance: {},
+    getUIContext: () => ({ getHostContext: () => ({}), getPromptAction: () => ({ showToast() {} }) })
+  });
+  await imported.importDeepSeek('');
+  assert.equal(imported.importError, '');
+  assert.equal(imported.projectFilter, null, 'Successful import selects all projects');
+  assert.equal(imported.archived, false);
+  assert.deepEqual(Array.from(imported.collapsedProjects), ['project']);
+  console.log('PASS import success shows all projects and expands only the imported group');
   let cleared = 0, drawerClosed = 0, detailClosed = 0, created = 0, destinations = 1;
   const toasts = [];
   const nav = Object.assign(new NavigationPage(), {paths: {clear(){cleared++; destinations=0;}, size: () => destinations}, appearance: {},

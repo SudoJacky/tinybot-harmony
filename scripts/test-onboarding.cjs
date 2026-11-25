@@ -365,7 +365,7 @@ async function testPanel() {
   p.account.signedIn = true;
   await p.view.primaryAction();
   await p.view.setLanguage('en');
-  p.view.setMode('dark');
+  await p.view.setMode('dark');
   await p.view.primaryAction();
   assert.deepEqual(p.events.slice(1), [['step', 2, true], ['language', 'en'], ['appearance', 'dark'], ['step', 3, true]]);
   await p.view.primaryAction();

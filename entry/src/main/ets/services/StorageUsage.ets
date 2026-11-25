@@ -1,5 +1,5 @@
 import { common } from '@kit.AbilityKit';
-import { Diagnostics } from '../model/Diagnostics';
+import { Diagnostics, TIMED_DIAGNOSTICS_FILE } from '../model/Diagnostics';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo as fs, storageStatistics } from '@kit.CoreFileKit';
 import { AppData, ThreadData } from '../model/Conversation';
@@ -264,7 +264,8 @@ export class StorageUsage {
     addCategory(report, 'usage', sumFiles(usage) + (requestSizes || []).reduce((total, item) => total + item.bytes, 0), usage.length + (requestSizes?.length || 0));
     let diagnosticsBytes = 0, diagnosticsFiles = 0;
     const diagnosticPaths: string[] = [roots.abilityFilesDir + '/performance-current.jsonl',
-      roots.abilityFilesDir + '/performance-previous.jsonl', roots.appFilesDir + '/tinybot-cpu.json'];
+      roots.abilityFilesDir + '/performance-previous.jsonl', roots.abilityFilesDir + '/' + TIMED_DIAGNOSTICS_FILE,
+      roots.appFilesDir + '/tinybot-cpu.json'];
     for (const path of diagnosticPaths) {
       let operation: string = 'access';
       try {
@@ -416,7 +417,8 @@ export class StorageUsage {
       }
     } else if (category === 'diagnostics') {
       const paths: string[] = [roots.abilityFilesDir + '/performance-current.jsonl',
-        roots.abilityFilesDir + '/performance-previous.jsonl', roots.appFilesDir + '/tinybot-cpu.json'];
+        roots.abilityFilesDir + '/performance-previous.jsonl', roots.abilityFilesDir + '/' + TIMED_DIAGNOSTICS_FILE,
+        roots.appFilesDir + '/tinybot-cpu.json'];
       for (const path of paths) {
         let operation: string = 'access';
         try {

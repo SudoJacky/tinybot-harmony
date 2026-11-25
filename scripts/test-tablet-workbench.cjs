@@ -20,11 +20,15 @@ function emitted(file, name) {
   const tree = ts.createSourceFile(compiled, fs.readFileSync(compiled, 'utf8'), ts.ScriptTarget.Latest, true);
   return { tree, cls: tree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === name) };
 }
-function probe(file, name, methods, globals = {}) {
+function probe(file, name, methods, globals = {}, constants = []) {
   const { tree, cls } = emitted(file, name), exports = {};
   const selected = cls.members.filter(n => methods.includes(n.name?.getText(tree)));
   assert.equal(selected.length, methods.length);
-  vm.runInNewContext(ts.transpileModule('class Probe {' + selected.map(n => n.getText(tree)).join('\n') + '} exports.Probe = Probe;', {
+  const declarations = tree.statements.filter(node => ts.isVariableStatement(node) &&
+    node.declarationList.declarations.some(declaration => constants.includes(declaration.name.getText(tree))));
+  const source = `${declarations.map(n => n.getText(tree)).join('\n')}
+class Probe { ${selected.map(n => n.getText(tree)).join('\n')} } exports.Probe = Probe;`;
+  vm.runInNewContext(ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ES2021 }
   }).outputText, { exports, ...globals });
   return exports.Probe;
@@ -427,12 +431,13 @@ const modelControls = [];
 class EffortStub { constructor(_, params) { modelControls.push({ type: 'effort', ...params }); } }
 class ModelListStub { constructor(_, params) { modelControls.push({ type: 'models', ...params }); } }
 const { reasoningEfforts } = sourceModule('entry/src/main/ets/model/ReasoningEffort.ets');
-const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleModelMenu', 'modelMenu', 'modelMenuHeight', 'popupHeightLimit', 'selectedProvider'], {
+const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'composerFooterTouchRegion', 'toggleModelMenu',
+  'modelMenu', 'modelMenuHeight', 'popupHeightLimit', 'selectedProvider'], {
   Button: modelButton, Row: gesture, Text: gesture, SymbolGlyph: gesture, Column: gesture, If: gesture, __Common__: gesture,
   ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, HoverEffect, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
   Placement: { TopRight: 'top-right' }, $r: value => value, t: value => value, reasoningEfforts,
   Chevron: class {}, ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
-});
+}, ['COMPOSER_FOOTER_CONTROL_HEIGHT', 'PHONE_COMPOSER_ACTION_SIZE']);
 const picker = Object.assign(new Picker(), { showModelMenu: false, appearance: {}, panelWidth: 360, panelTop: 0, modelButtonTop: 420,
   thread: { id: 'chat', modelRef: { providerId: 'openai', modelId: 'gpt-5.4' }, reasoningEffort: 'high' },
   app: { ready: true, configured: true, error: '', saveError: '', modelChoices: [], providerProfiles: [

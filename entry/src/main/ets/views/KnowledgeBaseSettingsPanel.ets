@@ -72,7 +72,7 @@ export struct KnowledgeBaseSettingsPanel {
         if (this.accessEnabled) {
           SectionHeader({ title: t('知识库服务') })
           GroupCard() {
-            NavRow({ title: t('腾讯 ima 知识库'), icon: $r('sys.symbol.doc_text'), subtitle: t('浏览和搜索腾讯 ima 知识库'),
+            NavRow({ title: t('腾讯 ima 知识库'), icon: $r('sys.symbol.doc_text'), subtitle: t('检索、读取和导入腾讯 ima 知识库资料'),
               value: this.imaStatus, disabled: this.saving, compId: 'configure-ima-knowledge-base', onTap: () => this.onIma(() => this.reloadIma()) })
           }
           if (this.imaError) { Banner({ text: this.imaError, compId: 'knowledge-base-ima-error' }) }

@@ -9,6 +9,7 @@ const suites = {
     'test-builtin-widgets.cjs',
     'test-markdown-math.cjs',
     'test-sidebar-navigation.cjs',
+    'test-deepseek-import.cjs',
     'test-parallel-sessions.cjs',
     'test-answer-speech-native.cjs',
     'test-api20-compat.cjs',

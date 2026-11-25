@@ -17,6 +17,7 @@ import { Btn } from '../common/Theme';
 import { Announcements, announcements } from '../services/Announcements';
 import { MarkdownView } from './MarkdownView';
 import { FeedbackPanel } from './FeedbackPanel';
+import { DiagnosticLogsCard } from './DiagnosticLogsCard';
 
 const QQ_GROUP_NUMBER: string = '337943922';
 const QQ_GROUP_INVITE_URL: string = 'https://qm.qq.com/q/lqgqSxGCK4';
@@ -151,6 +152,7 @@ export struct SupportPanel {
             onDisappear: () => this.cancelDeveloperUnlock() })
       }
     }.width('100%').padding({ top: Space.lg, bottom: Space.xl })
+    DiagnosticLogsCard()
     this.article(t('开源共建'), t('Tinybot 是一款开源软件，遵循 Apache 2.0 许可证。欢迎社区参与维护、改进翻译、报告问题，以及通过 Pull Request 提交代码，一起让 Tinybot 变得更好。'))
     GroupCard() {
       Column() {

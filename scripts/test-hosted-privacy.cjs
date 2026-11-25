@@ -279,6 +279,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   console.log('PASS consent gating, refusal followed by cold restart and agreement, re-sign, revocation, and stale dialog results');
   let initialized = 0, engines = 0, wants = [], loads = 0, stops = 0;
   const renderLifecycle = [];
+  const diagnosticLifecycle = [];
   const bootOrder = [];
   const noOp = () => {};
   const { default: EntryAbility } = load('entryability/EntryAbility.ets', {
@@ -299,7 +300,8 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     '../services/CompletionNotifications': { completionNotifications: { setForeground: noOp, dispose: noOp } },
     '../services/WebUiPreflight': { WebUiPreflight: { setForeground: value => renderLifecycle.push(['preflight', value]) } },
     '../services/PreviewCapture': { PreviewCapture: { setForeground: value => renderLifecycle.push(['capture', value]) } },
-    '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize() { initialized++; }, stop() { stops++; }, setForeground: noOp } },
+    '../services/DeveloperDiagnostics': { DeveloperDiagnostics: { initialize() { initialized++; }, stop() { stops++; },
+      setForeground: value => diagnosticLifecycle.push(value) } },
     '../services/HostedPrivacy': { hostedPrivacy }, '@kit.AbilityKit': { UIAbility: class {} },
     '../services/AutoCloudBackup': { autoCloudBackup: { setForeground: noOp, onBackground: noOp, dispose: noOp } }
   });
@@ -422,6 +424,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   hostedPrivacy.onPageShow();
   await tick();
   assert.deepEqual([initialized, engines, wants.length], beforeDebugServices.map((n, i) => n + (i === 2 ? 2 : i === 0 ? 1 : 0)));
+  assert.equal(diagnosticLifecycle.at(-1), true, 'Consent starts diagnostics in the current foreground state');
   debugAbility.onForeground();
   assert.equal(engines, beforeDebugServices[1], 'Native startup never preloads ArkWeb');
   hostedPrivacy.revokeConsent(); assert.equal(hostedPrivacy.allowed, false);

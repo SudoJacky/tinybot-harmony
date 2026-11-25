@@ -34,6 +34,7 @@ export struct AppearancePanel {
   @State private colorValue: number = 0;
   @State private paletteWidth: number = 0;
   @State private fontLoading: boolean = false;
+  @State private saving: boolean = false;
   private mounted: boolean = false;
   private readonly hueGradient: LinearGradient = new LinearGradient([
     { color: '#FF0000', offset: 0 }, { color: '#FFFF00', offset: 1 / 6 },
@@ -94,12 +95,16 @@ export struct AppearancePanel {
   private fontName(family: string): string { return family || t('跟随系统'); }
   private scaleNames(): string[] { return [t('小'), t('标准'), t('大'), t('更大')]; }
 
-  private save(next: AppearanceOptions): void {
+  private async save(next: AppearanceOptions): Promise<void> {
+    if (this.saving) { return; }
+    this.saving = true;
+    this.error = '';
     try {
-      AppearancePreferences.select(next);
-      this.error = '';
-      if (this.choice) { this.onDone(); }
-    } catch (error) { this.error = t('无法保存外观设置：{0}', [(error as Error).message]); }
+      await AppearancePreferences.select(next);
+      if (this.mounted && this.choice) { this.onDone(); }
+    } catch (error) {
+      if (this.mounted) { this.error = t('无法保存外观设置：{0}', [(error as Error).message]); }
+    } finally { this.saving = false; }
   }
   private selectMode(mode: AppearanceMode): void { const next = copyAppearance(this.options); next.mode = mode; this.save(next); }
   private selectAccent(accent: AccentName): void { const next = copyAppearance(this.options); next.accent = accent; this.save(next); }
@@ -172,7 +177,7 @@ export struct AppearancePanel {
       }.width('100%')
       if (!this.validColor()) { Banner({ text: t('请输入 #RRGGBB 格式的颜色代码。') }) }
       Button(t('应用颜色')).fontFamily(this.appearance.fontFamily).id('appearance-color-apply').attributeModifier(Btn.primary).width('100%')
-        .enabled(this.validColor()).onClick(() => this.applyColor())
+        .enabled(this.validColor() && !this.saving).onClick(() => this.applyColor())
     }.width('100%')
   }
 
@@ -186,7 +191,7 @@ export struct AppearancePanel {
             ForEach(APPEARANCE_MODES, (mode: AppearanceMode, index: number) => {
               if (index > 0) { RowDivider() }
               NavRow({ title: this.modeName(mode), active: this.options.mode === mode, trailing: 'select',
-                compId: 'appearance-mode-' + mode, onTap: () => this.selectMode(mode) })
+                disabled: this.saving, compId: 'appearance-mode-' + mode, onTap: () => this.selectMode(mode) })
             }, (mode: AppearanceMode) => mode)
           } else if (this.choice === 'font') {
             if (this.fontLoading) {
@@ -198,7 +203,7 @@ export struct AppearancePanel {
             ForEach(this.fonts, (family: string, index: number) => {
               if (index > 0) { RowDivider() }
               NavRow({ title: this.fontName(family), active: this.options.fontFamily === family, trailing: 'select',
-                titleFont: family, compId: 'appearance-font-' + index, onTap: () => this.selectFont(family) })
+                titleFont: family, disabled: this.saving, compId: 'appearance-font-' + index, onTap: () => this.selectFont(family) })
             }, (family: string) => family)
           } else {
             if (!this.materialAvailable()) {
@@ -209,7 +214,7 @@ export struct AppearancePanel {
               if (index > 0) { RowDivider() }
               NavRow({ title: this.effectName(effect), subtitle: this.effectDescription(effect),
                 active: this.materialAvailable() ? this.options.lightEffect === effect : effect === 'off',
-                trailing: 'select', disabled: !this.materialAvailable(), compId: 'appearance-effect-' + effect,
+                trailing: 'select', disabled: this.saving || !this.materialAvailable(), compId: 'appearance-effect-' + effect,
                 onTap: () => this.selectEffect(effect) })
             }, (effect: LightEffect) => effect)
           }
@@ -281,7 +286,7 @@ export struct AppearancePanel {
                     }
                   }.fontFamily(this.appearance.fontFamily).id('appearance-accent-' + name).layoutWeight(1).padding({ top: 4, bottom: 8 })
                   .backgroundColor(Color.Transparent).borderRadius(Radius.sm).accessibilityText(this.accentName(name))
-                  .accessibilitySelected(this.options.accent === name).onClick(() => this.selectAccent(name))
+                  .accessibilitySelected(this.options.accent === name).enabled(!this.saving).onClick(() => this.selectAccent(name))
                 }, (name: AccentName) => name)
               }.width('100%')
             }.padding(Space.lg).width('100%')
@@ -300,7 +305,7 @@ export struct AppearancePanel {
               Text(t('字号')).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary')).width('100%')
               Segmented({ options: this.scaleNames(), selected: FONT_SCALES.indexOf(this.options.fontScale),
                 optionIds: ['appearance-size-small', 'appearance-size-standard', 'appearance-size-large', 'appearance-size-larger'],
-                onSelect: (index: number) => this.selectScale(index) })
+                onSelect: (index: number) => this.selectScale(index) }).enabled(!this.saving)
             }.width('100%').padding(Space.lg)
           }
         }
@@ -313,7 +318,7 @@ export struct AppearancePanel {
         }
         if (this.error) { Banner({ text: this.error, compId: 'appearance-error' }) }
         Button(t('恢复默认外观')).fontFamily(this.appearance.fontFamily).id('appearance-reset').attributeModifier(Btn.text)
-          .onClick(() => this.save(defaultAppearance())).margin({ top: Space.sm })
+          .enabled(!this.saving).onClick(() => this.save(defaultAppearance())).margin({ top: Space.sm })
       }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.xl }).attributeModifier(PageStyles.form)
     }.width('100%').height('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
   }

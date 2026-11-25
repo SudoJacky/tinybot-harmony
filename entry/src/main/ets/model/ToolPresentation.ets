@@ -6,6 +6,14 @@ export function toolTitle(name: string): string {
     'list_mail_accounts': t('查看邮箱连接'), 'search_mail': t('查询邮件'), 'read_mail': t('读取邮件'),
     'list_ima_knowledge_bases': t('列出腾讯 ima 知识库'), 'browse_ima_knowledge': t('浏览腾讯 ima 知识库'),
     'search_ima_knowledge': t('搜索腾讯 ima 知识库'),
+    'get_ima_knowledge_base_details': t('查看腾讯 ima 知识库详情'),
+    'list_ima_writable_knowledge_bases': t('列出可写入的腾讯 ima 知识库'),
+    'check_ima_duplicate_files': t('检查腾讯 ima 同名文件'),
+    'read_ima_knowledge': t('读取腾讯 ima 原文'),
+    'download_ima_knowledge': t('下载腾讯 ima 原文'),
+    'upload_ima_file': t('上传文件到腾讯 ima'),
+    'import_ima_links': t('导入链接到腾讯 ima'),
+    'add_ima_reference': t('添加腾讯 ima 资料'),
     'get_life_panel': t('查看卡片详情'),
     'get_life_panel_catalog': t('查看卡片组件规范'), 'list_life_panels': t('查看 Life Panel'), 'publish_life_panel': t('保存卡片'),
     'get_life_board': t('查看看板'), 'list_life_boards': t('查看看板'), 'manage_life_board': t('管理看板'), 'manage_life_panel_task': t('管理卡片任务'),
@@ -48,7 +56,7 @@ export function toolGroupTitle(id: string): string {
 export function toolCapabilityDescription(id: string): string {
   const descriptions: Record<string, string> = {
     'context-read': t('读取附件、查看图片和读取会话引用'), 'web': t('搜索互联网并读取网页内容'),
-    'ima': t('浏览和搜索腾讯 ima 知识库'),
+    'ima': t('检索、读取和导入腾讯 ima 知识库资料'),
     'browser': t('打开网页、查看页面、操作与接管浏览器'), 'calculation': t('在代码沙箱中计算和处理数据'),
     'orchestration': t('通过代码组合调用已授权工具'), 'user-input': t('通过表单向你确认信息'),
     'plan': t('创建和更新任务步骤'), 'team': t('招募、管理团队并完成员工交接'),

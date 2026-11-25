@@ -73,6 +73,7 @@ export function copyModelConfig(config: ModelConfig, configured: boolean = confi
 export interface ContextState { compaction?: CompactionData; }
 
 export interface ThreadData extends ContextState, ToolSelection {
+  importSource?: string;
   annotations?: FileAnnotation[];
   toolApprovalMode?: string;
   panelContext?: string;

@@ -6,7 +6,9 @@ import { systemDateTime } from '@kit.BasicServicesKit';
 import { taskpool, util } from '@kit.ArkTS';
 import { displaySync } from '@kit.ArkGraphics2D';
 import { hidebug, hiAppEvent } from '@kit.PerformanceAnalysisKit';
-import { Diagnostics, PerfEvent, PerfSnapshot } from '../model/Diagnostics';
+import { Diagnostics, PerfEvent, PerfSnapshot, TIMED_DIAGNOSTICS_FILE } from '../model/Diagnostics';
+import { LogLevel } from '../model/DiagnosticLog';
+import { t } from '../model/I18n';
 import { collectPerformanceResources, ResourceProbe } from './PerformanceProbe';
 import { readAppInformation, AppInformation } from './AppInformation';
 import { clearRecentDiagnosticLogs } from './NativeDiagnosticLog';
@@ -17,6 +19,9 @@ interface DiagnosticExport {
   schema: number; application: AppInformation; platform: string; clock: string; definitions: string[];
   capture: PerfSnapshot; traceEvents: TraceEntry[]; displayTimeUnit: string; journal: string; previousJournal: string; diagnosticError: string;
 }
+interface TimedDiagnosticExport { schema: number; application: AppInformation; platform: string; capture: PerfSnapshot; }
+interface CaptureOptions { detailed: boolean; logLevel: LogLevel; }
+const TIMED_CAPTURE_MS: number = 5 * 60 * 1000;
 
 export class DeveloperDiagnostics {
   private static store?: preferences.Preferences;
@@ -39,6 +44,13 @@ export class DeveloperDiagnostics {
   private static watcher?: hiAppEvent.Watcher;
   private static cpuProfile: boolean = false;
   private static cpuTimer: number = -1;
+  private static timedDeadline: number = 0;
+  private static timedTimer: number = -1;
+  private static timedSession: number = -1;
+  private static priorOptions?: CaptureOptions;
+  private static pendingTimedCapture?: PerfSnapshot;
+  private static timedSaving: boolean = false;
+  private static timedWriting: Promise<void> = Promise.resolve();
 
   static initialize(context: common.Context): void {
     DeveloperDiagnostics.context = context;
@@ -49,6 +61,9 @@ export class DeveloperDiagnostics {
     } catch (error) { DeveloperDiagnostics.fail(1, error as Error); }
     AppStorage.setOrCreate('tinybot.developer.enabled', DeveloperDiagnostics.unlocked);
     AppStorage.setOrCreate('tinybot.developer.recording', false);
+    fs.access(DeveloperDiagnostics.timedPath()).then((exists: boolean) => {
+      if (exists) { AppStorage.setOrCreate('tinybot.diagnostics.available', true); }
+    }).catch((error: Error) => DeveloperDiagnostics.fail(8, error));
   }
   static enable(): void {
     DeveloperDiagnostics.persist(true);
@@ -64,6 +79,25 @@ export class DeveloperDiagnostics {
   static disable(): void { DeveloperDiagnostics.persist(false); DeveloperDiagnostics.stop(); }
   static start(): void {
     if (!DeveloperDiagnostics.unlocked || Diagnostics.recording) { return; }
+    DeveloperDiagnostics.startCapture();
+  }
+  static setTimedRecording(enabled: boolean): void {
+    if (!enabled) {
+      if (DeveloperDiagnostics.timedDeadline > 0) { DeveloperDiagnostics.stop(); }
+      return;
+    }
+    if (DeveloperDiagnostics.timedDeadline > 0 || DeveloperDiagnostics.timedSaving) { return; }
+    if (!DeveloperDiagnostics.context) { throw new Error(t('诊断存储不可用。')); }
+    if (Diagnostics.recording) { throw new Error(t('请先停止开发者模式中的诊断采集。')); }
+    DeveloperDiagnostics.priorOptions = { detailed: Diagnostics.detailed, logLevel: Diagnostics.logLevel };
+    Diagnostics.detailed = true; Diagnostics.logLevel = 'debug';
+    DeveloperDiagnostics.timedDeadline = Diagnostics.now() + TIMED_CAPTURE_MS;
+    DeveloperDiagnostics.startCapture();
+    DeveloperDiagnostics.timedSession = Diagnostics.session;
+    AppStorage.setOrCreate('tinybot.diagnostics.recording', true);
+    DeveloperDiagnostics.timedTimer = setTimeout(() => DeveloperDiagnostics.stop(), TIMED_CAPTURE_MS);
+  }
+  private static startCapture(): void {
     AppStorage.setOrCreate('tinybot.developer.error', '');
     Diagnostics.start(); DeveloperDiagnostics.marker = 0;
     Diagnostics.log('info', 'diagnostics', 'started');
@@ -75,7 +109,8 @@ export class DeveloperDiagnostics {
     if (Diagnostics.recording) { Diagnostics.log('info', 'diagnostics', 'stopped'); }
     DeveloperDiagnostics.suspend(); Diagnostics.stop();
     AppStorage.setOrCreate('tinybot.developer.recording', false);
-    DeveloperDiagnostics.flush();
+    if (DeveloperDiagnostics.timedDeadline > 0) { DeveloperDiagnostics.finishTimedCapture(); }
+    else { DeveloperDiagnostics.flush(); }
     if (DeveloperDiagnostics.watcher) {
       try { hiAppEvent.removeWatcher(DeveloperDiagnostics.watcher); }
       catch (error) { DeveloperDiagnostics.fail(2, error as Error); }
@@ -84,6 +119,9 @@ export class DeveloperDiagnostics {
   }
   static setForeground(foreground: boolean): void {
     DeveloperDiagnostics.foreground = foreground;
+    if (DeveloperDiagnostics.timedDeadline > 0 && Diagnostics.now() >= DeveloperDiagnostics.timedDeadline) {
+      DeveloperDiagnostics.stop();
+    }
     if (!foreground) { try { DeveloperDiagnostics.stopCpuProfile(); } catch (error) { DeveloperDiagnostics.fail(7, error as Error); } }
     if (!Diagnostics.recording) { return; }
     Diagnostics.event(foreground ? 'lifecycle.foreground' : 'lifecycle.background', {}, 0, true);
@@ -213,6 +251,58 @@ export class DeveloperDiagnostics {
     if (!DeveloperDiagnostics.context) { throw new Error('Diagnostic storage is unavailable.'); }
     return DeveloperDiagnostics.context.filesDir + (previous ? '/performance-previous.jsonl' : '/performance-current.jsonl');
   }
+  private static timedPath(): string {
+    if (!DeveloperDiagnostics.context) { throw new Error(t('诊断存储不可用。')); }
+    return DeveloperDiagnostics.context.filesDir + '/' + TIMED_DIAGNOSTICS_FILE;
+  }
+  private static finishTimedCapture(): void {
+    clearTimeout(DeveloperDiagnostics.timedTimer); DeveloperDiagnostics.timedTimer = -1;
+    DeveloperDiagnostics.timedDeadline = 0;
+    DeveloperDiagnostics.pendingTimedCapture = Diagnostics.snapshot();
+    const options = DeveloperDiagnostics.priorOptions;
+    if (options) {
+      Diagnostics.detailed = options.detailed; Diagnostics.logLevel = options.logLevel;
+      DeveloperDiagnostics.priorOptions = undefined;
+    }
+    AppStorage.setOrCreate('tinybot.diagnostics.recording', false);
+    AppStorage.setOrCreate('tinybot.diagnostics.available', true);
+    DeveloperDiagnostics.saveTimedCapture();
+  }
+  private static saveTimedCapture(): Promise<void> {
+    const capture = DeveloperDiagnostics.pendingTimedCapture;
+    if (!capture || DeveloperDiagnostics.timedSaving) { return DeveloperDiagnostics.timedWriting; }
+    DeveloperDiagnostics.timedSaving = true;
+    AppStorage.setOrCreate('tinybot.diagnostics.saving', true);
+    AppStorage.setOrCreate('tinybot.diagnostics.saveError', false);
+    DeveloperDiagnostics.timedWriting = DeveloperDiagnostics.writeTimedCapture(capture).then(() => {
+      DeveloperDiagnostics.pendingTimedCapture = undefined;
+    }).catch((error: Error) => {
+      DeveloperDiagnostics.fail(8, error);
+      AppStorage.setOrCreate('tinybot.diagnostics.saveError', true);
+    }).finally(() => {
+      DeveloperDiagnostics.timedSaving = false;
+      AppStorage.setOrCreate('tinybot.diagnostics.saving', false);
+    });
+    return DeveloperDiagnostics.timedWriting;
+  }
+  private static async writeTimedCapture(capture: PerfSnapshot): Promise<void> {
+    const path = DeveloperDiagnostics.timedPath();
+    const temporary = path + '.tmp';
+    const file = await fs.open(temporary, fs.OpenMode.CREATE | fs.OpenMode.TRUNC | fs.OpenMode.WRITE_ONLY);
+    try {
+      const data: TimedDiagnosticExport = { schema: 1, application: readAppInformation(), platform: 'HarmonyOS', capture: capture };
+      await DeveloperDiagnostics.writeAll(file.fd, JSON.stringify(data));
+    } finally { await fs.close(file); }
+    await fs.rename(temporary, path);
+  }
+  static async timedCapturePath(): Promise<string> {
+    if (DeveloperDiagnostics.timedDeadline > 0) { throw new Error(t('请先停止诊断日志采集。')); }
+    await DeveloperDiagnostics.saveTimedCapture();
+    if (DeveloperDiagnostics.pendingTimedCapture) { throw new Error(t('诊断日志保存失败，请重试。')); }
+    const path = DeveloperDiagnostics.timedPath();
+    if (!await fs.access(path)) { throw new Error(t('暂无可导出的诊断日志。')); }
+    return path;
+  }
   private static async rotate(): Promise<void> {
     const path = DeveloperDiagnostics.path(); const previous = DeveloperDiagnostics.path(true);
     if (await fs.access(path)) { if (await fs.access(previous)) { await fs.unlink(previous); } await fs.rename(path, previous); }
@@ -229,7 +319,7 @@ export class DeveloperDiagnostics {
     return written;
   }
   static flush(): void {
-    if (DeveloperDiagnostics.journalBusy || Diagnostics.session === 0) { return; }
+    if (DeveloperDiagnostics.journalBusy || Diagnostics.session === 0 || Diagnostics.session === DeveloperDiagnostics.timedSession) { return; }
     const snapshot = Diagnostics.snapshot(false); const events = Diagnostics.eventsSince(DeveloperDiagnostics.journalSession === Diagnostics.session ? DeveloperDiagnostics.journalSequence : 0);
     if (events.length === 0 && DeveloperDiagnostics.journalSession === Diagnostics.session) { return; }
     DeveloperDiagnostics.journalBusy = true;
@@ -280,14 +370,18 @@ export class DeveloperDiagnostics {
     return path;
   }
   static async clear(): Promise<void> {
-    DeveloperDiagnostics.stop(); await DeveloperDiagnostics.writing;
+    DeveloperDiagnostics.stop(); await DeveloperDiagnostics.writing; await DeveloperDiagnostics.timedWriting;
     for (const previous of [false, true]) { const path = DeveloperDiagnostics.path(previous); if (await fs.access(path)) { await fs.unlink(path); } }
     DeveloperDiagnostics.journalSession = -1; DeveloperDiagnostics.journalSequence = 0; DeveloperDiagnostics.journalBytes = 0;
     if (DeveloperDiagnostics.context) {
-      for (const path of [DeveloperDiagnostics.context.cacheDir + '/tinybot-performance.json', DeveloperDiagnostics.cpuProfilePath()]) {
+      for (const path of [DeveloperDiagnostics.context.cacheDir + '/tinybot-performance.json', DeveloperDiagnostics.cpuProfilePath(),
+        DeveloperDiagnostics.timedPath(), DeveloperDiagnostics.timedPath() + '.tmp']) {
         if (await fs.access(path)) { await fs.unlink(path); }
       }
     }
+    DeveloperDiagnostics.pendingTimedCapture = undefined;
+    AppStorage.setOrCreate('tinybot.diagnostics.available', false);
+    AppStorage.setOrCreate('tinybot.diagnostics.saveError', false);
     Diagnostics.clear();
     clearRecentDiagnosticLogs();
   }

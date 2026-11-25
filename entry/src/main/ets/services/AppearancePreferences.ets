@@ -4,6 +4,7 @@ import { preferences } from '@kit.ArkData';
 import { ThemeControl } from '@kit.ArkUI';
 import { AppearanceOptions, accentPalette, defaultAppearance, validateAppearance } from '../model/Appearance';
 import { makeAppearanceStyle } from '../common/AppearanceStyle';
+import { withFileMutation } from './FileMutationQueue';
 
 // Device preferences are separate from conversations and model settings.
 export class AppearancePreferences {
@@ -71,26 +72,32 @@ export class AppearancePreferences {
     AppearancePreferences.publishedDark = dark;
   }
 
-  static select(options: AppearanceOptions): void {
+  static async select(options: AppearanceOptions): Promise<void> {
     validateAppearance(options);
     const store = AppearancePreferences.store;
     if (!store || !AppearancePreferences.active) { throw new Error('Appearance storage is unavailable.'); }
-    const previous = AppearancePreferences.options;
     const serialized = JSON.stringify(options);
-    try {
-      store.putSync('appearance', serialized);
-      store.flushSync();
-      AppearancePreferences.options = JSON.parse(serialized) as AppearanceOptions;
-      AppearancePreferences.apply(AppearancePreferences.options, previous);
-    } catch (error) {
-      Diagnostics.log('error', 'appearance', 'save_failed', undefined, error as Error);
-      const attempted = AppearancePreferences.options;
-      AppearancePreferences.options = previous;
-      store.putSync('appearance', JSON.stringify(previous));
-      store.flushSync();
-      AppearancePreferences.apply(previous, attempted);
-      throw new Error((error as Error).message);
-    }
-    Diagnostics.log('info', 'appearance', 'applied');
+    await withFileMutation('preferences:tinybot-ui', async () => {
+      const previous = AppearancePreferences.options;
+      const mark = Diagnostics.begin();
+      try {
+        await store.put('appearance', serialized);
+        await store.flush();
+        AppearancePreferences.options = JSON.parse(serialized) as AppearanceOptions;
+        AppearancePreferences.apply(AppearancePreferences.options, previous);
+      } catch (error) {
+        Diagnostics.log('error', 'appearance', 'save_failed', undefined, error as Error);
+        const attempted = AppearancePreferences.options;
+        AppearancePreferences.options = previous;
+        try {
+          await store.put('appearance', JSON.stringify(previous));
+          await store.flush();
+        } finally {
+          if (attempted !== previous) { AppearancePreferences.apply(previous, attempted); }
+        }
+        throw error as Error;
+      } finally { if (Diagnostics.recording) { Diagnostics.end('appearance.save', mark); } }
+      Diagnostics.log('info', 'appearance', 'applied');
+    });
   }
 }

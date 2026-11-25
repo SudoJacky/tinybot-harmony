@@ -1,6 +1,7 @@
 import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
 import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { SearchPill } from '../common/SearchPill';
 import { chatShortcuts, NavigationShortcut } from '../common/KeyboardShortcuts';
 import { KeyboardShortcutsDialog } from '../views/KeyboardShortcutsDialog';
 import { DesktopCommandDialog } from '../views/DesktopCommandDialog';
@@ -53,12 +54,12 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { requestAppReview } from '../services/AppInformation';
 import { ReviewPreferences } from '../services/ReviewPreferences';
 import { ReviewChoice, ReviewInvitationDialog } from '../views/ReviewInvitationDialog';
-import { FrameCallback, KeyboardAvoidMode } from '@kit.ArkUI';
+import { curves, FrameCallback, KeyboardAvoidMode } from '@kit.ArkUI';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { ChatPanel } from '../views/ChatPanel';
-import { SETTINGS_CATEGORY_SWIPE_DISTANCE, SettingsCategoryBar, SettingsNavigation, settingsCategoryForSwipe } from '../views/SettingsNavigation';
+import { SETTINGS_CATEGORIES, SettingsCategory, SettingsCategoryBar, SettingsNavigation, settingsCategoryIndex } from '../views/SettingsNavigation';
 import { SettingsPanel, UserDocumentPanel } from '../views/SettingsPanel';
 import { SettingsSearchPanel } from '../views/SettingsSearchPanel';
 import { SettingsSearchItem, settingsSectionTitle } from '../model/SettingsSearch';
@@ -101,6 +102,7 @@ import { DetailTabItem, DetailTabs } from '../views/DetailTabs';
 const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
 const PC_CHAT_HEADER_HEIGHT: number = 48;
+const SETTINGS_PAGE_SPRING: ICurve = curves.interpolatingSpring(-1, 1, 360, 34);
 
 class SessionStreamFrame extends FrameCallback {
   private readonly flush: () => void;
@@ -215,7 +217,14 @@ struct Index {
   private toolsOrigin: string = 'productivity';
   @State private focusDraftRequest: number = 0;
   @State private settingsSection: string = 'models';
+  @State private settingsPageProgress: number = -1;
+  private settingsPagesScrolling: boolean = false;
   @State private settingsSearchTarget: string = '';
+  @State private settingsSearchOpen: boolean = false;
+  @State private settingsSearchQuery: string = '';
+  @State private settingsSearchWidth: number = 44;
+  private settingsSearchRevision: number = 0;
+  private settingsSearchFocusPending: boolean = false;
   @State private toolsTab: string = 'memory';
   @State private toolsTabRequest: number = 0;
 
@@ -1366,15 +1375,29 @@ struct Index {
 
   private selectSettingsSection(section: string, confirmed: boolean = false): void {
     if (this.confirmRootNavigation('settings', confirmed, () => this.selectSettingsSection(section, true))) { return; }
+    this.closeSettingsSearch();
     this.settingsSearchTarget = '';
     this.settingsSection = section;
     this.openSettings(true);
   }
 
-  private swipeSettingsSection(event: GestureEvent): void {
-    if (!this.settingsActive || !this.foreground) { return; }
-    const section = settingsCategoryForSwipe(this.settingsSection, event.offsetX, event.offsetY);
-    if (section !== undefined) { this.settingsSearchTarget = ''; this.settingsSection = section; }
+  private settingsPageChanged(index: number): void {
+    const section = SETTINGS_CATEGORIES[index]?.key;
+    if (!section || this.settingsSection === section || !this.settingsActive) { return; }
+    this.settingsSearchTarget = '';
+    this.settingsSection = section;
+  }
+
+  private settingsPageScrolled(index: number, position: number): void {
+    if (!this.settingsPagesScrolling || !this.settingsActive || this.settingsSearchOpen) { return; }
+    // Each visible page reports its own position, so their index minus position gives the same progress.
+    const progress = Math.max(0, Math.min(SETTINGS_CATEGORIES.length - 1, index - position));
+    if (Math.abs(progress - this.settingsPageProgress) >= 0.001) { this.settingsPageProgress = progress; }
+  }
+
+  private settingsPageScrollState(state: ScrollState): void {
+    this.settingsPagesScrolling = state !== ScrollState.Idle;
+    if (!this.settingsPagesScrolling) { this.settingsPageProgress = -1; }
   }
 
   private openSettings(discardConfirmed: boolean = false): void {
@@ -1396,19 +1419,51 @@ struct Index {
       if (this.app.beginProvider('', param)) { this.paths.pushPath({ name: route }); }
     } else if (route === 'productivity') { this.openTools(param); }
     else if (route === 'support') { this.openSupport(param); }
-    else { this.paths.pushPath({ name: route }); }
+    else if (route === 'ima-settings' && !knowledgeBaseAccess.enabled) { this.paths.pushPath({ name: 'knowledge-base-settings' }); }
+    else { this.paths.pushPath({ name: route, param: param || undefined }); }
   }
 
   private openSettingsSearch(): void {
+    if (this.settingsSearchOpen) { return; }
     this.settingsSearchTarget = '';
-    this.paths.pushPath({ name: 'find-settings' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
+    this.settingsPageProgress = -1;
+    this.settingsSearchRevision++;
+    this.settingsSearchFocusPending = true;
+    this.settingsSearchOpen = true;
+  }
+
+  private focusSettingsSearch(): void {
+    if (!this.settingsSearchFocusPending || !this.settingsSearchOpen || !this.settingsActive || !this.foreground) { return; }
+    this.settingsSearchFocusPending = false;
+    try { this.getUIContext().getFocusController().requestFocus('settings-search-input'); }
+    catch (error) { Diagnostics.log('warn', 'focus', 'settings_search_focus_failed', undefined, error as Error); }
+  }
+
+  private updateSettingsSearch(value: string): void {
+    const revision = this.settingsSearchRevision;
+    // Defer parent updates until the native input callback returns.
+    Promise.resolve().then(() => {
+      if (revision === this.settingsSearchRevision && this.settingsSearchOpen && this.settingsActive) {
+        this.settingsSearchQuery = value;
+      }
+    });
+  }
+
+  private closeSettingsSearch(): boolean {
+    if (!this.settingsSearchOpen) { return false; }
+    this.settingsSearchRevision++;
+    this.settingsSearchFocusPending = false;
+    this.settingsSearchOpen = false;
+    this.settingsSearchQuery = '';
+    if (this.settingsActive) { this.getUIContext().getFocusController().clearFocus(); }
+    return true;
   }
 
   private selectSettingsResult(item: SettingsSearchItem): void {
     if (item.route) { this.openSettingPage(item.route, item.param); return; }
+    this.closeSettingsSearch();
     this.settingsSection = item.section;
     this.settingsSearchTarget = item.id;
-    this.paths.pop();
   }
 
   private async openSupport(page: string): Promise<void> {
@@ -1591,15 +1646,34 @@ struct Index {
   }
 
   @Builder
-  settingsTitleActions() {
-    IconButton({ icon: $r('sys.symbol.magnifyingglass'), label: t('搜索设置'), compId: 'open-settings-search', diameter: 44, iconSize: 20,
-      onTap: () => this.openSettingsSearch() }).margin({ right: Space.sm })
+  settingsTitle() {
+    Row({ space: Space.sm }) {
+      IconButton({ chevron: 'left', label: t('返回'), compId: 'settings-back', diameter: 44,
+        onTap: () => { if (!this.closeSettingsSearch()) { this.paths.pop(); } } })
+      Stack({ alignContent: Alignment.End }) {
+        if (!this.settingsSearchOpen) {
+          Text(this.workbench().expanded ? settingsSectionTitle(this.settingsSection) : t('设置'))
+            .fontFamily(this.appearance.fontFamily).fontSize(24).fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%').padding({ right: 56 })
+        }
+        SearchPill({ open: this.settingsSearchOpen, opensLeft: true, expandedWidth: this.settingsSearchWidth,
+          label: t('搜索设置'), value: this.settingsSearchQuery, maxLength: 120,
+          pillId: 'settings-search-pill', toggleId: 'open-settings-search',
+          inputId: 'settings-search-input', closeId: 'close-settings-search', onOpen: () => this.openSettingsSearch(),
+          onClose: () => { this.closeSettingsSearch(); }, onChange: (value: string) => this.updateSettingsSearch(value),
+          onInputVisible: () => this.focusSettingsSearch() })
+      }.height(56).layoutWeight(1)
+        .onAreaChange((_previous: Area, current: Area) => { this.settingsSearchWidth = Math.max(44, Number(current.width)); })
+    }.width('100%').height(56).padding({ left: Space.page, right: Space.page })
   }
 
   @Builder
-  settingsContent() {
-    SettingsPanel({ app: this.app, section: this.settingsSection, settings: this.app.settings, account: this.account, active: this.settingsActive && this.foreground,
-      searchTarget: this.settingsSearchTarget, onAccount: () => this.openSettingPage('account'),
+  settingsContent(section: string) {
+    SettingsPanel({ app: this.app, section: section, settings: this.app.settings, account: this.account,
+      active: this.settingsActive && this.foreground && !this.settingsSearchOpen && section === this.settingsSection,
+      viewportId: 'settings-items-' + section, searchTarget: section === this.settingsSection ? this.settingsSearchTarget : '',
+      onAccount: () => this.openSettingPage('account'),
       browser: this.browser,
       onAddProvider: () => this.openSettingPage('provider-presets'),
       onUsage: () => this.openSettingPage('usage'),
@@ -1617,8 +1691,25 @@ struct Index {
       onSkills: () => this.openSettingPage('skills'),
       onUserDocument: () => this.openSettingPage('user-document'),
       onEditProvider: (id: string, _preset: string) => this.openSettingPage('provider', id) }).layoutWeight(1)
-      .gesture(PanGesture({ fingers: 1, isFingerCountLimited: true, direction: PanDirection.Horizontal,
-        distance: SETTINGS_CATEGORY_SWIPE_DISTANCE }).onActionEnd((event: GestureEvent) => this.swipeSettingsSection(event)))
+  }
+
+  @Builder
+  settingsPages() {
+    Swiper() {
+      ForEach(SETTINGS_CATEGORIES, (item: SettingsCategory) => {
+        Column() {
+          this.settingsContent(item.key)
+        }.width('100%').height('100%')
+      }, (item: SettingsCategory) => item.key)
+    }.id('settings-pages').width('100%').layoutWeight(1).clip(true)
+      .index(settingsCategoryIndex(this.settingsSection)).loop(false).indicator(false).cachedCount(1)
+      .disableSwipe(!this.settingsActive || !this.foreground || this.settingsSearchOpen)
+      .effectMode(this.appearance.effectStrength > 0 ? EdgeEffect.Spring : EdgeEffect.None)
+      .duration(this.appearance.effectStrength > 0 ? Motion.medium : 0)
+      .curve(this.appearance.effectStrength > 0 ? SETTINGS_PAGE_SPRING : Curve.Linear)
+      .onContentDidScroll((_selected: number, index: number, position: number) => this.settingsPageScrolled(index, position))
+      .onScrollStateChanged((state: ScrollState) => this.settingsPageScrollState(state))
+      .onChange((index: number) => this.settingsPageChanged(index))
   }
 
   @Builder
@@ -1748,22 +1839,27 @@ struct Index {
     } else if (name === 'settings') {
       NavDestination() {
         Column() {
-          if (!this.workbench().expanded) {
-            SettingsCategoryBar({ selected: this.settingsSection,
-              onSelect: (section: string) => { this.settingsSearchTarget = ''; this.settingsSection = section; } })
-          }
-          this.settingsContent()
+          this.settingsTitle()
+          Stack() {
+            Column() {
+              if (!this.workbench().expanded) {
+                SettingsCategoryBar({ selected: this.settingsSection, pageProgress: this.settingsPageProgress,
+                  onSelect: (section: string) => { this.settingsSearchTarget = ''; this.settingsSection = section; } })
+              }
+              this.settingsPages()
+            }.width('100%').height('100%').visibility(this.settingsSearchOpen ? Visibility.Hidden : Visibility.Visible)
+              .accessibilityLevel(this.settingsSearchOpen ? 'no-hide-descendants' : 'auto').enabled(!this.settingsSearchOpen)
+            if (this.settingsSearchOpen) {
+              SettingsSearchPanel({ app: this.app, query: this.settingsSearchQuery,
+                onSelect: (item: SettingsSearchItem) => this.selectSettingsResult(item) })
+            }
+          }.width('100%').layoutWeight(1)
         }.width('100%').height('100%')
-      }.title(this.workbench().expanded ? settingsSectionTitle(this.settingsSection) : t('设置'),
-        { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
-        .menus(this.settingsTitleActions)
-        .backgroundColor($r('app.color.page_background'))
-        .onShown(() => { this.settingsActive = true; this.rootSection = 'settings'; }).onHidden(() => { this.settingsActive = false; })
-    } else if (name === 'find-settings') {
-      NavDestination() {
-        SettingsSearchPanel({ app: this.app, onSelect: (item: SettingsSearchItem) => this.selectSettingsResult(item) })
-      }.title(t('搜索设置'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
-        .backgroundColor($r('app.color.page_background'))
+      }.hideTitleBar(true).backgroundColor($r('app.color.page_background'))
+        .onBackPressed(() => this.closeSettingsSearch())
+        .onShown(() => { this.settingsActive = true; this.rootSection = 'settings'; })
+        .onHidden(() => { this.settingsActive = false; this.settingsPageScrollState(ScrollState.Idle); })
+        .onDisAppear(() => { this.closeSettingsSearch(); })
     } else if (name === 'provider-presets') {
       NavDestination() {
         SettingsPanel({ app: this.app, section: this.windowWidth >= 840 ? this.settingsSection : '', settings: this.app.settings, account: this.account, browser: this.browser, presetsOnly: true,

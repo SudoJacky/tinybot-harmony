@@ -50,6 +50,7 @@ put('/app/attachments/a.jpg', 30);
 put('/app/attachments/b.jpg', 40);
 put('/app/attachments/c.jpg', 12);
 put('/app/tinybot-cpu.json', 7);
+put('/files/tinybot-diagnostics.json', 16);
 put('/cache/old.bin', 500, 60 * 60 * 1000);
 put('/cache/new.bin', 60, 60 * 1000);
 const fake = {
@@ -119,7 +120,7 @@ const data = {
 
   const context = { filesDir: '/files', cacheDir: '/cache', getApplicationContext: () => ({ filesDir: '/app' }) };
   const report = await StorageUsage.scan(context, data);
-  assert.equal(report.categorizedBytes, 100 + 340 + 90 + 82 + 15 + 32 + 560 + 5);
+  assert.equal(report.categorizedBytes, 100 + 340 + 90 + 82 + 15 + 48 + 560 + 5);
   assert.equal(report.bundle.totalBytes, 2300, 'system data includes cache, so total adds only installation and data');
   assert.equal(report.bundle.appBytes, 300);
   assert.equal(report.bundle.dataBytes, 2000);
@@ -127,7 +128,7 @@ const data = {
   assert.equal(report.categories.find(item => item.id === 'workspace').bytes, 340);
   assert.equal(report.categories.find(item => item.id === 'backups').bytes, 90);
   assert.equal(report.categories.find(item => item.id === 'attachments').bytes, 82);
-  assert.equal(report.categories.find(item => item.id === 'diagnostics').bytes, 32, 'CPU profile lives in the app directory');
+  assert.equal(report.categories.find(item => item.id === 'diagnostics').bytes, 48, 'Count both the CPU profile and the saved About log');
   assert.equal(report.cacheCleanBytes, 500);
   assert.equal(report.orphanAttachmentBytes, 40);
   assert.equal(report.orphanWorkspaceBytes, 200);
@@ -146,6 +147,8 @@ const data = {
   assert.equal(attachments.entries.find(item => item.label === 'c.jpg').detail, '使用中');
   const sessions = await StorageUsage.entries(context, data, 'sessions');
   assert.ok(sessions.entries.length === 1 && sessions.entries[0].removable === false && sessions.entries[0].label === 'Notes');
+  const diagnostics = await StorageUsage.entries(context, data, 'diagnostics');
+  assert.equal(diagnostics.entries.find(item => item.label === 'tinybot-diagnostics.json').bytes, 16);
   const cacheEntries = await StorageUsage.entries(context, data, 'cache');
   assert.equal(cacheEntries.entries.find(item => item.label === 'old.bin').removable, true);
   assert.equal(cacheEntries.entries.find(item => item.label === 'new.bin').removable, false);

@@ -15,7 +15,7 @@ function evaluate(file, dependencies = {}, globals = {}) {
   } });
   return exports;
 }
-const { DiagnosticsCollector, DeveloperGate } = evaluate('model/Diagnostics');
+const { DiagnosticsCollector, DeveloperGate, TIMED_DIAGNOSTICS_FILE } = evaluate('model/Diagnostics');
 const plain = value => JSON.parse(JSON.stringify(value));
 let now = 100, clocks = 0;
 const p = new DiagnosticsCollector(); p.configureClock(() => { clocks++; return now; });
@@ -71,6 +71,7 @@ ui.recording = true; ui.foreground = false; ui.syncTimer(); assert.equal(panelTi
 console.log('PASS compiled developer page stops statistics polling when recording or foreground ends');
 
 const settings = new Map(), files = new Map(), handles = new Map(), timers = new Map(), storage = new Map();
+const timeouts = new Map();
 let next = 0, watches = 0, frameStarts = 0, frameStops = 0, cpuStarts = 0, cpuStops = 0, flushFailure = false;
 let samplingGate, frameCallback;
 const collector = new DiagnosticsCollector(); collector.configureClock(() => now);
@@ -97,10 +98,13 @@ const { DeveloperDiagnostics: d } = evaluate('services/DeveloperDiagnostics', {
     startJsCpuProfiling() { cpuStarts++; }, stopJsCpuProfiling() { cpuStops++; files.set('/application-files/tinybot-cpu.json', '{}'); } },
     hiAppEvent: { domain: { OS: 'OS' }, event: { MAIN_THREAD_JANK: 'MAIN_THREAD_JANK', APP_FREEZE: 'APP_FREEZE', APP_CRASH: 'APP_CRASH', RESOURCE_OVERLIMIT: 'RESOURCE_OVERLIMIT' },
       addWatcher() { watches++; return {}; }, removeWatcher() { watches--; } } },
-  '../model/Diagnostics': { Diagnostics: collector }, './PerformanceProbe': { collectPerformanceResources() {} }, './NativeDiagnosticLog': { configureNativeDiagnosticLog() {}, clearRecentDiagnosticLogs() {} },
+  '../model/Diagnostics': { Diagnostics: collector, TIMED_DIAGNOSTICS_FILE }, '../model/I18n': { t: key => key },
+  './PerformanceProbe': { collectPerformanceResources() {} }, './NativeDiagnosticLog': { configureNativeDiagnosticLog() {}, clearRecentDiagnosticLogs() {} },
   './AppInformation': { readAppInformation: () => ({ bundleName: 'test', versionName: '0.1.6', versionCode: 10006 }) }
 }, { AppStorage: { setOrCreate: (k, v) => storage.set(k, v), get: k => storage.get(k) }, setInterval: fn => { const id = ++next; timers.set(id, fn); return id; },
-  clearInterval: id => timers.delete(id), setTimeout: fn => { const id = ++next; timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id) });
+  clearInterval: id => timers.delete(id), setTimeout: (fn, ms) => {
+    const id = ++next; timers.set(id, fn); timeouts.set(id, ms); return id;
+  }, clearTimeout: id => { timers.delete(id); timeouts.delete(id); } });
 const settle = async () => { for (let i = 0; i < 2000; i++) await Promise.resolve(); await d.writing; };
 (async () => {
   d.initialize({ filesDir: '/files', cacheDir: '/cache', getApplicationContext: () => ({ filesDir: '/application-files' }) }); d.setForeground(true);
@@ -137,6 +141,67 @@ const settle = async () => { for (let i = 0; i < 2000; i++) await Promise.resolv
   resolve(probe); await settle(); assert.equal(collector.session, previous + 1); assert.ok(!collector.snapshot().metrics.some(m => m.name === 'memory.pssSwap'));
   samplingGate = undefined; d.disable(); await settle();
   console.log('PASS native foreground/background lifecycle, worker sampling, optional frames, CPU profile stop, export/Chrome Trace, partial writes, journal rotation/failure/retry, clearing and stale async probes');
+
+  await d.clear();
+  collector.detailed = false; collector.logLevel = 'warn';
+  await assert.rejects(() => d.timedCapturePath(), /暂无可导出/);
+  d.setTimedRecording(true);
+  assert.equal(settings.get('enabled'), false, 'About captures do not unlock Developer Mode');
+  assert.equal(storage.get('tinybot.diagnostics.recording'), true);
+  assert.equal(collector.detailed, true); assert.equal(collector.logLevel, 'debug');
+  const timedSession = collector.session;
+  d.setTimedRecording(true);
+  assert.equal(collector.session, timedSession, 'Repeated enabling does not restart the clock');
+  assert.deepEqual([...timeouts.values()], [300000]);
+  await assert.rejects(() => d.timedCapturePath(), /先停止/);
+  collector.log('debug', 'web', 'navigation_blocked', { url: 'https://PRIVATE_URL', threadId: 'PRIVATE_CHAT' });
+  collector.event('test.manual');
+  d.flush(); d.setForeground(false); await settle();
+  assert.equal(files.size, 0, 'About data stays separate from Developer Mode journals');
+  assert.deepEqual([...timeouts.values()], [300000], 'Backgrounding leaves the timeout armed');
+  d.setForeground(true); d.setTimedRecording(false);
+  assert.equal(storage.get('tinybot.diagnostics.recording'), false);
+  assert.equal(timeouts.size, 0);
+  const savedPath = await d.timedCapturePath();
+  assert.equal(savedPath, '/files/' + TIMED_DIAGNOSTICS_FILE);
+  const manual = JSON.parse(files.get(savedPath));
+  assert.equal(manual.capture.recording, false);
+  assert.equal(manual.capture.detailed, true); assert.equal(manual.capture.logging.minimumLevel, 'debug');
+  assert.ok(manual.capture.events.some(event => event.name === 'test.manual'));
+  assert.equal(manual.capture.logging.records.filter(event => event.log.level === 'debug').length, 1);
+  assert.ok(!files.get(savedPath).includes('PRIVATE_'));
+  assert.equal(collector.detailed, false); assert.equal(collector.logLevel, 'warn');
+  const manualBytes = files.get(savedPath);
+  d.setTimedRecording(true); await settle();
+  collector.event('test.automatic');
+  flushFailure = true;
+  now += 300000;
+  timers.get([...timeouts.keys()][0])();
+  await d.timedWriting;
+  assert.equal(storage.get('tinybot.diagnostics.recording'), false);
+  assert.equal(storage.get('tinybot.diagnostics.saveError'), true);
+  assert.equal(timeouts.size, 0); assert.equal(watches, 0);
+  assert.equal(files.get(savedPath), manualBytes, 'A failed write preserves the last completed file');
+  await assert.rejects(() => d.timedCapturePath(), /保存失败/);
+  flushFailure = false;
+  assert.equal(await d.timedCapturePath(), savedPath);
+  const automatic = JSON.parse(files.get(savedPath));
+  assert.equal(automatic.capture.elapsedMs, 300000);
+  assert.ok(automatic.capture.events.some(event => event.name === 'test.automatic'));
+  assert.ok(!automatic.capture.events.some(event => event.name === 'test.manual'));
+  d.setTimedRecording(true); d.setForeground(false); now += 300001; d.setForeground(true);
+  assert.equal(storage.get('tinybot.diagnostics.recording'), false, 'Resuming after the deadline stops a suspended capture');
+  await d.timedCapturePath();
+  storage.delete('tinybot.diagnostics.available');
+  d.initialize({ filesDir: '/files', cacheDir: '/cache', getApplicationContext: () => ({ filesDir: '/application-files' }) });
+  await settle();
+  assert.equal(storage.get('tinybot.diagnostics.available'), true, 'A new launch discovers the saved log');
+  assert.equal(collector.recording, false);
+  d.enable();
+  assert.throws(() => d.setTimedRecording(true), /开发者模式/);
+  d.disable(); await d.clear();
+  assert.equal(storage.get('tinybot.diagnostics.available'), false); assert.ok(!files.has(savedPath));
+  console.log('PASS About diagnostic logs support manual stop, five-minute timeout, background expiry, sanitized export, failed-write retry and restart retention');
   const cache = new Map(), wire = new TextEncoder();
   const source = 'PRIVATE_RESPONSE_请勿记录';
   const nativeHttp = { RequestMethod: { POST: 1 }, createHttp: () => {

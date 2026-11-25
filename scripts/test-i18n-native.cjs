@@ -10,8 +10,8 @@ const cache = new Map(), stored = new Map(), visible = new Map();
 let systemLanguage = 'zh-Hans-CN', failFlush = false, failRead = false;
 const preferenceStore = {
   getSync: (key, fallback) => stored.has(key) ? stored.get(key) : fallback,
-  putSync: (key, value) => stored.set(key, value),
-  flushSync: () => { if (failFlush) throw new Error('Injected storage failure'); }
+  put: async (key, value) => stored.set(key, value),
+  flush: async () => { if (failFlush) { failFlush = false; throw new Error('Injected storage failure'); } }
 };
 const kits = {
   '@kit.ArkData': { preferences: { getPreferencesSync: () => {
@@ -35,32 +35,33 @@ const { LanguagePreferences: language } = load(path.join(root, 'services/Languag
 const languageLogs = [];
 load(path.join(root, 'model/Diagnostics')).Diagnostics.configureLogSink(data => languageLogs.push(data));
 const { getLocale, t } = load(path.join(root, 'model/I18n'));
-language.initialize({});
-assert.equal(getLocale(), 'zh-CN');
-systemLanguage = 'en-US'; language.refresh();
-assert.equal(t('保存'), 'Save');
-language.select('zh-CN');
-assert.equal(stored.get('language'), 'zh-CN');
-systemLanguage = 'en-GB'; language.refresh();
-assert.equal(t('保存'), '保存');
-language.initialize({});
-assert.equal(getLocale(), 'zh-CN');
-failFlush = true;
-assert.throws(() => language.select('en'), /Injected/);
-assert.equal(languageLogs.at(-1).event, 'save_failed');
-assert.equal(stored.get('language'), 'zh-CN');
-assert.equal(visible.get('tinybot.locale'), 'zh-CN');
-failFlush = false;
-language.select('system');
-assert.equal(getLocale(), 'en');
-systemLanguage = 'zh-TW'; language.refresh();
-assert.equal(getLocale(), 'zh-CN');
-stored.set('language', 'unsupported'); language.initialize({});
-assert.equal(visible.get('tinybot.language'), 'system');
-failRead = true; language.initialize({}); failRead = false;
-assert.equal(languageLogs.at(-1).event, 'load_failed'); assert.equal(languageLogs.at(-1).fields.errorCode, 15500019);
-assert.ok(!JSON.stringify(languageLogs).includes('PRIVATE_PREFERENCE_PATH'));
-console.log('PASS system changes, explicit override, restart persistence, save failure rollback and invalid preference fallback');
+async function testLanguagePreferences() {
+  language.initialize({});
+  assert.equal(getLocale(), 'zh-CN');
+  systemLanguage = 'en-US'; language.refresh();
+  assert.equal(t('保存'), 'Save');
+  await language.select('zh-CN');
+  assert.equal(stored.get('language'), 'zh-CN');
+  systemLanguage = 'en-GB'; language.refresh();
+  assert.equal(t('保存'), '保存');
+  language.initialize({});
+  assert.equal(getLocale(), 'zh-CN');
+  failFlush = true;
+  await assert.rejects(() => language.select('en'), /Injected/);
+  assert.equal(languageLogs.at(-1).event, 'save_failed');
+  assert.equal(stored.get('language'), 'zh-CN');
+  assert.equal(visible.get('tinybot.locale'), 'zh-CN');
+  await language.select('system');
+  assert.equal(getLocale(), 'en');
+  systemLanguage = 'zh-TW'; language.refresh();
+  assert.equal(getLocale(), 'zh-CN');
+  stored.set('language', 'unsupported'); language.initialize({});
+  assert.equal(visible.get('tinybot.language'), 'system');
+  failRead = true; language.initialize({}); failRead = false;
+  assert.equal(languageLogs.at(-1).event, 'load_failed'); assert.equal(languageLogs.at(-1).fields.errorCode, 15500019);
+  assert.ok(!JSON.stringify(languageLogs).includes('PRIVATE_PREFERENCE_PATH'));
+  console.log('PASS system changes, explicit override, restart persistence, save failure rollback and invalid preference fallback');
+}
 
 async function testLanguagePage() {
   const source = path.join(root, 'views/LanguagePanel.ets');
@@ -98,4 +99,4 @@ async function testLanguagePage() {
   assert.equal(leaving.selecting, false);
   console.log('PASS language page: immediate selection, draft-save ordering, duplicate clicks, save failure/retry, busy guard and navigation cleanup');
 }
-testLanguagePage().catch(error => { console.error(error); process.exitCode = 1; });
+testLanguagePreferences().then(testLanguagePage).catch(error => { console.error(error); process.exitCode = 1; });

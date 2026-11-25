@@ -126,7 +126,7 @@ export struct ImaSettingsPanel {
               .onChange((value: string) => { this.apiKey = value; this.clearFeedback(); })
             GroupCard() {
               SwitchRow({ title: t('允许助手访问腾讯 ima'), isOn: this.accessEnabled, compId: 'ima-enabled',
-                subtitle: t('搜索词会发送给腾讯 ima，返回的资料可能发送给当前模型。'),
+                subtitle: t('搜索词、导入链接和上传的文件会发送给腾讯 ima。读取的资料可能发送给当前模型。'),
                 onChange: (value: boolean) => { this.accessEnabled = value; this.clearFeedback(); } })
             }
           }.width('100%').enabled(this.ready && !this.busy)

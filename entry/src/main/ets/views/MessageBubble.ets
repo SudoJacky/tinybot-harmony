@@ -166,8 +166,8 @@ struct ToolRow {
           }
         }.translate({ y: this.glyphShift }).opacity(this.glyphOpacity)
         Stack({ alignContent: Alignment.Center }) {
-          Chevron({ pointing: 'down' })
-        }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
+          Chevron({ pointing: 'right', subtle: true })
+        }.width(16).height(16).rotate({ angle: this.disclosure.open ? 90 : 0 })
       }.id('tool-' + this.execution.call.id).width('100%').height(PROCESS_ROW_HEIGHT)
       .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + toolTitle(this.name()) + ' ' + toolStatusLabel(this.execution.status))
       .onClick(() => {
@@ -631,8 +631,8 @@ export struct MessageBubble {
           }
           if (this.timeline().length > 0 && (this.message.status === 'generating' || this.foldable())) {
             Stack({ alignContent: Alignment.Center }) {
-              Chevron({ pointing: 'down' })
-            }.width(16).height(16).rotate({ angle: this.folded() ? 0 : 180 })
+              Chevron({ pointing: 'right', subtle: true })
+            }.width(16).height(16).rotate({ angle: this.folded() ? 0 : 90 })
               .animation({ duration: 280, curve: Motion.standard })
           }
         }.id('process-' + this.message.id).height(32).width('100%')

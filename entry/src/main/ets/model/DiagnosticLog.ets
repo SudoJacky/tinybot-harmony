@@ -59,7 +59,8 @@ EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save
 EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'cache_release_failed', 'replace_failed', 'retire_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
   'restore_completed', 'restore_failed', 'local_export_failed', 'local_import_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
   'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed', 'auto_failed', 'auto_settings_failed', 'auto_task_failed', 'auto_expired', 'auto_release_failed',
-  'webdav_failed', 'webdav_cleanup_failed', 'webdav_uploaded', 'webdav_settings_failed'];
+  'webdav_failed', 'webdav_cleanup_failed', 'webdav_uploaded', 'webdav_settings_failed',
+  'deepseek_download_failed', 'deepseek_download_cleanup_failed'];
 EVENTS.sync = ['device_discovery_failed', 'device_store_close_failed', 'device_published', 'device_transfer_failed', 'dfs_status'];
 EVENTS['life-panel'] = ['published', 'refresh_skipped', 'refresh_started', 'refresh_complete', 'refresh_cancelled', 'refresh_failed', 'manifest_failed', 'action_failed', 'expiry_failed', 'connection_failed', 'api_response', 'api_failed', 'transform_started', 'transform_complete', 'transform_failed'];
 EVENTS.background = ['acquired', 'released', 'cancelled', 'suspended', 'release_failed', 'stop_failed', 'transition_failed', 'window_expired'];
@@ -67,7 +68,7 @@ EVENTS.notification = ['authorization_checked', 'authorization_denied', 'authori
 EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'recognition_failed', 'cancel_failed', 'playback_requested', 'playback_failed', 'cleanup_failed', 'late_cleanup_failed'];
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
-EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
+EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested', 'settings_search_focus_failed'];
 EVENTS.onboarding = ['haptic_failed'];
 EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated',
   'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed', 'keyboard_shortcuts_open_failed',
@@ -115,7 +116,8 @@ STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir
   'connect', 'login', 'examine', 'search', 'fetch', 'identify', 'capability',
   'discover', 'balance', 'credential_read', 'credential_write', 'credential_remove', 'save_config', 'response', 'streaming', 'connecting', 'attachment', 'log',
   'PUT', 'MOVE', 'DELETE', 'GET', 'PROPFIND', 'MKCOL', 'local', 'remote', 'haptic_step', 'haptic_complete',
-  'search_knowledge_base', 'get_knowledge_list', 'search_knowledge'];
+  'search_knowledge_base', 'get_knowledge_list', 'search_knowledge', 'get_knowledge_base',
+  'get_addable_knowledge_base_list', 'get_media_info', 'get_doc_content', 'check_repeated_names', 'create_media', 'import_urls', 'add_knowledge'];
 STRINGS.credentialScope = ['provider', 'search', 'mcp', 'backup'];
 STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled'];
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser', 'ima'];

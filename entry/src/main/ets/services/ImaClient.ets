@@ -11,13 +11,43 @@ import { knowledgeBaseAccess } from './KnowledgeBaseAccess';
 import { NetworkTransfers } from './NetworkTransfers';
 
 export const IMA_SETUP_URL: string = 'https://ima.qq.com/agent-interface';
-const IMA_API_URL: string = 'https://ima.qq.com/openapi/wiki/v1/';
+const IMA_API_URL: string = 'https://ima.qq.com/openapi/';
 const IMA_ASSET: string = 'tinybot-ima-connection';
 
 export interface ImaSettings { clientId: string; enabled: boolean; }
 interface ImaConnection extends ImaSettings { apiKey: string; }
-export type ImaMethod = 'search_knowledge_base' | 'get_knowledge_list' | 'search_knowledge';
-export interface ImaRequest { cursor: string; query?: string; limit?: number; knowledge_base_id?: string; folder_id?: string; }
+export type ImaMethod = 'search_knowledge_base' | 'get_knowledge_list' | 'search_knowledge' | 'get_knowledge_base' |
+  'get_addable_knowledge_base_list' | 'get_media_info' | 'get_doc_content' | 'check_repeated_names' | 'create_media' |
+  'import_urls' | 'add_knowledge';
+export interface ImaRequest {
+  cursor?: string;
+  query?: string;
+  limit?: number;
+  ids?: string[];
+  knowledge_base_id?: string;
+  folder_id?: string;
+  media_id?: string;
+  media_type?: number;
+  title?: string;
+  note_id?: string;
+  target_content_format?: number;
+  urls?: string[];
+  params?: ImaNamedMedia[];
+  file_name?: string;
+  file_ext?: string;
+  file_size?: number;
+  content_type?: string;
+  file_info?: ImaFileInfo;
+  note_info?: ImaContentInfo;
+  session_info?: ImaContentInfo;
+}
+export interface ImaNamedMedia { name: string; media_type: number; }
+interface ImaContentInfo { content_id: string; }
+export interface ImaFileInfo { cos_key: string; file_size: number; last_modify_time: number; file_name: string; }
+export interface ImaSession {
+  query: (method: ImaMethod, input: ImaRequest) => Promise<Object>;
+  checkAccess: () => void;
+}
 interface ImaResponse { code: number; msg?: string; data?: Object; }
 
 function validHeader(value: string): boolean { return /^[!-~]+$/.test(value); }
@@ -95,10 +125,15 @@ export class ImaClient {
   }
 
   async query(method: ImaMethod, input: ImaRequest, cancellation: Cancellation): Promise<Object> {
+    return this.withAccess(cancellation, (session) => session.query(method, input));
+  }
+
+  async withAccess<T>(cancellation: Cancellation, operation: (session: ImaSession) => Promise<T>): Promise<T> {
     cancellation.check();
     const revision = this.revision;
     const accessRevision = knowledgeBaseAccess.revision;
     const checkAccess = (): void => {
+      cancellation.check();
       if (!this.enabled || this.revision !== revision || knowledgeBaseAccess.revision !== accessRevision) {
         throw new ToolFailure('NOT_CONFIGURED', t('腾讯 ima 连接已关闭或已更改，请检查设置。'), 'check_settings');
       }
@@ -108,8 +143,11 @@ export class ImaClient {
     if (!value?.enabled) {
       throw new ToolFailure('NOT_CONFIGURED', t('腾讯 ima 连接已关闭或已更改，请检查设置。'), 'check_settings');
     }
-    const result = await this.request(method, input, value, cancellation, checkAccess);
-    cancellation.check();
+    const session: ImaSession = {
+      query: (method, input) => this.request(method, input, value, cancellation, checkAccess),
+      checkAccess: checkAccess
+    };
+    const result = await operation(session);
     checkAccess();
     return result;
   }
@@ -135,7 +173,7 @@ export class ImaClient {
         unsubscribe = cancellation.onCancel(() => finish(undefined, new RunCancelledError()));
         if (settled) { return; }
         CompatHttp.request({
-          url: IMA_API_URL + method, method: 'POST',
+          url: IMA_API_URL + (method === 'get_doc_content' ? 'note/v1/' : 'wiki/v1/') + method, method: 'POST',
           headers: { 'Content-Type': 'application/json; charset=utf-8', 'ima-openapi-clientid': value.clientId, 'ima-openapi-apikey': value.apiKey },
           body: JSON.stringify(input), connectTimeout: 10000, readTimeout: 30000, maxBytes: 256 * 1024, dataType: 'string', redirect: 'refuse'
         }, (stop: () => void) => { abort = stop; })

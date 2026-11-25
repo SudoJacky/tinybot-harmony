@@ -183,19 +183,24 @@ export struct OnboardingPanel {
 
   private clearValidation(): void { this.error = ''; this.invalidField = ''; }
 
-  private setLanguage(value: AppLanguage): void {
+  private async setLanguage(value: AppLanguage): Promise<void> {
     if (this.blocked() || value === this.language) { return; }
+    this.saving = true;
     this.error = '';
-    try { LanguagePreferences.select(value); }
-    catch (error) { this.error = this.t('无法保存语言设置，请重试。') + ' ' + (error as Error).message; }
+    try { await LanguagePreferences.select(value); }
+    catch (error) { if (this.mounted) { this.error = this.t('无法保存语言设置，请重试。') + ' ' + (error as Error).message; } }
+    finally { this.saving = false; }
   }
 
-  private setMode(mode: AppearanceMode): void {
+  private async setMode(mode: AppearanceMode): Promise<void> {
     if (this.blocked() || mode === this.options.mode) { return; }
     const next = copyAppearance(this.options);
     next.mode = mode;
-    try { this.error = ''; AppearancePreferences.select(next); }
-    catch (error) { this.error = this.t('无法保存外观设置，请重试。') + ' ' + (error as Error).message; }
+    this.saving = true;
+    this.error = '';
+    try { await AppearancePreferences.select(next); }
+    catch (error) { if (this.mounted) { this.error = this.t('无法保存外观设置，请重试。') + ' ' + (error as Error).message; } }
+    finally { this.saving = false; }
   }
 
   private modeLabel(mode: AppearanceMode): string {

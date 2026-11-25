@@ -11,6 +11,18 @@ import { NativeWorkspaceFiles } from './NativeWorkspaceFiles';
 import { attachmentContext } from '../model/AttachmentContext';
 import { createEmptyPixel } from './EmptyPixel';
 
+function safeAttachmentName(value: string): string {
+  const name = value.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').slice(-200);
+  return !name || ['.', '..'].includes(name) || name.startsWith('.tinybot-') ? 'file' : name;
+}
+
+function documentMime(name: string): string {
+  return /\.pdf$/i.test(name) ? 'application/pdf' : /\.docx$/i.test(name) ?
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : /\.xlsx$/i.test(name) ?
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : /\.pptx$/i.test(name) ?
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/octet-stream';
+}
+
 export class Attachments {
   private static root: string = '';
   private static filesDir: string = '';
@@ -48,6 +60,24 @@ export class Attachments {
       finally { await pixel.release(); }
     } finally { await source.release(); }
   }
+  static async saveImportedFile(bytes: ArrayBuffer, fileName: string, photo: boolean): Promise<Attachment> {
+    const name = safeAttachmentName(fileName);
+    if (photo) { return Attachments.saveInspection(new Uint8Array(bytes), name); }
+    if (!Attachments.root) { throw new Error(t('附件存储尚未就绪。')); }
+    const id = util.generateRandomUUID();
+    const item: Attachment = { id: id, name: name, mime: documentMime(name), path: 'attachments/' + id + '/' + name,
+      size: bytes.byteLength, original: true };
+    const directory = Attachments.root + '/attachments/' + id;
+    await fs.mkdir(directory, true);
+    try { await writeBytes(Attachments.path(item), bytes); }
+    catch (error) { await fs.rmdir(directory); throw error as Error; }
+    return item;
+  }
+  static async discardImportedFile(item: Attachment): Promise<void> {
+    const path = Attachments.path(item);
+    if (item.original) { await fs.rmdir(path.slice(0, path.lastIndexOf('/'))); }
+    else { await fs.unlink(path); }
+  }
   static saveBrowserAnnotation(pixel: image.PixelMap): Promise<Attachment> {
     return Attachments.saveImage(pixel, t('网页批注.jpg'));
   }
@@ -81,7 +111,9 @@ export class Attachments {
     if (bytes.byteLength > 4 * 1024 * 1024) { throw new Error(t('压缩后图片仍超过 4 MB。')); }
     const id = util.generateRandomUUID();
     const item: Attachment = { id: id, name: name, mime: 'image/jpeg', path: id + '.jpg', size: bytes.byteLength };
-    await writeBytes(Attachments.path(item), bytes);
+    const path = Attachments.path(item);
+    try { await writeBytes(path, bytes); }
+    catch (error) { if (await fs.access(path)) { await fs.unlink(path); } throw error as Error; }
     return item;
   }
   static async import(uri: string, photo: boolean): Promise<Attachment> {
@@ -90,17 +122,12 @@ export class Attachments {
     const id = util.generateRandomUUID();
     let name = uri.slice(uri.lastIndexOf('/') + 1).split('?')[0];
     try { name = decodeURIComponent(name); } catch (_) { /* Keep literal URI name. */ }
-    name = name.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').slice(-200);
-    if (!name || ['.', '..'].includes(name) || name.startsWith('.tinybot-')) { name = 'file'; }
+    name = safeAttachmentName(name);
     if (!photo) {
       const relative = 'attachments/' + id + '/' + name;
       await fs.mkdir(Attachments.root + '/attachments/' + id, true);
       const size = await copyFileBytes(uri, Attachments.root + '/' + relative);
-      const mime = /\.pdf$/i.test(name) ? 'application/pdf' : /\.docx$/i.test(name) ?
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : /\.xlsx$/i.test(name) ?
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : /\.pptx$/i.test(name) ?
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/octet-stream';
-      return { id: id, name: name, mime: mime, path: relative, size: size, original: true };
+      return { id: id, name: name, mime: documentMime(name), path: relative, size: size, original: true };
     }
     const file = await fs.open(uri, fs.OpenMode.READ_ONLY);
     try {

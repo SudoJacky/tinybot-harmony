@@ -252,6 +252,23 @@ export class SessionService {
       catch (error) { throw new Error(t('主要数据已导入，附加数据恢复未完成，请重试：{0}', [(error as Error).message])); }
     });
   }
+  async importDeepSeek(threads: ThreadData[], prepare: (added: ThreadData[]) => Promise<() => Promise<void>>): Promise<number> {
+    let count = 0;
+    const ok = await this.mutate('', async () => {
+      const existing = new Set(this.data.threads.map(thread => thread.id));
+      const added = threads.filter(thread => !existing.has(thread.id));
+      if (!added.length) { return; }
+      const candidate = copyAppMetadata(this.data);
+      candidate.threads = added.concat(this.data.threads);
+      const rollback = await prepare(added);
+      try {
+        await this.commitCandidate(candidate, () => { this.data.threads = candidate.threads; },
+          this.draftWriteIds(added.map(thread => thread.id)));
+        count = added.length;
+      } catch (error) { await rollbackBackupFailure(error as Error, rollback); }
+    }, 'snapshot', 'shared', false);
+    return ok ? count : -1;
+  }
   private get active(): ThreadData { return this.requireThread(this.data.activeThreadId); }
   private get providerProfiles(): ProviderProfile[] { return this.data.providerProfiles || []; }
   private get extensions(): ExtensionSettings { return this.data.extensions || defaultExtensions(); }
@@ -308,22 +325,28 @@ export class SessionService {
 
   async saveSearch(draft: SearchDraft): Promise<boolean> {
     return this.mutate('', async () => {
-      this.status.error = await saveSearchSettings(this.snapshot(), draft, this.credentials, () => this.resources.createId(), (candidate) => this.commitSettings(candidate));
-    });
+      this.status.error = await saveSearchSettings(copyAppMetadata(this.data), draft, this.credentials, () => this.resources.createId(),
+        (candidate) => this.commitPreferences({ config: this.data.config, extensions: this.extensions,
+          productivity: candidate.productivity || defaultProductivity() }));
+    }, 'preferences');
   }
   async saveProductivity(value: ProductivityData): Promise<boolean> {
+    const memoriesChanged = JSON.stringify(value.memories) !== JSON.stringify(this.data.productivity?.memories || []);
     return this.mutate(t("保存资料失败："), async () => {
       validateProductivity(value);
       if (memoryCharacters(value.memories) > MEMORY_CHAR_LIMIT && memoryCharacters(value.memories) > memoryCharacters(this.data.productivity?.memories || [])) {
         throw new Error(t('记忆容量不足：{0}/100 条，{1}/{2} 字符。请先整理已有记忆；本次未保存任何变更。',
           [value.memories.length, memoryCharacters(value.memories), MEMORY_CHAR_LIMIT]));
       }
-      const candidate = this.snapshot(); candidate.productivity = JSON.parse(JSON.stringify(value)) as ProductivityData;
-      if (JSON.stringify(value.memories) !== JSON.stringify(this.data.productivity?.memories || [])) {
-        for (const thread of candidate.threads) { thread.memorySnapshot = undefined; }
+      const productivity = JSON.parse(JSON.stringify(value)) as ProductivityData;
+      if (!memoriesChanged) {
+        await this.commitPreferences({ config: this.data.config, extensions: this.extensions, productivity: productivity });
+        return;
       }
+      const candidate = this.snapshot(); candidate.productivity = productivity;
+      for (const thread of candidate.threads) { thread.memorySnapshot = undefined; }
       await this.commitSettings(candidate);
-    });
+    }, memoriesChanged ? 'snapshot' : 'preferences');
   }
   async refreshMemoryContext(): Promise<boolean> {
     return this.mutate(t('刷新记忆失败：'), async () => {
@@ -673,7 +696,8 @@ export class SessionService {
     this.draftRevision++; this.dirtyDrafts.add(this.active.id); this.publish('snapshot');
   }
   async flushDraft(): Promise<void> {
-    if (!this.application.ready || this.application.phase === 'saving' || this.application.saveError.length > 0) { return; }
+    if (!this.application.ready || this.application.phase === 'saving' || this.application.saveError.length > 0 ||
+      this.dirtyDrafts.size === 0) { return; }
     // Runtime checkpoints and draft writes use the repository's same ordered save lane.
     try { await this.persist(this.data.activeThreadId); } catch (_) { /* persist publishes the retained unsaved state. */ }
   }
@@ -777,6 +801,7 @@ export class SessionService {
     }, 'preferences');
   }
   async setSettingsToggle(kind: SettingsToggle, value: boolean): Promise<boolean> {
+    const affectsContext = kind === 'autoMemory' || kind === 'readOnly' || kind === 'webEnabled';
     return this.mutate(t("保存助手设置失败："), async () => {
       if (typeof value !== 'boolean') { throw new Error('Invalid settings toggle value.'); }
       const preferences = this.preferencesSnapshot();
@@ -790,7 +815,7 @@ export class SessionService {
       else { throw new Error('Invalid settings toggle.'); }
       preferences.productivity.options = options;
       await this.commitPreferences(preferences);
-    }, 'preferences');
+    }, 'preferences', 'shared', affectsContext);
   }
   async saveImageGeneration(value?: ImageGenerationConfig): Promise<boolean> {
     return this.mutate('', async () => {
@@ -1608,7 +1633,8 @@ export class SessionService {
     await previous;
     try { return await action(); } finally { release(); }
   }
-  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'selection' | 'preferences' | 'state' = 'snapshot', scope: 'shared' | 'thread' | 'navigation' = 'shared'): Promise<boolean> {
+  private async mutate(prefix: string, action: () => Promise<void>, publication: 'snapshot' | 'selection' | 'preferences' | 'state' = 'snapshot',
+    scope: 'shared' | 'thread' | 'navigation' = 'shared', affectsContext: boolean = true): Promise<boolean> {
     if (!(scope === 'shared' ? this.canMutateShared : scope === 'navigation' ? this.canNavigate : this.canMutate)) { return false; }
     const startedAt = Date.now();
     const draftRevision = this.draftRevision;
@@ -1619,9 +1645,9 @@ export class SessionService {
     try {
       await this.exclusive(action);
       // A settings commit must not overwrite typing that happened while disk/key IO was pending.
-      await this.persistDraftChanges(draftRevision);
+      await this.persistDraftChanges(draftRevision, publication === 'preferences' ? this.data.activeThreadId : undefined);
       // State-only mutations publish their own field changes and leave the retained context intact.
-      if (publication !== 'state' && this.status.phase === 'idle') { this.refreshContext(); }
+      if (affectsContext && publication !== 'state' && this.status.phase === 'idle') { this.refreshContext(); }
       return true;
     }
     catch (error) { this.status.error = prefix + (error as Error).message; this.resources.reportError('mutation_failed', error as Error); return false; }

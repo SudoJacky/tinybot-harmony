@@ -1,4 +1,6 @@
 import { LogData, LogFields, LogLevel, LogSanitizer, knownLogEvent, logRank, LOG_LEVELS } from './DiagnosticLog';
+export const TIMED_DIAGNOSTICS_FILE: string = 'tinybot-diagnostics.json';
+
 export interface PerfValues {
   batchSize?: number;
   current?: number;

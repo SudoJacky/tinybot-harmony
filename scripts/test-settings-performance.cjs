@@ -50,7 +50,7 @@ function holdSave() {
 function panel(app) {
   const toasts = [];
   const value = Object.assign(new globals.exports.Panel(), { app, settings: app.settings,
-    pendingSave: Promise.resolve(), toggleRevisions: new Map(), appearance: {},
+    toggleRevisions: new Map(), appearance: {},
     getUIContext: () => ({ getPromptAction: () => ({ showToast: value => toasts.push(value.message) }) }) });
   value.resetAssistantDraft(); return { value, toasts };
 }
@@ -76,9 +76,11 @@ const watchdog = setTimeout(() => { throw Error('Settings performance tests did 
   const threadViews = app.threads, messages = app.active.messages, captureIds = [];
   const save = f.repository.save.bind(f.repository);
   f.repository.save = (data, ids) => { captureIds.push(ids); return save(data); };
-  const start = performance.now(); ui.value.saveToggle('readOnly', true); await held.waitForEntry(ui.value.pendingSave);
+  const start = performance.now();
+  const toggleSave = ui.value.saveToggle('readOnly', true);
+  await held.waitForEntry(toggleSave);
   const editableDuringSave = ui.value.canEdit();
-  held.resume(); await ui.value.pendingSave;
+  held.resume(); await toggleSave;
   console.log(JSON.stringify({ editableDuringSave, snapshots, messageUpdates, contextMs: Math.round(contextMs), saveMs: Math.round(performance.now() - start) }));
   assert.equal(editableDuringSave, true, 'Saving one toggle must leave unrelated settings editable');
   assert.equal(snapshots, 0, 'A preference change must not copy all transcripts');
@@ -86,6 +88,21 @@ const watchdog = setTimeout(() => { throw Error('Settings performance tests did 
   assert.equal(app.productivity.options.readOnly, true);
   assert.equal(app.threads, threadViews); assert.equal(app.active.messages, messages);
   assert.equal(captureIds.length, 1); assert.equal(captureIds[0].length, 0, 'Reuse unchanged transcript files');
+  await app.flushDraft();
+  assert.equal(captureIds.length, 1, 'A clean draft does not trigger a save before changing the language');
+  const productivity = { ...app.productivity, options: { ...app.productivity.options,
+    title: { providerId: 'fixture-provider', modelId: 'fixture-model' } } };
+  assert.equal(await f.session.saveProductivity(productivity), true, f.session.state.error);
+  assert.equal(await f.session.saveSearch({ provider: 'bing-browser', enabled: true, baseUrl: '', apiKey: '' }),
+    true, f.session.state.error);
+  assert.equal(app.productivity.options.title.modelId, 'fixture-model');
+  assert.equal(app.productivity.options.search.provider, 'bing-browser');
+  assert.equal(snapshots, 0, 'Model and search settings reuse the existing transcripts');
+  assert.equal(messageUpdates, 0, 'Model and search settings do not update message views');
+  assert.equal(app.threads, threadViews);
+  assert.equal(app.active.messages, messages);
+  assert.equal(captureIds.length, 3);
+  assert.ok(captureIds.every(ids => ids.length === 0));
   MessageViewModel.prototype.update = update;
   console.log('PASS responsive settings and transcript-independent preference saves');
 
@@ -97,8 +114,11 @@ const watchdog = setTimeout(() => { throw Error('Settings performance tests did 
   assert.equal(startupApp.active.id, 'thread-1', 'Older settings resume the last chat by default');
   assert.equal(startupApp.settings.newChatOnStartup, false);
   const startupPanel = panel(startupApp).value;
-  startupPanel.saveToggle('newChatOnStartup', true);
-  await startupPanel.pendingSave;
+  let startupContextRefreshes = 0;
+  const refreshStartupContext = startup.session.refreshContext.bind(startup.session);
+  startup.session.refreshContext = () => { startupContextRefreshes++; refreshStartupContext(); };
+  await startupPanel.saveToggle('newChatOnStartup', true);
+  assert.equal(startupContextRefreshes, 0, 'Startup preferences do not change the current request context');
   assert.equal(startupApp.active.id, 'thread-1', 'Saving only affects the next cold launch');
   const savedStartup = await startup.repository.load();
   assert.equal(savedStartup.config.newChatOnStartup, true);
@@ -118,8 +138,7 @@ const watchdog = setTimeout(() => { throw Error('Settings performance tests did 
   await repeated.session.initialize();
   assert.equal(repeated.session.snapshot().activeThreadId, blank.id);
   assert.equal(repeated.session.snapshot().threads.length, 2, 'An untouched startup chat is reused');
-  startupPanel.saveToggle('newChatOnStartup', false);
-  await startupPanel.pendingSave;
+  await startupPanel.saveToggle('newChatOnStartup', false);
   const reopened = new Fixture(await startup.repository.load());
   await reopened.session.initialize();
   assert.equal(reopened.session.snapshot().activeThreadId, 'thread-1');
@@ -177,15 +196,13 @@ const watchdog = setTimeout(() => { throw Error('Settings performance tests did 
 
   const rapid = await setup(), first = holdSave(); let attempts = 0;
   rapid.f.repository.beforeSave = async () => { if (++attempts === 1) await first.pause(); };
-  rapid.value.saveToggle('readOnly', true); await first.waitForEntry(rapid.value.pendingSave);
-  rapid.value.saveToggle('autoMemory', true);
-  rapid.value.saveToggle('readOnly', false);
-  rapid.value.saveToggle('saveSummary', true);
-  rapid.value.saveToggle('webEnabled', false);
-  rapid.value.saveToggle('autoCompact', false);
+  const firstRapidSave = rapid.value.saveToggle('readOnly', true);
+  await first.waitForEntry(firstRapidSave);
+  const rapidSaves = [firstRapidSave, rapid.value.saveToggle('autoMemory', true), rapid.value.saveToggle('readOnly', false),
+    rapid.value.saveToggle('saveSummary', true), rapid.value.saveToggle('webEnabled', false), rapid.value.saveToggle('autoCompact', false)];
   assert.equal(rapid.value.assistantDraft.readOnly, false);
   assert.equal(rapid.value.assistantDraft.autoMemory, true); assert.equal(rapid.app.settings.webEnabled, false);
-  first.resume(); await rapid.value.pendingSave;
+  first.resume(); await Promise.all(rapidSaves);
   const saved = await rapid.f.repository.load();
   assert.equal(attempts, 6); assert.equal(saved.productivity.options.readOnly, false);
   assert.equal(saved.productivity.options.autoMemory, true); assert.equal(saved.productivity.options.saveSummary, true);
@@ -195,19 +212,19 @@ const watchdog = setTimeout(() => { throw Error('Settings performance tests did 
 
   const failed = await setup(), lateFailure = holdSave(); let writes = 0;
   failed.f.repository.beforeSave = async () => { if (++writes === 1) { await lateFailure.pause(); throw Error('disk unavailable'); } };
-  failed.value.saveToggle('readOnly', true); await lateFailure.waitForEntry(failed.value.pendingSave);
-  failed.value.saveToggle('readOnly', false); failed.value.saveToggle('autoMemory', true);
-  lateFailure.resume(); await failed.value.pendingSave;
+  const firstFailedSave = failed.value.saveToggle('readOnly', true);
+  await lateFailure.waitForEntry(firstFailedSave);
+  const afterFailure = [failed.value.saveToggle('readOnly', false), failed.value.saveToggle('autoMemory', true)];
+  lateFailure.resume(); await Promise.all([firstFailedSave, ...afterFailure]);
   assert.equal(failed.value.assistantDraft.readOnly, false); assert.equal(failed.app.productivity.options.readOnly, false);
   assert.equal(failed.value.assistantDraft.autoMemory, true); assert.equal(failed.app.productivity.options.autoMemory, true);
   assert.equal(failed.toasts.length, 1); assert.match(failed.toasts[0], /disk unavailable/);
   assert.ok(failed.f.resources.errors.some(message => message.includes('disk unavailable')));
   failed.f.repository.beforeSave = async () => { throw Error('still unavailable'); };
-  failed.value.saveToggle('autoMemory', false); failed.value.saveToggle('webEnabled', false);
-  await failed.value.pendingSave;
+  await Promise.all([failed.value.saveToggle('autoMemory', false), failed.value.saveToggle('webEnabled', false)]);
   assert.equal(failed.value.assistantDraft.autoMemory, true); assert.equal(failed.app.settings.webEnabled, true);
   failed.f.repository.beforeSave = async () => {};
-  failed.value.saveToggle('saveSummary', true); await failed.value.pendingSave;
+  await failed.value.saveToggle('saveSummary', true);
   assert.equal(failed.app.productivity.options.saveSummary, true, 'A failed save must not poison later saves');
   console.log('PASS failed saves report errors, roll back only their field and leave the queue usable');
 
@@ -216,9 +233,12 @@ const watchdog = setTimeout(() => { throw Error('Settings performance tests did 
   const changed = [], originalSave = drafts.f.repository.save.bind(drafts.f.repository);
   drafts.f.repository.save = (data, ids) => { changed.push(ids); return originalSave(data); };
   drafts.f.repository.beforeSave = async () => { if (++diskWrites === 1) await pendingDisk.pause(); };
-  drafts.value.saveToggle('readOnly', true); await pendingDisk.waitForEntry(drafts.value.pendingSave);
-  drafts.f.session.setDraft('typed during save'); pendingDisk.resume(); await drafts.value.pendingSave;
-  assert.ok(changed[0].includes(drafts.app.active.id), 'Capture drafts already dirty before the preference save');
+  const saveWithDraft = drafts.value.saveToggle('readOnly', true);
+  await pendingDisk.waitForEntry(saveWithDraft);
+  drafts.f.session.setDraft('typed during save'); pendingDisk.resume(); await saveWithDraft;
+  assert.equal(changed.length, 2);
+  assert.ok(changed.every(ids => ids?.length === 1 && ids[0] === drafts.app.active.id),
+    'Capture only the dirty draft during the original and follow-up writes');
   assert.equal((await drafts.f.repository.load()).threads[0].draft, 'typed during save');
   assert.equal(drafts.app.draft, 'typed during save'); assert.equal(drafts.app.productivity.options.readOnly, true);
   assert.equal(drafts.app.busy, false);

@@ -13,23 +13,24 @@ const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 const cls = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'Index');
 const methods = ['openTools', 'openSettings', 'createChat', 'revealChat',
   'openFiles', 'openDetailTab', 'openHistorySearch', 'toggleHistory', 'setHistoryCollapsed',
-  'confirmProviderDiscard', 'confirmRootNavigation', 'returnFromSettings', 'selectSettingsSection', 'swipeSettingsSection',
-  'openSettingPage', 'openSettingsSearch', 'selectSettingsResult'];
+  'confirmProviderDiscard', 'confirmRootNavigation', 'returnFromSettings', 'selectSettingsSection', 'settingsPageChanged',
+  'settingsPageScrolled', 'settingsPageScrollState',
+  'openSettingPage', 'openSettingsSearch', 'focusSettingsSearch', 'updateSettingsSearch', 'closeSettingsSearch', 'selectSettingsResult'];
 const body = methods.map(name => cls.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
-const globals = { exports: {}, t: text => text, $r: value => value, LaunchMode: { POP_TO_SINGLETON: 2 }, Diagnostics: { log() {} }, Motion: {} };
+const globals = { exports: {}, t: text => text, $r: value => value, LaunchMode: { POP_TO_SINGLETON: 2 }, Diagnostics: { log() {} }, Motion: {},
+  knowledgeBaseAccess: { enabled: false }, ScrollState: { Idle: 0, Scroll: 1, Fling: 2 } };
 const categoryFile = path.join(__dirname, '../entry/src/main/ets/views/SettingsNavigation.ets');
 const categoryTree = ts.createSourceFile(categoryFile, fs.readFileSync(categoryFile, 'utf8'), ts.ScriptTarget.Latest, true);
-const categorySource = categoryTree.statements.filter(node => ts.isVariableStatement(node) ||
-  (ts.isFunctionDeclaration(node) && node.name?.text === 'settingsCategoryForSwipe')).map(node => node.getText(categoryTree)).join('\n');
+const categorySource = categoryTree.statements.filter(ts.isVariableStatement).map(node => node.getText(categoryTree)).join('\n');
 vm.runInNewContext(ts.transpileModule(categorySource, {
   compilerOptions: { target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS }
 }).outputText, globals);
-globals.settingsCategoryForSwipe = globals.exports.settingsCategoryForSwipe;
+globals.SETTINGS_CATEGORIES = globals.exports.SETTINGS_CATEGORIES;
 vm.runInNewContext(ts.transpileModule(`class Page { ${body} } exports.Page = Page;`, {
   compilerOptions: { target: ts.ScriptTarget.ES2021 }
 }).outputText, globals);
 function fixture() {
-  const routes = [], toasts = [], dialogs = [];
+  const routes = [], toasts = [], dialogs = [], focus = [];
   let resets = 0;
   const page = Object.assign(new globals.exports.Page(), {
     app: { canNavigate: true, active: { id: 'chat' }, error: '', saveError: '', busy: false, providerEditor: { hasChanges: false },
@@ -44,14 +45,16 @@ function fixture() {
       clear() { routes.length = 0; }, pop() { return routes.pop(); }
     },
     appearance: {}, detailTabs: [], workspaceRequest: 0, historySearchRequest: 0, historyCollapsed: false,
-    toolsTab: 'memory', toolsTabRequest: 0,
+    toolsTab: 'memory', toolsTabRequest: 0, settingsActive: true, foreground: true,
+    settingsSearchOpen: false, settingsSearchQuery: '', settingsSearchRevision: 0, settingsPageProgress: -1,
     setDrawer(open) { this.drawerOpen = open; }, setDetailPane(open) { this.detailPaneOpen = open; },
     workbench() { return { docked: true, canExpand: true, expanded: !this.historyCollapsed }; },
     getUIContext: () => ({ showAlertDialog(value) { dialogs.push(value); },
-      animateTo(_options, update) { update(); }, getFocusController: () => ({ clearFocus() {} }),
+      animateTo(_options, update) { update(); },
+      getFocusController: () => ({ clearFocus() { focus.push(null); }, requestFocus(id) { focus.push(id); } }),
       getPromptAction: () => ({ showToast(value) { toasts.push(value.message); } }) })
   });
-  return { page, routes, toasts, dialogs, resets: () => resets };
+  return { page, routes, toasts, dialogs, focus, resets: () => resets };
 }
 test('files, search and sidebar expansion never add navigation pages', () => {
   const { page, routes } = fixture();
@@ -83,13 +86,26 @@ test('repeated settings taps preserve the current settings draft', () => {
   assert.equal(routes.length, 1);
   assert.equal(resets(), 1);
 });
-test('global settings search opens editors and can jump to a switch without changing it', () => {
-  const { page, routes, resets } = fixture();
+test('inline settings search keeps results on return and locates a switch without changing it', async () => {
+  const { page, routes, focus, resets } = fixture();
   page.openSettings();
   page.openSettingsSearch(); page.openSettingsSearch();
-  assert.deepEqual(routes.map(route => route.name), ['settings', 'find-settings']);
+  assert.deepEqual(routes.map(route => route.name), ['settings']);
+  assert.equal(page.settingsSearchOpen, true);
+  assert.equal(focus.length, 0, 'Wait for the mounted input before requesting focus');
+  page.focusSettingsSearch(); page.focusSettingsSearch();
+  assert.deepEqual(focus, ['settings-search-input']);
+  page.updateSettingsSearch('model');
+  await Promise.resolve();
   page.selectSettingsResult({ id: 'open-image-generation', section: 'models', route: 'image-generation' });
-  assert.deepEqual(routes.map(route => route.name), ['settings', 'find-settings', 'image-generation']);
+  assert.deepEqual(routes.map(route => route.name), ['settings', 'image-generation']);
+  page.paths.pop();
+  assert.equal(page.settingsSearchQuery, 'model');
+  page.selectSettingsResult({ id: 'appearance-mode', section: 'appearance', route: 'appearance-choice', param: 'mode' });
+  assert.equal(routes.at(-1).param, 'mode');
+  page.paths.pop();
+  page.selectSettingsResult({ id: 'configure-ima-knowledge-base', section: 'tools', route: 'ima-settings' });
+  assert.equal(routes.at(-1).name, 'knowledge-base-settings');
   page.paths.pop();
   let edited;
   page.app.beginProvider = (preset, id) => { edited = { preset, id }; return true; };
@@ -101,27 +117,46 @@ test('global settings search opens editors and can jump to a switch without chan
   assert.deepEqual(routes.map(route => route.name), ['settings']);
   assert.equal(page.settingsSection, 'tools');
   assert.equal(page.settingsSearchTarget, 'browser-enabled');
+  assert.equal(page.settingsSearchOpen, false);
   assert.equal(resets(), 1, 'Locating a switch does not reopen settings or reset drafts');
+  page.openSettingsSearch();
+  page.updateSettingsSearch('late IME update');
+  assert.equal(page.closeSettingsSearch(), true);
+  page.focusSettingsSearch();
+  await Promise.resolve();
+  assert.equal(page.settingsSearchQuery, '');
+  assert.equal(focus.at(-1), null);
 });
-test('settings swipes move one category, stop at the ends and keep the settings route', () => {
+test('settings swipes report fractional progress and commit only a settled category', () => {
   const { page, routes, resets } = fixture();
   page.openSettings();
-  Object.assign(page, { settingsSection: 'models', settingsActive: true, foreground: true });
-  const swipe = (offsetX, offsetY = 0) => page.swipeSettingsSection({ offsetX, offsetY });
-  for (const [x, y] of [[-30, 0], [-50, 40], [15, 120]]) swipe(x, y);
-  assert.equal(page.settingsSection, 'models', 'Short, diagonal and vertical gestures leave the selection in place');
-  for (const section of ['assistant', 'tools', 'appearance', 'data', 'help', 'help']) {
-    swipe(-80); assert.equal(page.settingsSection, section);
-  }
-  for (const section of ['data', 'appearance', 'tools', 'assistant', 'models', 'account', 'account']) {
-    swipe(80); assert.equal(page.settingsSection, section);
-  }
+  Object.assign(page, { settingsSection: 'models', settingsSearchTarget: 'previous-result' });
+  page.settingsPageScrollState(globals.ScrollState.Scroll);
+  page.settingsPageScrolled(1, -0.35);
+  assert.equal(page.settingsPageProgress, 1.35);
+  page.settingsPageScrolled(2, 0.6501);
+  assert.equal(page.settingsPageProgress, 1.35, 'Both visible pages report the same position');
+  assert.equal(page.settingsSection, 'models');
+  page.settingsPageScrollState(globals.ScrollState.Fling);
+  page.settingsPageScrolled(2, -0.04);
+  assert.equal(page.settingsPageProgress, 2.04);
+  page.settingsPageChanged(2);
+  page.settingsPageScrollState(globals.ScrollState.Idle);
+  assert.equal(page.settingsSection, 'assistant');
+  assert.equal(page.settingsSearchTarget, '');
+  assert.equal(page.settingsPageProgress, -1);
+  page.settingsPageScrollState(globals.ScrollState.Scroll);
+  page.settingsPageScrolled(0, 0.25); assert.equal(page.settingsPageProgress, 0);
+  page.settingsPageScrolled(6, -0.15); assert.equal(page.settingsPageProgress, 6);
+  page.openSettingsSearch();
+  page.settingsPageScrolled(2, -0.25); assert.equal(page.settingsPageProgress, -1);
+  page.closeSettingsSearch();
   assert.deepEqual(routes.map(route => route.name), ['settings']);
   assert.equal(resets(), 1);
   page.settingsActive = false;
   routes.push({ name: 'provider' });
-  swipe(-80);
-  assert.equal(page.settingsSection, 'account', 'Settings subpages do not react to the swipe');
+  page.settingsPageChanged(3);
+  assert.equal(page.settingsSection, 'assistant', 'A hidden settings page cannot change the current category');
   assert.equal(routes.at(-1).name, 'provider');
 });
 test('switching sidebar destinations reuses existing roots', () => {

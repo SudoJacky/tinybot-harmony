@@ -92,6 +92,19 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
       throw new ToolFailure('PERMISSION_DENIED', 'Copy the input into the private workspace first.', 'choose_another_path', { path: path });
     }
     if (this.managed(path)) { return new util.TextEncoder().encodeInto((await this.read(path, cancellation, maximum)).content); }
+    return this.withJobInput(path, maximum, cancellation, async (fd, size) => {
+      const bytes = await readBounded(fd, size);
+      cancellation.check();
+      return new Uint8Array(bytes);
+    });
+  }
+
+  async withJobInput<T>(path: string, maximum: number, cancellation: Cancellation,
+    transfer: (fd: number, size: number, modifiedAt: number) => Promise<T>): Promise<T> {
+    if (this.isShared(path) || this.managed(path)) {
+      throw new ToolFailure('PERMISSION_DENIED', 'Copy the input into an ordinary file in the private workspace first.',
+        'choose_another_path', { path: path });
+    }
     return withFileMutation(await this.fileKey(path), async () => {
       const absolute = await this.resolve(path, false, cancellation);
       const file = await fs.open(absolute, fs.OpenMode.READ_ONLY | fs.OpenMode.NOFOLLOW);
@@ -102,9 +115,8 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
           throw new ToolFailure('LIMIT_EXCEEDED', 'File job input exceeds the remaining byte budget (' + maximum + ' bytes).',
             'choose_another_path', { path: path });
         }
-        const bytes = await readBounded(file.fd, stat.size);
         cancellation.check();
-        return new Uint8Array(bytes);
+        return await transfer(file.fd, stat.size, stat.mtime);
       } finally { await fs.close(file); }
     });
   }

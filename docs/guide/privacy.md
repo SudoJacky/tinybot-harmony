@@ -12,6 +12,7 @@ Tinybot 把对话、文件与设置保存在本机，只有调用模型或联网
 <filesDir>/attachments/      图片附件（.jpg）；文本与文档原件随消息存入工作区
 <filesDir>/usage-records/    旧版用量分页账本（升级后保留）
 <filesDir>/performance-current.jsonl / performance-previous.jsonl   诊断日志（仅在开启采集时写入）
+<filesDir>/tinybot-diagnostics.json   「关于 Tinybot」最近一次保存的脱敏诊断日志
 工作区目录/                     每段会话或每个项目的文件，按 ID 隔离
   ├─ attachments/<附件ID>/<文件名>   文本与文档原件
   ├─ generated-images/        图片工具生成的结果
@@ -98,6 +99,7 @@ Markdown 导出与诊断导出不携带 API 密钥；模型密钥也不会出现
 | 图片服务 | 每次调用 `image_gen` | 提示词与参考图发送给配置的图片服务；生成结果下载后保存在工作区 |
 | DeepSeek 搜索 | 启用联网搜索且选择 DeepSeek 时 | 复用官方 DeepSeek 模型服务的密钥 |
 | Tavily | 启用联网搜索且选择 Tavily 时 | 独立的地址与密钥 |
+| 腾讯 ima | 配置并启用知识库后调用 ima 工具 | 搜索词、导入链接和选择上传的文件发送给 ima。文件上传使用腾讯云 COS 的临时凭证。获取的原文可能作为资料发送给当前模型 |
 | 目标网站 | 网页读取或应用内浏览器 | 内容作为不可信资料交给模型 |
 | 华为账号（Account Kit） | 登录与账号状态检查 | 仅使用 OpenID |
 | 华为云空间 | 自动或手动创建、刷新、恢复、删除云备份 | 快照保存在用户的云空间 |

@@ -11,6 +11,8 @@ import { LifeBoards } from './LifeBoards';
 import { LifePanelTools } from './LifePanelTools';
 import { MailTools } from './MailTools';
 import { ImaTools } from './ImaTools';
+import { imaClient } from './ImaClient';
+import { ImaKnowledge } from './ImaKnowledge';
 import { installNativePanelAgent } from './NativePanelAgent';
 import { PreviewCapture } from './PreviewCapture';
 import { savePreviewRepair } from './PreviewRecovery';
@@ -160,7 +162,10 @@ export class NativeSessionResources implements SessionResources {
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());
-    groups.push(new ImaTools());
+    const ima = context ? new ImaKnowledge(imaClient, files, context.cacheDir,
+      live?.askForToolApproval === false ? undefined :
+        (title, details, cancellation) => this.approval.request(title, details, cancellation)) : undefined;
+    groups.push(new ImaTools(imaClient, ima));
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
     const imageFiles = new NativeImageWorkspace(files, live?.imageAttachments || (() => attachments));
     groups.push(new ImageInspectionTools((path, maximum, cancellation) => imageFiles.readJobInput(path, maximum, cancellation),

@@ -7,10 +7,9 @@ import { settingsSectionTitle } from '../model/SettingsSearch';
 import { AnimatedIcon } from '../common/AnimatedIcon';
 import { AnimatedIconName } from '../common/IconArtwork';
 
-interface SettingsCategory { key: string; icon: AnimatedIconName; }
+export interface SettingsCategory { key: string; icon: AnimatedIconName; }
 const CATEGORY_TRACK_RADIUS: number = 25;
-export const SETTINGS_CATEGORY_SWIPE_DISTANCE: number = 44;
-const CATEGORIES: SettingsCategory[] = [
+export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   { key: 'account', icon: 'account' },
   { key: 'models', icon: 'services' },
   { key: 'assistant', icon: 'preferences' },
@@ -20,17 +19,15 @@ const CATEGORIES: SettingsCategory[] = [
   { key: 'help', icon: 'help' }
 ];
 
-export function settingsCategoryForSwipe(key: string, offsetX: number, offsetY: number): string | undefined {
-  const distance = Math.abs(offsetX);
-  if (distance < SETTINGS_CATEGORY_SWIPE_DISTANCE || distance <= Math.abs(offsetY) * 1.5) { return undefined; }
-  const index = CATEGORIES.findIndex((item: SettingsCategory) => item.key === key);
-  return index < 0 ? undefined : CATEGORIES[index + (offsetX < 0 ? 1 : -1)]?.key;
+export function settingsCategoryIndex(key: string): number {
+  return Math.max(0, SETTINGS_CATEGORIES.findIndex((item: SettingsCategory) => item.key === key));
 }
 
 @Component
 export struct SettingsCategoryBar {
   @StorageProp('tinybot.appearance.style') @Watch('motionChanged') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('selectionChanged') selected: string = 'models';
+  @Prop @Watch('pageProgressChanged') pageProgress: number = -1;
   @State private thumb: SegmentFrame = { left: 0, right: 0 };
   @State private hoveredCategory: string = '';
   onSelect: (key: string) => void = () => {};
@@ -38,6 +35,7 @@ export struct SettingsCategoryBar {
   private segments: Map<string, SegmentFrame> = new Map();
   private viewportWidth: number = 0;
   private animator?: AnimatorResult;
+  private swipeStartOffset?: number;
 
   aboutToDisappear(): void { this.stopMotion(); }
 
@@ -69,19 +67,50 @@ export struct SettingsCategoryBar {
     animator.play();
   }
 
-  private reveal(target: SegmentFrame, animated: boolean): void {
-    if (this.viewportWidth <= 0) { return; }
-    const offset = this.scroller.currentOffset().xOffset;
-    const next = target.left < offset ? Math.max(0, target.left - 3) :
+  private revealOffset(target: SegmentFrame, offset: number): number {
+    if (this.viewportWidth <= 0) { return offset; }
+    return target.left < offset ? Math.max(0, target.left - 3) :
       target.right > offset + this.viewportWidth ? target.right + 3 - this.viewportWidth : offset;
-    if (next !== offset) {
+  }
+
+  private scrollTrack(next: number, animated: boolean): void {
+    if (Math.abs(next - this.scroller.currentOffset().xOffset) >= 0.5) {
       this.scroller.scrollTo({ xOffset: next, yOffset: 0,
         animation: animated && this.appearance.effectStrength > 0 ?
           { duration: SegmentedMotion.duration, curve: Curve.EaseOut } : false });
     }
   }
 
+  private reveal(target: SegmentFrame, animated: boolean): void {
+    if (this.viewportWidth <= 0) { return; }
+    this.scrollTrack(this.revealOffset(target, this.scroller.currentOffset().xOffset), animated);
+  }
+
+  private pageProgressChanged(): void {
+    if (this.pageProgress < 0) {
+      if (this.swipeStartOffset === undefined) { return; }
+      this.swipeStartOffset = undefined;
+      const target = this.segments.get(this.selected);
+      if (target) { this.moveThumb(target, false); this.reveal(target, false); }
+      return;
+    }
+    const previous = this.segments.get(SETTINGS_CATEGORIES[Math.floor(this.pageProgress)]?.key ?? '');
+    const next = this.segments.get(SETTINGS_CATEGORIES[Math.ceil(this.pageProgress)]?.key ?? '');
+    if (!previous || !next || this.viewportWidth <= 0) { return; }
+    if (this.swipeStartOffset === undefined) {
+      this.stopMotion();
+      this.swipeStartOffset = this.scroller.currentOffset().xOffset;
+    }
+    const fraction = this.pageProgress % 1;
+    this.thumb = { left: previous.left + (next.left - previous.left) * fraction,
+      right: previous.right + (next.right - previous.right) * fraction };
+    const leftOffset = this.revealOffset(previous, this.swipeStartOffset);
+    const rightOffset = this.revealOffset(next, this.swipeStartOffset);
+    this.scrollTrack(leftOffset + (rightOffset - leftOffset) * fraction, false);
+  }
+
   private selectionChanged(): void {
+    if (this.pageProgress >= 0) { return; }
     const target = this.segments.get(this.selected);
     if (!target) { return; }
     this.moveThumb(target, true);
@@ -89,6 +118,7 @@ export struct SettingsCategoryBar {
   }
 
   private motionChanged(): void {
+    if (this.pageProgress >= 0) { return; }
     const target = this.segments.get(this.selected);
     if (target && this.appearance.effectStrength === 0) {
       this.moveThumb(target, false);
@@ -103,7 +133,8 @@ export struct SettingsCategoryBar {
     if (right <= left || (previous?.left === left && previous?.right === right)) { return; }
     const target: SegmentFrame = { left: left, right: right };
     this.segments.set(key, target);
-    if (key === this.selected) {
+    if (this.pageProgress >= 0) { this.pageProgressChanged(); }
+    else if (key === this.selected) {
       const animated = !!this.animator;
       this.moveThumb(target, animated);
       this.reveal(target, animated);
@@ -112,6 +143,7 @@ export struct SettingsCategoryBar {
 
   private viewportChanged(area: Area): void {
     this.viewportWidth = Number(area.width);
+    if (this.pageProgress >= 0) { this.pageProgressChanged(); return; }
     const target = this.segments.get(this.selected);
     if (target) { this.reveal(target, false); }
   }
@@ -128,7 +160,7 @@ export struct SettingsCategoryBar {
                 .accessibilityLevel('no').hitTestBehavior(HitTestMode.None)
             }
             Row({ space: 2 }) {
-              ForEach(CATEGORIES, (item: SettingsCategory) => {
+              ForEach(SETTINGS_CATEGORIES, (item: SettingsCategory) => {
                 Button({ type: ButtonType.Normal }) {
                   Row({ space: Space.sm }) {
                     AnimatedIcon({ iconName: item.icon, selected: this.selected === item.key,
@@ -172,7 +204,7 @@ export struct SettingsNavigation {
       Button(t('返回对话')).attributeModifier(Btn.text).id('settings-return-chat').onClick(this.onChat)
       Text(t('设置')).fontSize(24).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
         .width('100%').padding({ left: 12, top: 12, bottom: 12 })
-      ForEach(CATEGORIES, (item: SettingsCategory) => {
+      ForEach(SETTINGS_CATEGORIES, (item: SettingsCategory) => {
         Button() {
           Row({ space: 12 }) {
             AnimatedIcon({ iconName: item.icon, iconSize: 20, selected: this.selected === item.key,

@@ -46,24 +46,58 @@ function form(app, tab, entryId = '') {
   value.aboutToAppear(); return { value, closed };
 }
 (async () => {
-  const searchProfiles = [{ id: 'my-kimi', name: 'Work Kimi', presetId: 'kimi', protocol: 'chat-completions', enabled: false }];
+  const searchProfiles = [{ id: 'my-kimi', name: 'Work Kimi', presetId: 'kimi', protocol: 'chat-completions',
+    models: ['fixture-alpha-2'], enabled: false }];
   assert.equal(findSettings('  ', searchProfiles, false).length, 0);
   assert.equal(findSettings('ｍｉｍｏ不存在', searchProfiles, false).length, 0);
   assert.equal(findSettings('生图', searchProfiles, false)[0].route, 'image-generation');
-  assert.equal(findSettings('dark mode', searchProfiles, false)[0].route, 'appearance');
+  assert.equal(findSettings('dark mode', searchProfiles, false)[0].param, 'mode');
   assert.equal(findSettings('work  KIMI', searchProfiles, false)[0].param, 'my-kimi');
+  assert.equal(findSettings('fixture alpha 2', searchProfiles, false)[0].param, 'my-kimi');
   assert.equal(findSettings('浏览器', searchProfiles, false)[0].id, 'browser-enabled');
   for (const query of ['冷启动', '上次会话', 'last conversation']) {
     const result = findSettings(query, searchProfiles, false)[0];
     assert.equal(result.id, 'new-chat-on-startup');
     assert.equal(result.section, 'appearance');
   }
-  for (const query of ['知识库', 'knowledge base', 'Tencent IMA']) {
+  for (const query of ['知识库', 'knowledge base']) {
     assert.equal(findSettings(query, searchProfiles, false)[0].route, 'knowledge-base-settings');
   }
+  for (const [query, id] of [['Tencent IMA', 'configure-ima-knowledge-base'], ['ima知识库', 'configure-ima-knowledge-base'],
+    ['webdva', 'webdav-backup-settings'], ['ｆｎｏｔ size', 'appearance-font-size'], ['上文窗口', 'capability-context'],
+    ['会话命名', 'model-title'], ['默认外观', 'appearance-reset'], ['数据导入', 'import-local-backup'], ['许可证', 'open-third-party-licenses']]) {
+    assert.equal(findSettings(query, searchProfiles, false)[0]?.id, id, query);
+  }
+  assert.equal(findSettings('webdva', searchProfiles, false).length, 1, 'A typo should not keep broad prefix results');
+  assert.equal(findSettings('zzzzzz', searchProfiles, false).length, 0);
   assert.equal(findSettings('开发者模式', searchProfiles, false).length, 0);
   assert.equal(findSettings('开发者模式', searchProfiles, true)[0].id, 'open-developer');
   console.log('PASS settings search matches bilingual titles, aliases and configured services across categories');
+
+  const node = new Proxy({}, { get: () => () => {} });
+  let refreshResults;
+  let visibleResults = [];
+  const Search = controller('SettingsSearchPanel', ['initialRender'], {
+    Column: node, Scroll: node, If: node, Alignment: {}, BarState: {}, Space: {}, PageStyles: {}, findSettings,
+    ViewPU: { create() {} }, SettingsSearchResults: class {
+      constructor(_parent, props) { visibleResults = Array.from(props.items, item => item.id); }
+    }
+  });
+  const search = Object.assign(new Search(), { query: 'w', app: { providerProfiles: searchProfiles },
+    observeComponentCreation2(render, element) {
+      render(1, true);
+      if (element.name === 'SettingsSearchResults') refreshResults = () => render(1, false);
+    },
+    ifElseBranchUpdateFunction(_branch, render) { render(); },
+    updateStateVarsOfChildByElmtId(_id, props) { visibleResults = Array.from(props.items, item => item.id); }
+  });
+  search.initialRender();
+  assert.ok(visibleResults.length > 1);
+  search.query = 'webdva'; refreshResults();
+  assert.deepEqual(visibleResults, ['webdav-backup-settings']);
+  search.query = 'zzzzzz'; refreshResults();
+  assert.deepEqual(visibleResults, []);
+  console.log('PASS mounted settings results refresh for each nonblank query');
 
   const setupLinks = [];
   const setupContext = { openLink: async (url, options) => { setupLinks.push({ url, options }); } };
@@ -97,10 +131,10 @@ function form(app, tab, entryId = '') {
     Space: { md: 12 }, SettingsRevealFrame: class { constructor(onIdle) { this.onIdle = onIdle; } }
   });
   const frames = [], offsets = [];
-  const reveal = Object.assign(new Reveal(), { active: false, searchTarget: 'browser-enabled',
+  const reveal = Object.assign(new Reveal(), { active: false, searchTarget: 'browser-enabled', viewportId: 'settings-items-tools',
     scroller: { scrollBy: (_x, y) => offsets.push(y) }, getUIContext: () => ({
       postFrameCallback: frame => frames.push(frame), vp2px: value => value * 2, px2vp: value => value / 2,
-      getComponentUtils: () => ({ getRectangleById: id => id === 'settings-items' ?
+      getComponentUtils: () => ({ getRectangleById: id => id === 'settings-items-tools' ?
         { windowOffset: { y: 120 }, size: { height: 300 } } : { windowOffset: { y: 450 }, size: { height: 40 } } })
     }) });
   reveal.revealSearchTarget(); assert.equal(frames.length, 0);
@@ -193,12 +227,27 @@ function form(app, tab, entryId = '') {
   console.log('PASS image settings load a legacy choice, show unavailable selections and preselect a newly added provider');
 
   let writes = 0, pops = 0, reject = true;
-  const Appearance = controller('AppearancePanel', ['save'], { AppearancePreferences: { select() {
-    if (reject) throw Error('storage unavailable'); writes++;
+  let pendingAppearance;
+  const Appearance = controller('AppearancePanel', ['save'], { AppearancePreferences: { async select() {
+    if (reject) throw Error('storage unavailable');
+    writes++;
+    await pendingAppearance;
   } } });
-  const appearance = Object.assign(new Appearance(), { choice: 'mode', error: '', onDone: () => pops++ });
-  appearance.save({ mode: 'dark' }); assert.equal(pops, 0); assert.match(appearance.error, /storage unavailable/);
-  reject = false; appearance.save({ mode: 'dark' }); assert.equal(pops, 1); assert.equal(writes, 1);
-  appearance.choice = ''; appearance.save({ accent: 'green' }); assert.equal(pops, 1);
+  const appearance = Object.assign(new Appearance(), { choice: 'mode', mounted: true, saving: false, error: '', onDone: () => pops++ });
+  await appearance.save({ mode: 'dark' }); assert.equal(pops, 0); assert.match(appearance.error, /storage unavailable/);
+  reject = false;
+  const disk = Promise.withResolvers(); pendingAppearance = disk.promise;
+  const saveAppearance = appearance.save({ mode: 'dark' });
+  assert.equal(appearance.saving, true); assert.equal(pops, 0);
+  await appearance.save({ mode: 'system' }); assert.equal(writes, 1);
+  disk.resolve(); await saveAppearance;
+  assert.equal(pops, 1); assert.equal(appearance.saving, false);
+  appearance.choice = ''; await appearance.save({ accent: 'green' }); assert.equal(pops, 1);
+  const lateDisk = Promise.withResolvers(); pendingAppearance = lateDisk.promise;
+  appearance.choice = 'mode';
+  const lateAppearance = appearance.save({ mode: 'light' });
+  appearance.mounted = false;
+  lateDisk.resolve(); await lateAppearance;
+  assert.equal(pops, 1, 'A completed write cannot dismiss a different page');
   console.log('PASS appearance subpage returns only after a successful save; inline changes stay on the main page');
 })().catch(error => { console.error(error); process.exitCode = 1; });

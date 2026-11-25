@@ -28,6 +28,7 @@ const cls = name => tree.statements.find(n => ts.isClassDeclaration(n) && n.name
 const methods = ['filtered', 'threadProject', 'sections', 'section', 'sectionThreads', 'sectionTitle', 'groupOpen', 'visibleCount', 'loadMore',
   'toggleGroup', 'onActivePath', 'lastBranch'];
 const globals = { exports: {}, t: key => key, Motion: { medium: 220, standard: 'ease' }, Diagnostics: { log() {} } };
+globals.DEEPSEEK_IMPORT_GROUP = load(path.join(root, 'entry/src/main/ets/model/DeepSeekImport')).DEEPSEEK_IMPORT_GROUP;
 vm.runInNewContext(ts.transpileModule(`${cls('ThreadSection').getText(tree)}
 class Sidebar { ${cls('ThreadList').members.filter(n => methods.includes(n.name?.getText(tree))).map(n => n.getText(tree)).join('\n')} }
 exports.Sidebar = Sidebar;`, { compilerOptions: { target: ts.ScriptTarget.ES2021 } }).outputText, globals);

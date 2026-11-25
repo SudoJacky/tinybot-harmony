@@ -77,6 +77,7 @@ interface PendingComposerAction { owner: number; threadId: string; run: () => vo
 interface HistoryPageAnchor { threadId: string; messageId: string; y: number; }
 
 const PHONE_COMPOSER_ACTION_SIZE: number = 44;
+const COMPOSER_FOOTER_CONTROL_HEIGHT: number = 36;
 const ATTACHMENT_FOLDER_WIDTH: number = 104;
 const ATTACHMENT_FOLDER_HEIGHT: number = 66;
 const ATTACHMENT_FLAP_SPRING: ICurve = curves.interpolatingSpring(0, 1, 420, 33);
@@ -1769,12 +1770,18 @@ export struct ChatPanel {
       this.thread.modelRef?.modelId || '', this.thread.reasoningEffort);
   }
 
+  private composerFooterTouchRegion(): Rectangle {
+    const height = this.workbench ? COMPOSER_FOOTER_CONTROL_HEIGHT : PHONE_COMPOSER_ACTION_SIZE;
+    return { x: 0, y: (COMPOSER_FOOTER_CONTROL_HEIGHT - height) / 2, width: '100%', height: height };
+  }
+
   @Builder
   modelButton() {
     Button({ type: ButtonType.Capsule }) {
       Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
         .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis })
-    }.id('composer-model-picker').height(this.workbench ? 36 : 44)
+    }.id('composer-model-picker').height(COMPOSER_FOOTER_CONTROL_HEIGHT)
+      .responseRegion(this.composerFooterTouchRegion())
       .constraintSize({ minWidth: 64, maxWidth: Math.max(64, Math.min(220, this.panelWidth / 2)) })
       .padding({ left: 12, right: 12 }).backgroundColor(Color.Transparent)
       .border({ width: 0.5, color: $r('app.color.divider') }).focusOnTouch(false)
@@ -1850,7 +1857,8 @@ export struct ChatPanel {
         Text(toolApprovalModeName(this.thread.toolApprovalMode)).fontFamily(this.appearance.fontFamily)
           .fontSize(12).maxLines(1).fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
-    }.id('composer-tool-approval').height(this.workbench ? 36 : 44).constraintSize({ minWidth: this.workbench ? 36 : 44 })
+    }.id('composer-tool-approval').height(COMPOSER_FOOTER_CONTROL_HEIGHT)
+      .responseRegion(this.composerFooterTouchRegion()).constraintSize({ minWidth: this.workbench ? 36 : 44 })
       .padding({ left: 8, right: 8 }).focusOnTouch(false)
       .backgroundColor(Color.Transparent)
       .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
@@ -2325,6 +2333,7 @@ export struct ChatPanel {
           this.toolApprovalButton()
           this.modelButton()
         }.id('composer-footer').width('100%').justifyContent(FlexAlign.SpaceBetween)
+          .responseRegion(this.composerFooterTouchRegion())
           .enabled(!this.voiceOverlayVisible())
           .hitTestBehavior(this.voiceOverlayVisible() ? HitTestMode.None : HitTestMode.Default)
           .accessibilityLevel(this.voiceOverlayVisible() ? 'no-hide-descendants' : 'auto')

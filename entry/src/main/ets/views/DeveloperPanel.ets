@@ -12,6 +12,7 @@ import { exportFile, shareFile } from '../services/NativeActions';
 export struct DeveloperPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @StorageProp('tinybot.developer.enabled') private developerEnabled: boolean = false;
+  @StorageProp('tinybot.diagnostics.recording') @Watch('syncCaptureOptions') private timedRecording: boolean = false;
   @StorageProp('tinybot.developer.recording') @Watch('syncTimer') private recording: boolean = false;
   @StorageProp('tinybot.developer.cpu') private cpuRecording: boolean = false;
   @StorageProp('tinybot.developer.error') private adapterError: string = '';
@@ -31,10 +32,13 @@ export struct DeveloperPanel {
   onDisabled: () => void = () => {};
 
   aboutToAppear(): void {
-    this.mounted = true; this.detailed = Diagnostics.detailed; this.minimumLevel = Diagnostics.logLevel;
+    this.mounted = true; this.syncCaptureOptions();
     this.frames = DeveloperDiagnostics.framesEnabled(); this.refresh(); this.syncTimer();
   }
   aboutToDisappear(): void { this.mounted = false; clearInterval(this.timer); this.timer = -1; }
+  private syncCaptureOptions(): void {
+    this.detailed = Diagnostics.detailed; this.minimumLevel = Diagnostics.logLevel;
+  }
   private syncTimer(): void {
     clearInterval(this.timer); this.timer = -1;
     if (this.mounted && this.foreground && this.recording) { this.timer = setInterval(() => this.refresh(), 2000); }
@@ -81,7 +85,7 @@ export struct DeveloperPanel {
   }
   private clear(): void {
     this.getUIContext().showAlertDialog({ systemMaterial: this.appearance.surface, title: t('清除诊断数据'),
-      message: t('停止采集并删除本机两份滚动日志及当前统计。'),
+      message: t('停止采集并删除本机诊断日志及统计数据。'),
       primaryButton: { value: t('取消'), action: () => {} }, secondaryButton: { value: t('清除'), action: async () => {
         this.busy = true;
         try { await DeveloperDiagnostics.clear(); this.refresh(); }
@@ -102,7 +106,7 @@ export struct DeveloperPanel {
                 onChange: (value: boolean) => { if (value) { DeveloperDiagnostics.start(); } else { DeveloperDiagnostics.stop(); } this.refresh(); } })
               RowDivider()
               SwitchRow({ title: t('详细事件时间线'), subtitle: t('记录各次解析、布局、增量和工具操作；关闭后保留统计、慢操作及资源数据。'),
-                compId: 'developer-detailed', isOn: this.detailed, disabled: this.busy,
+                compId: 'developer-detailed', isOn: this.detailed, disabled: this.busy || this.timedRecording,
                 onChange: (value: boolean) => { this.detailed = value; Diagnostics.detailed = value; } })
               RowDivider()
               SwitchRow({ title: t('逐帧回调采样'), subtitle: t('额外请求 Vsync，增加功耗与采样开销。统计回调间隔，不代表实际掉帧率。'),
@@ -128,7 +132,7 @@ export struct DeveloperPanel {
             compIdPrefix: 'developer-log-level', onSelect: (index: number) => {
               this.minimumLevel = LOG_LEVELS[index]; Diagnostics.logLevel = this.minimumLevel;
               Diagnostics.event('logging.level', { code: index }, 0, true); this.refresh();
-            } })
+            } }).enabled(!this.timedRecording)
           Text(t('Debug {0} · Info {1} · Warn {2} · Error {3} · 覆盖 {4} · 过滤 {5} · 拒绝 {6} · 输出失败 {7}',
             [this.stats.logging.counts.debug, this.stats.logging.counts.info, this.stats.logging.counts.warn, this.stats.logging.counts.error,
               this.stats.logging.overwritten, this.stats.logging.filtered, this.stats.logging.rejected, this.stats.logging.sinkFailures]))

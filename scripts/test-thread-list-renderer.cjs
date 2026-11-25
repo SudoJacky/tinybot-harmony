@@ -109,6 +109,7 @@ function load(file) {
 }
 const { Fixture, seed } = load(path.join(root, 'entry/src/test/SessionService.test'));
 const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/ChatViewModel'));
+globals.DEEPSEEK_IMPORT_GROUP = load(path.join(root, 'entry/src/main/ets/model/DeepSeekImport')).DEEPSEEK_IMPORT_GROUP;
 globals.MAX_PROJECT_SHARED_FOLDERS = load(path.join(root, 'entry/src/main/ets/model/SharedFolders')).MAX_PROJECT_SHARED_FOLDERS;
 (async () => {
   const data = seed();

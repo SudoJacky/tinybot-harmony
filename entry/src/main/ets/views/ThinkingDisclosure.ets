@@ -54,8 +54,8 @@ export struct ThinkingDisclosure {
           Blank()
         }
         Stack({ alignContent: Alignment.Center }) {
-          Chevron({ pointing: 'down' })
-        }.width(16).height(16).rotate({ angle: this.disclosure.open ? 180 : 0 })
+          Chevron({ pointing: 'right', subtle: true })
+        }.width(16).height(16).rotate({ angle: this.disclosure.open ? 90 : 0 })
           .animation({ duration: Motion.medium, curve: Motion.standard })
       }.id('thinking-toggle-' + this.identity).width('100%').height(PROCESS_ROW_HEIGHT)
       .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + (this.streaming ? t('正在思考') : t('已思考')))

@@ -201,32 +201,78 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
   assert.equal(composer.composerCorners().bottomRight, 24);
   console.log('PASS emitted composer: retained icon updates and concentric phone toolbar corners');
 
-  let settingsParams, settingsUpdate, settingsSwipe;
-  const Settings = compile(methods('pages/Index', ['settingsContent']), {
-    SettingsPanel: class { constructor(_parent, params) { settingsParams = params; } }, ViewPU: { create() {} },
+  const settingsPages = new Map(), swiperEvents = new Map();
+  const component = new Proxy({}, { get: () => () => {} });
+  const Settings = compile(methods('pages/Index', ['settingsContent', 'settingsPages']), {
+    SettingsPanel: class { constructor(_parent, params, _storage, id) { settingsPages.set(id, params); } }, ViewPU: { create() {} },
     __Common__: { create() {}, layoutWeight() {}, pop() {} },
-    Gesture: { create() {}, pop() {} }, GesturePriority: { Low: 0 }, PanDirection: { Horizontal: 0 }, SETTINGS_CATEGORY_SWIPE_DISTANCE: 44,
-    PanGesture: { create() {}, onActionEnd(callback) { settingsSwipe = callback; }, pop() {} }
+    Column: component, ForEach: component, EdgeEffect: {}, Curve: {}, Motion: {}, SETTINGS_PAGE_SPRING: {},
+    Swiper: new Proxy({}, { get: (_target, key) => value => swiperEvents.set(key, value) }),
+    SETTINGS_CATEGORIES: [{ key: 'models' }, { key: 'assistant' }], settingsCategoryIndex: key => key === 'models' ? 0 : 1
   });
-  const settingsSwipes = [];
-  const settings = Object.assign(new Settings(), { app: { settings: {} }, settingsSection: 'models', settingsActive: true, foreground: true,
-    swipeSettingsSection(event) { settingsSwipes.push(event); },
-    observeComponentCreation2(callback, component) {
-      if (component.name === 'SettingsPanel') { settingsUpdate = () => callback(1, false); }
-      callback(1, true);
+  const settingsMoves = [], settingsUpdates = [];
+  let settingsElement = 0;
+  const settings = Object.assign(new Settings(), { app: { settings: {} }, appearance: { effectStrength: 1 },
+    settingsSection: 'models', settingsActive: true, foreground: true,
+    settingsPageScrolled(index, position) { settingsMoves.push([index, position]); },
+    observeComponentCreation2(callback, element) {
+      const id = ++settingsElement;
+      if (element.name === 'SettingsPanel') settingsUpdates.push(() => callback(id, false));
+      callback(id, true);
     },
-    updateStateVarsOfChildByElmtId(_id, params) { settingsParams = { ...settingsParams, ...params }; }
+    forEachUpdateFunction(_id, items, build) { items.forEach(build); },
+    updateStateVarsOfChildByElmtId(id, params) { settingsPages.set(id, { ...settingsPages.get(id), ...params }); }
   });
-  settings.settingsContent();
-  assert.equal(settingsParams.section, 'models');
-  settingsSwipe({ offsetX: -80, offsetY: 0 });
-  assert.deepEqual(settingsSwipes, [{ offsetX: -80, offsetY: 0 }]);
-  for (const section of ['account', 'assistant', 'tools', 'appearance', 'data', 'help', 'models']) {
-    settings.settingsSection = section; settingsUpdate();
-    assert.equal(settingsParams.section, section, 'An existing tablet panel must receive the current category');
-  }
-  settings.foreground = false; settingsUpdate(); assert.equal(settingsParams.active, false);
-  console.log('PASS emitted settings: categories update without rebuilding the panel');
+  settings.settingsPages();
+  const displayedSettings = () => Array.from(settingsPages.values()).filter(page => page.active).map(page => page.section);
+  assert.deepEqual(Array.from(settingsPages.values()).map(page => page.viewportId), ['settings-items-models', 'settings-items-assistant']);
+  assert.deepEqual(displayedSettings(), ['models']);
+  assert.equal(swiperEvents.get('loop'), false);
+  swiperEvents.get('onContentDidScroll')(0, 1, 0.75);
+  assert.deepEqual(settingsMoves, [[1, 0.75]]);
+  settings.settingsSection = 'assistant'; settings.settingsSearchTarget = 'auto-memory';
+  settingsUpdates.forEach(update => update());
+  assert.deepEqual(displayedSettings(), ['assistant']);
+  assert.deepEqual(Array.from(settingsPages.values()).map(page => page.searchTarget), ['', 'auto-memory']);
+  settings.foreground = false; settingsUpdates.forEach(update => update());
+  assert.deepEqual(displayedSettings(), []);
+  console.log('PASS emitted settings: retained pages use unique viewports and only the selected page handles active work');
+
+  const Track = compile(methods('views/SettingsNavigation', ['revealOffset', 'scrollTrack', 'reveal', 'pageProgressChanged'], 'SettingsCategoryBar'), {
+    SETTINGS_CATEGORIES: [{ key: 'models' }, { key: 'assistant' }], Curve: {}, SegmentedMotion: {}
+  });
+  let trackOffset = 0;
+  const track = Object.assign(new Track(), { selected: 'models', viewportWidth: 180, appearance: {}, stopMotion() {},
+    segments: new Map([['models', { left: 60, right: 150 }], ['assistant', { left: 152, right: 262 }]]),
+    moveThumb(target) { this.thumb = target; },
+    scroller: { currentOffset: () => ({ xOffset: trackOffset }), scrollTo: ({ xOffset }) => { trackOffset = xOffset; } }
+  });
+  track.pageProgress = 0.5; track.pageProgressChanged();
+  assert.equal(track.thumb.left, 106); assert.equal(track.thumb.right, 206); assert.equal(trackOffset, 42.5);
+  track.pageProgress = 0; track.pageProgressChanged();
+  assert.equal(track.thumb.left, 60); assert.equal(trackOffset, 0, 'A cancelled swipe returns the strip to its starting position');
+  track.pageProgress = -1; track.pageProgressChanged();
+  assert.equal(track.swipeStartOffset, undefined);
+  console.log('PASS settings track and selection follow fractional page progress and reverse on cancellation');
+
+  const ToggleModel = compile(methods('viewmodel/ChatViewModel', ['setSettingsToggle']), { t: value => value });
+  const writes = [];
+  let finishFirstToggle;
+  const toggleModel = Object.assign(new ToggleModel(), { settings: {}, requireSession: () => ({
+    async setSettingsToggle(kind, value) {
+      writes.push([kind, value]);
+      return writes.length === 1 ? new Promise(resolve => { finishFirstToggle = resolve; }) : true;
+    }
+  }) });
+  const firstToggle = toggleModel.setSettingsToggle('autoMemory', false);
+  const secondToggle = toggleModel.setSettingsToggle('readOnly', true);
+  assert.deepEqual(writes, [['autoMemory', false]], 'Another category must wait for an in-flight settings save');
+  finishFirstToggle(false);
+  assert.equal(await firstToggle, false);
+  assert.equal(await secondToggle, true);
+  assert.deepEqual(writes, [['autoMemory', false], ['readOnly', true]]);
+  assert.equal(toggleModel.pendingSettingsToggle, undefined);
+  console.log('PASS toggles on different settings pages share one save sequence');
 
   const nodes = new Map(); let current, requests = 0, exits = 0;
   const widget = new Proxy({}, { get: (_target, key) => (...args) => {

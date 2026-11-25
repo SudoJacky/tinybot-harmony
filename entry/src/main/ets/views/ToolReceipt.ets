@@ -24,8 +24,8 @@ export struct ToolReceipt {
         Text(toolStat(this.execution.call.function.name, this.execution.call.function.arguments, this.execution.output, this.execution.status, this.execution.fileDiff) ||
           toolStatusLabel(this.execution.status)).fontFamily(this.appearance.fontFamily).fontSize(12)
           .fontColor(this.execution.status === 'failed' ? $r('app.color.danger') : $r('app.color.text_tertiary'))
-        Chevron({ pointing: 'down' })
-          .rotate({ angle: this.disclosure.open ? 180 : 0 })
+        Chevron({ pointing: 'right', subtle: true })
+          .rotate({ angle: this.disclosure.open ? 90 : 0 })
       }.id('nested-tool-' + this.execution.call.id).width('100%').constraintSize({ minHeight: 44 })
       .accessibilityText((this.disclosure.open ? t('收起') : t('展开')) + ' ' + toolTitle(this.execution.call.function.name) + ' ' + toolStatusLabel(this.execution.status))
       .onClick(() => { this.onInspect(); this.disclosure.open = !this.disclosure.open; })

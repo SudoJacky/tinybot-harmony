@@ -25,7 +25,7 @@ export struct LanguagePanel {
     try {
       await this.app.flushDraft();
       if (this.disposed || this.app.saveError) { return; }
-      LanguagePreferences.select(choice);
+      await LanguagePreferences.select(choice);
     } catch (_) {
       if (!this.disposed) { this.error = t('无法保存语言设置，请重试。'); }
     } finally { this.selecting = false; }

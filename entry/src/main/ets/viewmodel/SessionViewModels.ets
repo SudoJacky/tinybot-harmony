@@ -185,6 +185,7 @@ export class ThreadViewModel {
   toolApprovalMode: ToolApprovalMode = 'ask';
   disabledTools: string[] = [];
   projectId?: string;
+  importSource?: string;
   memoryReview?: MemoryReviewRecord;
   reasoningEffort: string = 'default';
   references: ThreadReference[] = [];
@@ -216,6 +217,7 @@ export class ThreadViewModel {
     this.agentMode = data.agentMode || 'full'; this.disabledTools = data.disabledTools || [];
     this.toolApprovalMode = toolApprovalMode(data.toolApprovalMode);
     this.projectId = data.projectId;
+    this.importSource = data.importSource;
     this.memoryReview = data.memoryReview;
     this.reasoningEffort = data.reasoningEffort || 'default';
     this.references = data.references || [];

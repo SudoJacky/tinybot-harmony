@@ -137,6 +137,7 @@ export default class EntryAbility extends UIAbility {
       DeveloperDiagnostics.initialize(this.context);
       // ArkWeb initializes with the first Web view; native chat needs no engine prewarm.
     }
+    DeveloperDiagnostics.setForeground(this.abilityForeground);
     for (const want of this.pendingWants) { this.receiveWant(want); }
     this.pendingWants = [];
   }

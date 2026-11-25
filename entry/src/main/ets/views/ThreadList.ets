@@ -1,6 +1,7 @@
 import { Chevron } from '../common/Chevron';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { SearchPill } from '../common/SearchPill';
 import { t } from '../model/I18n';
 import { ColorMetrics, FrameCallback, LengthMetrics, SymbolGlyphModifier } from '@kit.ArkUI';
 import { KeyCode } from '@kit.InputKit';
@@ -10,6 +11,10 @@ import { picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { ChatViewModel, ThreadViewModel } from '../viewmodel/ChatViewModel';
 import { ProjectData } from '../model/Project';
+import { DEEPSEEK_IMPORT_GROUP } from '../model/DeepSeekImport';
+import { chooseDeepSeekArchive, importDeepSeekArchive, PrepareImportedFiles } from '../services/DeepSeekArchive';
+import { DEEPSEEK_LINK_LIMIT, withDeepSeekDownload } from '../services/DeepSeekDownload';
+import { ThreadData } from '../model/Conversation';
 import { MAX_PROJECT_SHARED_FOLDERS, SharedFolder, sharedFolderNameFromUri, uniqueSharedFolderName } from '../model/SharedFolders';
 import { ProjectFolderAccess } from '../services/ProjectFolderAccess';
 import { Cancellation } from '../services/Cancellation';
@@ -291,6 +296,12 @@ export struct ThreadList {
   @State private query: string = '';
   @State private archived: boolean = false;
   @State private projectFilter: string | null = null;
+  @State private importingDeepSeek: boolean = false;
+  @State private importingDeepSeekLink: boolean = false;
+  @State private deepSeekImportOpen: boolean = false;
+  @State private deepSeekLink: string = '';
+  private pendingDeepSeekImport?: string;
+  @State private importError: string = '';
   @State private selecting: boolean = false;
   private selectionAnchor: string = '';
   @State private selectedIds: string[] = [];
@@ -318,7 +329,10 @@ export struct ThreadList {
     this.mounted = true;
     if (this.searchRequest > 0) { this.searchRequested(); }
   }
-  aboutToDisappear(): void { this.mounted = false; this.focusRequest++; this.searchInputRevision++; this.closeCloudPicker(); }
+  aboutToDisappear(): void {
+    this.mounted = false; this.focusRequest++; this.searchInputRevision++; this.closeCloudPicker();
+    this.deepSeekLink = ''; this.pendingDeepSeekImport = undefined;
+  }
   private searchAvailabilityChanged(): void { if (!this.active || !this.foreground) { this.focusRequest++; } }
   private searchVisibilityChanged(): void { if (!this.searchOpen) { this.focusRequest++; this.searchInputRevision++; } }
 
@@ -377,7 +391,57 @@ export struct ThreadList {
 
   private threadProject(thread: ThreadViewModel, projects: Set<string>): string {
     const project = thread.projectId || '';
-    return projects.has(project) ? project : '';
+    if (projects.has(project)) { return project; }
+    return thread.importSource === 'deepseek' ? DEEPSEEK_IMPORT_GROUP : '';
+  }
+  private submitDeepSeekImport(useLink: boolean): void {
+    const link = useLink ? this.deepSeekLink.trim() : '';
+    if (useLink && !link) { return; }
+    this.pendingDeepSeekImport = link;
+    this.deepSeekLink = '';
+    this.deepSeekImportOpen = false;
+  }
+  private deepSeekSheetClosed(): void {
+    this.onProjectSheetVisibility(false);
+    this.deepSeekLink = '';
+    const link = this.pendingDeepSeekImport; this.pendingDeepSeekImport = undefined;
+    if (this.mounted && link !== undefined) { this.importDeepSeek(link); }
+  }
+  private async importDeepSeek(link: string): Promise<void> {
+    if (this.importingDeepSeek || this.app.sharedBusy || this.app.saveError) { return; }
+    this.importingDeepSeek = true; this.importingDeepSeekLink = link.length > 0; this.importError = '';
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const commit = (threads: ThreadData[], prepare: PrepareImportedFiles): Promise<number> => this.app.importDeepSeek(threads, prepare);
+      const count = link ? await withDeepSeekDownload(context.cacheDir, link, path => importDeepSeekArchive(path, commit)) :
+        await chooseDeepSeekArchive(context, commit);
+      if (count === undefined || !this.mounted) { return; }
+      if (count < 0) { throw new Error(this.app.error || this.app.saveError || t('当前无法导入数据。')); }
+      if (count > 0) {
+        this.closeSearch();
+        this.setScope(false, null);
+        this.collapsedProjects = this.collapsedProjects.filter(id => id !== DEEPSEEK_IMPORT_GROUP);
+      }
+      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface,
+        message: count > 0 ? t('已导入 {0} 段 DeepSeek 对话。', [count]) : t('此 ZIP 中的 DeepSeek 会话已导入。') });
+    } catch (error) {
+      this.importError = t('导入 DeepSeek 会话失败：{0}', [(error as Error).message]);
+    } finally { this.importingDeepSeek = false; this.importingDeepSeekLink = false; }
+  }
+
+  @Builder
+  deepSeekImportSheet() {
+    Column({ space: Space.sm }) {
+      TextInput({ text: this.deepSeekLink, placeholder: t('粘贴 DeepSeek 导出包的下载链接') })
+        .id('deepseek-download-link').fontFamily(this.appearance.fontFamily).attributeModifier(Styles.input)
+        .type(InputType.URL).maxLength(DEEPSEEK_LINK_LIMIT).enterKeyType(EnterKeyType.Go)
+        .onChange((link: string) => { this.deepSeekLink = link; }).onSubmit(() => this.submitDeepSeekImport(true))
+      Button(t('下载并导入')).id('deepseek-download-import').fontFamily(this.appearance.fontFamily)
+        .attributeModifier(Btn.primary).width('100%').enabled(this.deepSeekLink.trim().length > 0)
+        .onClick(() => this.submitDeepSeekImport(true))
+      Button(t('选择本地 ZIP 文件')).id('deepseek-import-local-zip').fontFamily(this.appearance.fontFamily)
+        .attributeModifier(Btn.text).width('100%').onClick(() => this.submitDeepSeekImport(false))
+    }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.sm, bottom: Space.lg })
   }
   private locked(): boolean { return !this.app.canNavigate; }
   private endSelection(): void { this.selecting = false; this.selectedIds = []; this.selectionAnchor = ''; }
@@ -446,6 +510,7 @@ export struct ThreadList {
     return this.sectionCache?.byId.get(id);
   }
   private sectionTitle(id: string): string {
+    if (id === DEEPSEEK_IMPORT_GROUP) { return t('导入的会话'); }
     return this.app.projects.find((project) => project.id === id)?.name || t('普通聊天');
   }
   private loadMore(id: string): void {
@@ -804,17 +869,19 @@ export struct ThreadList {
     if (cached && cached.threads === threads && cached.projects === projects && cached.scope === scope &&
       cached.hideEmpty === hideEmpty) { return cached.sections; }
     const result = projects.map((project) => new ThreadSection(project.id, project.name));
+    const imported = new ThreadSection(DEEPSEEK_IMPORT_GROUP, t('导入的会话'));
     const ordinary = new ThreadSection('', t('普通聊天'));
-    result.push(ordinary);
+    result.push(imported, ordinary);
     const byId = new Map<string, ThreadSection>();
+    const projectIds = new Set(projects.map(project => project.id));
     for (const section of result) { byId.set(section.id, section); }
     for (const thread of threads) {
-      const section = byId.get(thread.projectId || '') || ordinary;
+      const section = byId.get(this.threadProject(thread, projectIds)) || ordinary;
       section.positions.set(thread.id, section.threads.length);
       section.threads.push(thread);
     }
     const sections = result.filter((section) => (scope === null || section.id === scope) &&
-      (!hideEmpty || section.threads.length > 0));
+      ((!hideEmpty && section.id !== DEEPSEEK_IMPORT_GROUP) || section.threads.length > 0));
     this.sectionCache = { threads: threads, projects: projects, scope: scope, hideEmpty: hideEmpty, sections: sections, byId: byId };
     return sections;
   }
@@ -846,6 +913,10 @@ export struct ThreadList {
           .id('threads-all-projects').onClick(() => this.setScope(this.archived, null))
         MenuItem(() => materialMenuContent.bind(this)({ label: t('普通聊天'), selected: this.projectFilter === '' }))
           .id('threads-ordinary').onClick(() => this.setScope(this.archived, ''))
+        if (this.app.threads.some(thread => thread.importSource === 'deepseek')) {
+          MenuItem(() => materialMenuContent.bind(this)({ label: t('导入的会话'), selected: this.projectFilter === DEEPSEEK_IMPORT_GROUP }))
+            .id('threads-imported').onClick(() => this.setScope(this.archived, DEEPSEEK_IMPORT_GROUP))
+        }
         ForEach(this.app.projects, (project: ProjectData) => {
           MenuItem(() => materialMenuContent.bind(this)({ label: project.name, selected: this.projectFilter === project.id }))
             .id('threads-project-' + project.id).onClick(() => this.setScope(this.archived, project.id))
@@ -858,6 +929,10 @@ export struct ThreadList {
         MenuItem({ content: t('新建项目'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.folder_badge_plus')) })
           .id('project-create').enabled(!this.app.sharedBusy && !this.app.saveError)
           .onClick(() => this.editProject())
+        MenuItem({ content: this.importingDeepSeek ? t('正在导入 DeepSeek 会话…') : t('导入 DeepSeek 会话'),
+          symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.square_and_arrow_down')) })
+          .id('import-deepseek-sessions').enabled(!this.importingDeepSeek && !this.app.sharedBusy && !this.app.saveError)
+          .onClick(() => { this.importError = ''; this.deepSeekImportOpen = true; })
       }
     }
   }
@@ -866,34 +941,10 @@ export struct ThreadList {
 
   @Builder
   searchControl() {
-    Row() {
-      Stack() {
-        SymbolGlyph($r('sys.symbol.magnifyingglass')).fontSize(19)
-          .fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
-        if (!this.searchOpen) {
-          Button({ type: ButtonType.Circle }).id('thread-search-toggle').width(this.searchHeight()).height(this.searchHeight())
-            .backgroundColor(Color.Transparent).accessibilityText(t('搜索对话')).enabled(!this.locked())
-            .onClick(() => this.searchRequested())
-        }
-      }.width(this.searchHeight()).height(this.searchHeight()).flexShrink(0)
-      if (this.searchOpen) {
-        TextInput({ placeholder: t('搜索对话') })
-          .id('search-threads').layoutWeight(1).height(this.searchHeight()).padding(0)
-          .fontFamily(this.appearance.fontFamily).fontSize(15).placeholderColor($r('app.color.text_tertiary'))
-          .backgroundColor(Color.Transparent).enabled(!this.locked()).accessibilityText(t('搜索对话'))
-          .onChange((value: string) => this.searchInputChanged(value))
-          .onKeyEvent((event: KeyEvent) => {
-            if (event.type === KeyType.Down && event.keyCode === KeyCode.KEYCODE_ESCAPE) {
-              this.closeSearch();
-              event.stopPropagation();
-            }
-          })
-        IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭搜索'), compId: 'close-thread-search',
-          diameter: this.searchHeight(), iconSize: 15, onTap: () => this.closeSearch() })
-      }
-    }.id('thread-search-pill').width(this.searchOpen ? this.toolbarWidth : this.searchHeight()).height(this.searchHeight())
-      .borderRadius(this.searchHeight() / 2).clip(true).backgroundColor($r('app.color.surface_variant'))
-      .animation({ duration: Motion.fast, curve: Motion.standard })
+    SearchPill({ open: this.searchOpen, diameter: this.searchHeight(), expandedWidth: this.toolbarWidth, disabled: this.locked(),
+      label: t('搜索对话'), value: this.query, pillId: 'thread-search-pill', toggleId: 'thread-search-toggle',
+      inputId: 'search-threads', closeId: 'close-thread-search', onOpen: () => this.searchRequested(),
+      onClose: () => this.closeSearch(), onChange: (value: string) => this.searchInputChanged(value) })
   }
 
   @Builder
@@ -920,12 +971,17 @@ export struct ThreadList {
             .bindMenu(this.scopeMenu, { systemMaterial: this.appearance.menu, mask: false })
           IconButton({ animatedIcon: 'newChat', label: t('新建对话'), compId: 'workbench-new-chat',
             diameter: this.searchHeight(), iconSize: 19, disabled: this.locked(), onTap: () => this.onNewChat(
-              this.projectFilter === null && this.workbench ? this.app.activeProject?.id : this.projectFilter || undefined) })
+              this.projectFilter === null && this.workbench ? this.app.activeProject?.id :
+                this.projectFilter === DEEPSEEK_IMPORT_GROUP ? undefined : this.projectFilter || undefined) })
         }.width('100%').height(this.searchHeight()).enabled(!this.searchOpen)
           .accessibilityLevel(this.searchOpen ? 'no-hide-descendants' : 'auto')
         this.searchControl()
       }.width('100%').height(this.searchHeight())
         .onAreaChange((_oldArea: Area, area: Area) => { this.toolbarWidth = Math.max(this.searchHeight(), Number(area.width)); })
+        .bindSheet($$this.deepSeekImportOpen, this.deepSeekImportSheet(), { radius: Radius.sheet, title: { title: t('导入 DeepSeek 会话') },
+          height: SheetSize.FIT_CONTENT, dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.TRANSLATE_AND_RESIZE,
+          systemMaterial: this.appearance.surface, onWillAppear: () => this.onProjectSheetVisibility(true),
+          onDisappear: () => this.deepSeekSheetClosed() })
     }
   }
 
@@ -945,7 +1001,8 @@ export struct ThreadList {
             .animation({ duration: Motion.medium, curve: Motion.standard })
           Text(this.sectionTitle(id)).fontFamily(this.appearance.fontFamily).fontSize(14).fontWeight(FontWeight.Medium).maxLines(1).layoutWeight(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .fontColor((this.app.active.projectId || '') === id ? this.appearance.accent : $r('app.color.text_secondary'))
+            .fontColor((this.app.active.projectId || (this.app.active.importSource === 'deepseek' ? DEEPSEEK_IMPORT_GROUP : '')) === id ?
+              this.appearance.accent : $r('app.color.text_secondary'))
           if (this.desktop) {
             Chevron({ pointing: 'down' })
               .rotate({ angle: this.groupOpen(id) ? 0 : -90 }).accessibilityLevel('no')
@@ -956,7 +1013,7 @@ export struct ThreadList {
         .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
         .onClick(() => this.toggleGroup(id))
         .accessibilityText(this.sectionTitle(id) + '，' + (this.groupOpen(id) ? t('收起') : t('展开')))
-      if (!this.selecting) {
+      if (!this.selecting && id !== DEEPSEEK_IMPORT_GROUP) {
         if (this.desktop && id && !this.archived) {
           Button({ type: ButtonType.Normal }) {
             SymbolGlyph($r('sys.symbol.wave_bubble_badge_plus')).fontSize(16).fontColor([$r('app.color.text_secondary')]).accessibilityLevel('no')
@@ -1048,6 +1105,10 @@ export struct ThreadList {
       if (this.app.saveError.length > 0) {
         Banner({ text: this.app.saveError, actionLabel: t("重试"), actionEnabled: !this.app.sharedBusy,
           onAction: () => { this.app.retrySave(); } })
+      } else if (this.importingDeepSeek) {
+        Banner({ text: this.importingDeepSeekLink ? t('正在下载并导入 DeepSeek 会话…') : t('正在导入 DeepSeek 会话…'), danger: false })
+      } else if (this.importError.length > 0) {
+        Banner({ text: this.importError, compId: 'deepseek-import-error' })
       } else if (this.app.error.length > 0) {
         Banner({ text: this.app.error })
       }

@@ -33,6 +33,7 @@ export struct SettingsPanel {
   @Prop presetsOnly: boolean = false;
   @Prop @Watch('revealSearchTarget') active: boolean = false;
   @Prop @Watch('revealSearchTarget') searchTarget: string = '';
+  @Prop viewportId: string = 'settings-items';
   @Prop @Watch('resetScroll') section: string = '';
   @State private assistantDraft: AssistantOptions = defaultAssistantOptions();
   @ObjectLink app: ChatViewModel;
@@ -56,7 +57,6 @@ export struct SettingsPanel {
   onLanguage: () => void = () => {};
   onSupport: (page: string) => void = () => {};
   onTools: (tab: string) => void = () => {};
-  private pendingSave: Promise<void> = Promise.resolve();
   private toggleRevisions: Map<SettingsToggle, number> = new Map<SettingsToggle, number>();
   private scroller: Scroller = new Scroller();
 
@@ -72,7 +72,7 @@ export struct SettingsPanel {
       if (!this.active || this.searchTarget !== target) { return; }
       const rects = ui.getComponentUtils();
       const item = rects.getRectangleById(target);
-      const viewport = rects.getRectangleById('settings-items');
+      const viewport = rects.getRectangleById(this.viewportId);
       if (item.size.height <= 0 || viewport.size.height <= 0) { return; }
       const top = viewport.windowOffset.y + ui.vp2px(Space.md);
       const bottom = viewport.windowOffset.y + viewport.size.height - ui.vp2px(Space.md);
@@ -111,17 +111,15 @@ export struct SettingsPanel {
   }
 
   // Respond immediately; serialize field changes without locking or resetting unrelated drafts.
-  private saveToggle(kind: SettingsToggle, value: boolean): void {
+  private async saveToggle(kind: SettingsToggle, value: boolean): Promise<void> {
     if (!this.canEdit()) { return; }
     this.setToggleDraft(kind, value);
     const revision = (this.toggleRevisions.get(kind) || 0) + 1;
     this.toggleRevisions.set(kind, revision);
-    this.pendingSave = this.pendingSave.then(async () => {
-      if (await this.app.setSettingsToggle(kind, value)) { return; }
-      // An earlier failure cannot undo a newer click on the same switch.
-      if (this.toggleRevisions.get(kind) === revision) { this.setToggleDraft(kind, this.savedToggleValue(kind)); }
-      this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.settings.error });
-    });
+    if (await this.app.setSettingsToggle(kind, value)) { return; }
+    // An earlier failure cannot undo a newer click on the same switch.
+    if (this.toggleRevisions.get(kind) === revision) { this.setToggleDraft(kind, this.savedToggleValue(kind)); }
+    this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: this.settings.error });
   }
 
   private userDocumentPreview(): string {
@@ -300,20 +298,22 @@ export struct SettingsPanel {
             NavRow({ title: t('语言'), icon: $r('sys.symbol.translate'), value: languageName(this.language),
               compId: 'open-language', disabled: !this.canEdit(), onTap: this.onLanguage })
             RowDivider()
-            Column({ space: Space.sm }) {
+            Row({ space: Space.xs }) {
               Row({ space: Space.md }) {
                 SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(20).fontColor([$r('app.color.text_secondary')])
                   .width(28).accessibilityLevel('no')
                 Text(t('启动时打开')).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
-              }.width('100%')
+                  .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              }.layoutWeight(1)
               Segmented({ options: [t('上次会话'), t('新建空会话')], selected: this.settings.newChatOnStartup ? 1 : 0,
                 optionIds: ['startup-last-chat', 'startup-new-chat'], compIdPrefix: 'startup-chat',
-                controlHeight: 50, trackRadius: 25, gap: 2, thumbShadow: false,
+                controlHeight: 36, trackRadius: 18, labelSize: 12, gap: 2, thumbShadow: false,
                 onSelect: (index: number) => {
                   const newChat = index === 1;
                   if (newChat !== this.settings.newChatOnStartup) { this.saveToggle('newChatOnStartup', newChat); }
-                } }).enabled(this.canEdit())
-            }.id('new-chat-on-startup').width('100%').padding(Space.lg).opacity(this.canEdit() ? 1 : 0.4)
+                } }).width(144).flexShrink(0).enabled(this.canEdit())
+            }.id('new-chat-on-startup').width('100%').constraintSize({ minHeight: 56 })
+              .padding({ left: Space.lg, right: Space.lg, top: Space.sm, bottom: Space.sm }).opacity(this.canEdit() ? 1 : 0.4)
               .backgroundColor(this.searchTarget === 'new-chat-on-startup' ? this.appearance.accentTint : Color.Transparent)
           }
         }
@@ -350,7 +350,7 @@ export struct SettingsPanel {
         }
         }
       }.padding({ left: Space.page, right: Space.page, bottom: Space.xl }).width('100%').attributeModifier(PageStyles.form)
-    }.id('settings-items').height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
+    }.id(this.viewportId).height('100%').width('100%').scrollBar(BarState.Off).edgeEffect(EdgeEffect.Spring).align(Alignment.Top)
   }
   build() {
     if (this.presetsOnly) { this.presetsPage() }

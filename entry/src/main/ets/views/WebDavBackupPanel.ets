@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { PageStyles } from '../common/PageStyles';
-import { Btn, Font, Radius, Space, Styles } from '../common/Theme';
+import { Btn, Font, Space, Styles } from '../common/Theme';
 import { Banner, GroupCard, NavRow, RowDivider, SectionHeader } from '../common/Widgets';
 import { Diagnostics } from '../model/Diagnostics';
 import { getLocale, t } from '../model/I18n';
@@ -161,66 +161,92 @@ export struct WebDavBackupPanel {
     GroupCard() {
       Column() {
         ForEach(this.connections, (connection: WebDavSettings) => {
-          NavRow({ title: connection.name, subtitle: connection.username + ' · ' + connection.directory, icon: $r('sys.symbol.cloud'),
+          NavRow({ title: connection.name, subtitle: connection.username + '\n' + connection.directory, icon: $r('sys.symbol.cloud'),
             trailing: 'select', active: this.saved?.id === connection.id,
             compId: 'webdav-connection-' + connection.id, disabled: this.busy, onTap: () => this.choose(connection) })
           RowDivider()
         }, (connection: WebDavSettings) => connection.id + ':' + (connection.grantId || '') + ':' + connection.name)
-        NavRow({ title: t('添加 WebDAV 连接'), icon: $r('sys.symbol.plus'), compId: 'webdav-add-connection',
+        NavRow({ title: t('添加 WebDAV 连接'), icon: $r('sys.symbol.plus'), compId: 'webdav-add-connection', accent: true,
           disabled: this.busy, onTap: () => this.choose() })
       }
     }
   }
 
   @Builder
+  fieldLabel(label: string) {
+    Text(label).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
+      .fontColor($r('app.color.text_secondary')).width('100%').accessibilityLevel('no')
+  }
+
+  @Builder
   connectionForm() {
+    Row({ space: Space.sm }) {
+      Text(this.saved ? t('连接设置') : t('添加 WebDAV 连接')).fontFamily(this.appearance.fontFamily)
+        .fontSize(13).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_secondary')).layoutWeight(1)
+      if (this.saved || this.dirty) {
+        Text(this.dirty ? t('有未保存的修改') : t('已保存')).id('webdav-connection-status')
+          .fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
+          .fontColor(this.dirty ? $r('app.color.text_tertiary') : this.appearance.accent)
+      }
+    }.width('100%').padding({ left: Space.xs, right: Space.xs, top: Space.lg, bottom: Space.sm })
     GroupCard() {
-      Column({ space: Space.md }) {
-        Row({ space: Space.sm }) {
-          SymbolGlyph($r('sys.symbol.cloud')).fontSize(20).fontColor([this.appearance.accent]).accessibilityLevel('no')
-          Text(t('连接设置')).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_primary')).layoutWeight(1)
-          Text(this.dirty ? t('有未保存的修改') : this.saved ? t('已保存') : t('未配置 WebDAV'))
-            .id('webdav-connection-status').fontFamily(this.appearance.fontFamily).fontSize(Font.caption)
-            .fontColor(this.saved && !this.dirty ? this.appearance.accent : $r('app.color.text_secondary'))
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            .padding({ left: Space.sm, right: Space.sm, top: 4, bottom: 4 }).borderRadius(Radius.sm)
-            .backgroundColor(this.saved && !this.dirty ? this.appearance.accentContainer : $r('app.color.surface_variant'))
-        }.width('100%')
-        Column({ space: Space.sm }) {
-          Text(t('连接名称')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
-            .fontColor($r('app.color.text_secondary')).width('100%')
-          TextInput({ text: this.name, placeholder: t('例如：坚果云、团队文件') }).id('webdav-name').maxLength(64)
-            .attributeModifier(Styles.input).accessibilityText(t('连接名称'))
-            .onChange((value: string) => { this.name = value; this.changed(); })
-          Text(t('WebDAV 目录地址')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
-            .fontColor($r('app.color.text_secondary')).width('100%')
-          TextInput({ text: this.directory, placeholder: 'https://example.com/dav/tinybot/' })
-            .id('webdav-directory').type(InputType.URL).attributeModifier(Styles.input).accessibilityText(t('WebDAV 目录地址'))
-            .onChange((value: string) => { this.directory = value; this.changed(); })
-          Text(t('WebDAV 账号')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
-            .fontColor($r('app.color.text_secondary')).width('100%')
-          TextInput({ text: this.username }).id('webdav-username').attributeModifier(Styles.input)
-            .accessibilityText(t('WebDAV 账号'))
-            .onChange((value: string) => { this.username = value; this.changed(); })
-          Text(t('WebDAV 密码或应用专用密码')).fontFamily(this.appearance.fontFamily).fontSize(Font.small)
-            .fontColor($r('app.color.text_secondary')).width('100%')
-          TextInput({ text: this.password, placeholder: this.saved ? t('留空保留当前密码') : '' })
-            .type(InputType.Password).showPasswordIcon(true).id('webdav-password').attributeModifier(Styles.input)
-            .accessibilityText(t('WebDAV 密码或应用专用密码'))
-            .onChange((value: string) => { this.password = value; this.changed(); })
-          Row({ space: Space.sm }) {
-            if (this.saved) {
-              Button(t('移除连接')).attributeModifier(Btn.textSmall).id('webdav-clear').constraintSize({ minHeight: 44 })
-                .onClick(() => this.confirmClear())
-            }
-            Button(t('保存连接')).attributeModifier(Btn.primary).id('webdav-save').layoutWeight(1)
-              .enabled(this.dirty && this.name.trim().length > 0 && this.directory.trim().length > 0 &&
-                this.username.trim().length > 0 && (this.saved !== undefined || this.password.length > 0))
-              .onClick(() => this.save(false))
+      Column({ space: Space.lg }) {
+        Column({ space: Space.md }) {
+          Column({ space: Space.xs }) {
+            this.fieldLabel(t('连接名称'))
+            TextInput({ text: this.name, placeholder: t('例如：坚果云、团队文件') }).id('webdav-name').maxLength(64)
+              .attributeModifier(Styles.input).fontFamily(this.appearance.fontFamily).accessibilityText(t('连接名称'))
+              .onChange((value: string) => { this.name = value; this.changed(); })
           }.width('100%')
-        }.width('100%').enabled(!this.busy)
-      }.width('100%').padding(Space.lg)
+          Column({ space: Space.xs }) {
+            this.fieldLabel(t('WebDAV 目录地址'))
+            TextInput({ text: this.directory, placeholder: 'https://example.com/dav/tinybot/' })
+              .id('webdav-directory').type(InputType.URL).attributeModifier(Styles.input).fontFamily(this.appearance.fontFamily)
+              .accessibilityText(t('WebDAV 目录地址')).onChange((value: string) => { this.directory = value; this.changed(); })
+          }.width('100%')
+        }.width('100%')
+        Divider().strokeWidth(0.5).color($r('app.color.divider'))
+        Column({ space: Space.md }) {
+          Column({ space: Space.xs }) {
+            this.fieldLabel(t('WebDAV 账号'))
+            TextInput({ text: this.username }).id('webdav-username').attributeModifier(Styles.input)
+              .fontFamily(this.appearance.fontFamily).accessibilityText(t('WebDAV 账号'))
+              .onChange((value: string) => { this.username = value; this.changed(); })
+          }.width('100%')
+          Column({ space: Space.xs }) {
+            this.fieldLabel(t('WebDAV 密码或应用专用密码'))
+            TextInput({ text: this.password, placeholder: this.saved ? t('留空保留当前密码') : '' })
+              .type(InputType.Password).showPasswordIcon(true).id('webdav-password').attributeModifier(Styles.input)
+              .fontFamily(this.appearance.fontFamily).accessibilityText(t('WebDAV 密码或应用专用密码'))
+              .onChange((value: string) => { this.password = value; this.changed(); })
+          }.width('100%')
+        }.width('100%')
+        Row({ space: Space.md }) {
+          if (this.saved) {
+            Button(t('移除连接')).attributeModifier(Btn.textSmall).fontColor($r('app.color.danger'))
+              .id('webdav-clear').constraintSize({ minHeight: 44 }).onClick(() => this.confirmClear())
+          }
+          Button(t('保存连接')).attributeModifier(Btn.primary).id('webdav-save').layoutWeight(1)
+            .enabled(this.dirty && this.name.trim().length > 0 && this.directory.trim().length > 0 &&
+              this.username.trim().length > 0 && (this.saved !== undefined || this.password.length > 0))
+            .onClick(() => this.save(false))
+        }.width('100%')
+      }.width('100%').padding(Space.lg).enabled(!this.busy)
+    }
+  }
+
+  @Builder
+  backupVersions() {
+    SectionHeader({ title: t('可恢复的备份') })
+    GroupCard() {
+      Column() {
+        ForEach(this.versions, (item: BackupSnapshot, index: number) => {
+          if (index > 0) { RowDivider() }
+          NavRow({ title: item.createdAt ? new Date(item.createdAt).toLocaleString(getLocale()) : t('旧版备份'),
+            subtitle: item.name.startsWith('tinybot-config-') ? t('配置备份 · 设备 {0}', [item.deviceId?.slice(0, 8) || '']) : t('旧版备份'),
+            icon: $r('sys.symbol.clock'), disabled: this.locked(), onTap: () => this.transfer(true, item.name) })
+        }, (item: BackupSnapshot) => item.name)
+      }
     }
   }
 
@@ -246,7 +272,7 @@ export struct WebDavBackupPanel {
   build() {
     Scroll() {
       Column() {
-        this.connectionList()
+        if (this.connections.length > 0) { this.connectionList() }
         this.connectionForm()
         if (!this.transferFeedback) { this.feedback() }
         SectionHeader({ title: t('备份与恢复'),
@@ -261,14 +287,10 @@ export struct WebDavBackupPanel {
               compId: 'restore-webdav-backup', animatedIcon: 'restore', disabled: this.locked(), onTap: () => this.chooseRestore() })
           }
         }
-        ForEach(this.versions, (item: BackupSnapshot) => {
-          NavRow({ title: item.createdAt ? new Date(item.createdAt).toLocaleString(getLocale()) : t('旧版备份'),
-            subtitle: item.name.startsWith('tinybot-config-') ? t('配置备份 · 设备 {0}', [item.deviceId?.slice(0, 8) || '']) : t('旧版备份'), icon: $r('sys.symbol.clock'),
-            disabled: this.locked(), onTap: () => this.transfer(true, item.name) })
-        }, (item: BackupSnapshot) => item.name)
         if (this.transferFeedback) { this.feedback() }
-      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.md, bottom: Space.xl })
+        if (this.versions.length > 0) { this.backupVersions() }
+      }.width('100%').padding({ left: Space.page, right: Space.page, top: Space.xs, bottom: Space.xl })
         .attributeModifier(PageStyles.form)
-    }.width('100%').height('100%').scrollBar(BarState.Off).align(Alignment.Top)
+    }.id('webdav-settings-scroll').width('100%').height('100%').scrollBar(BarState.Off).align(Alignment.Top)
   }
 }
