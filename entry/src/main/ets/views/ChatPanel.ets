@@ -1,4 +1,6 @@
+import { Chevron } from '../common/Chevron';
 import { FileAnnotationList } from './FileAnnotationList';
+import { filePreviewIcon } from '../common/FileArtwork';
 import { KeyCode } from '@kit.InputKit';
 import { ChatShortcut, ChatShortcutAction, NavigationShortcut, chatShortcuts, handleDraftEnter } from '../common/KeyboardShortcuts';
 import { AdaptiveUi } from '../model/AdaptiveUi';
@@ -72,7 +74,9 @@ class ChatLayoutFrame extends FrameCallback {
 }
 
 interface PendingComposerAction { owner: number; threadId: string; run: () => void; }
+interface HistoryPageAnchor { threadId: string; messageId: string; y: number; }
 
+const PHONE_COMPOSER_ACTION_SIZE: number = 44;
 const ATTACHMENT_FOLDER_WIDTH: number = 104;
 const ATTACHMENT_FOLDER_HEIGHT: number = 66;
 const ATTACHMENT_FLAP_SPRING: ICurve = curves.interpolatingSpring(0, 1, 420, 33);
@@ -112,11 +116,47 @@ export struct ChatPanel {
   private messageSource: MessageListSource = new MessageListSource();
   private messageSyncRevision: number = 0;
   private positionedThreadId: string = '';
+  private transcriptAttached: boolean = false;
+  private earlierAnchor?: HistoryPageAnchor;
+
+  private loadEarlierMessages(): void {
+    if (this.app.visibleMessageCount >= this.thread.messages.length) { return; }
+    const first = this.messageSource.getData(0);
+    if (first) {
+      const rect = this.scroller.getItemRect(1); // The earlier-history button occupies index zero.
+      this.earlierAnchor = { threadId: this.thread.id, messageId: first.id,
+        y: rect.height > 0 ? rect.y : this.topInset + Space.sm };
+    }
+    this.followOutput = false;
+    clearTimeout(this.scrollTimer); this.scrollTimer = -1;
+    this.app.visibleMessageCount = Math.min(this.thread.messages.length, this.app.visibleMessageCount + 60);
+  }
+
   private syncMessages(): void {
     const revision = ++this.messageSyncRevision;
     this.afterRender(() => {
-      if (revision !== this.messageSyncRevision) { return; }
-      this.messageSource.update(this.thread.id, this.app.visibleMessages);
+      if (revision !== this.messageSyncRevision || this.thread.id !== this.app.active.id) { return; }
+      const attached = this.transcriptAttached && !!this.positionedThreadId && this.messageSource.totalCount() > 0;
+      this.messageSource.update(this.thread.id, this.thread.messages, this.app.visibleMessageCount);
+      const visibleCount = this.messageSource.totalCount();
+      const anchor = this.earlierAnchor;
+      if (anchor) {
+        this.earlierAnchor = undefined;
+        if (anchor.threadId === this.thread.id) {
+          const index = this.messageSource.indexOf(anchor.messageId);
+          if (index >= 0) {
+            const destination = index + (visibleCount < this.thread.messages.length ? 1 : 0);
+            const lifetime = this.lifecycle;
+            // Anchor to the previous message, even when the button itself stayed visible.
+            this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
+              if (!this.composerMounted || this.lifecycle !== lifetime || this.thread.id !== anchor.threadId ||
+                this.messageSource.totalCount() !== visibleCount || this.app.searchMessageId) { return; }
+              this.scroller.scrollToIndex(destination, false, ScrollAlign.START,
+                { extraOffset: LengthMetrics.vp(this.topInset + Space.sm - anchor.y) });
+            }));
+          }
+        }
+      }
       if (this.showBrowserAnnotations && (this.positionedThreadId !== this.thread.id ||
         !this.thread.attachments.some((item) => !!item.browserAnnotation))) {
         this.showBrowserAnnotations = false;
@@ -125,14 +165,20 @@ export struct ChatPanel {
       this.positionedThreadId = this.thread.id;
       this.inspectingOutput = false;
       this.followOutput = !this.app.searchMessageId;
-      if (this.app.visibleMessages.length === 0 || this.app.searchMessageId) { return; }
+      if (visibleCount === 0 || this.app.searchMessageId) { return; }
+      if (attached) {
+        // Replace the previous transcript's scroll offset before laying out the new data.
+        if (Diagnostics.recording) { Diagnostics.event('scroll.open', { rows: visibleCount }); }
+        this.scrollToLatest(false);
+        return;
+      }
       const threadId = this.thread.id;
       const lifecycle = this.lifecycle;
       // LazyForEach has not mounted the tail yet, so its area callback cannot initiate this jump.
       this.getUIContext().postFrameCallback(new ChatLayoutFrame(() => {
         if (!this.composerMounted || this.lifecycle !== lifecycle || this.thread.id !== threadId ||
           !this.followOutput || this.app.searchMessageId) { return; }
-        if (Diagnostics.recording) { Diagnostics.event('scroll.open', { rows: this.app.visibleMessages.length }); }
+        if (Diagnostics.recording) { Diagnostics.event('scroll.open', { rows: this.messageSource.totalCount() }); }
         this.scrollToLatest(false);
       }));
     });
@@ -287,7 +333,7 @@ export struct ChatPanel {
     return message.role === 'user' ? Motion.rise(0, 16) : Motion.rise(2, 10);
   }
   private locate(): void {
-    const index = this.app.visibleMessages.findIndex((item) => item.id === this.app.searchMessageId);
+    const index = this.messageSource.indexOf(this.app.searchMessageId);
     if (index >= 0) { this.followOutput = false; this.scroller.scrollToIndex(index + (this.thread.messages.length > this.app.visibleMessageCount ? 1 : 0), false, ScrollAlign.CENTER); }
   }
 
@@ -303,6 +349,10 @@ export struct ChatPanel {
   aboutToAppear(): void {
     this.lifecycle++;
     this.composerMounted = true;
+    // The initial index must refer to rows already present in the data source.
+    if (this.thread.id === this.app.active.id) {
+      this.messageSource.update(this.thread.id, this.thread.messages, this.app.visibleMessageCount);
+    }
     this.syncMessages();
     this.messageSearchChanged();
     systemInsets(this.getUIContext()).then((insets: number[]) => { this.insetBottom = insets[1]; });
@@ -332,6 +382,7 @@ export struct ChatPanel {
   aboutToDisappear(): void {
     this.lifecycle++;
     this.composerMounted = false;
+    this.transcriptAttached = false;
     this.composerEditRevision++; this.composerSelectionRevision++;
     this.focusOwner++;
     this.cancelPlusAction();
@@ -562,15 +613,26 @@ export struct ChatPanel {
   }
 
   private scrollToLatest(smooth: boolean = true): void {
+    const lastIndex = this.lastMessageListIndex();
+    if (lastIndex < 0) { return; }
+    if (smooth) {
+      const tail = this.scroller.getItemRect(lastIndex);
+      // ArkUI measures every row crossed by an animated scrollToIndex.
+      smooth = tail.height > 0 && tail.y + tail.height <= this.panelHeight * 2;
+    }
     this.inspectingOutput = false;
     // Resume following at onReachEnd so streaming updates cannot interrupt the native spring's soft landing.
     this.followOutput = !smooth;
     clearTimeout(this.scrollTimer); this.scrollTimer = -1;
-    const earlier = this.app.visibleMessageCount < this.thread.messages.length ? 1 : 0;
-    const team = this.app.teams.some((run) => !run.ownerMessageId) ? 1 : 0;
-    const lastIndex = earlier + this.app.visibleMessages.length + team - 1;
     this.scroller.scrollToIndex(lastIndex, smooth, ScrollAlign.END);
   }
+  private lastMessageListIndex(): number {
+    const visible = this.messageSource.totalCount();
+    const earlier = visible < this.thread.messages.length ? 1 : 0;
+    const team = this.app.teams.some((run) => !run.ownerMessageId) ? 1 : 0;
+    return earlier + visible + team - 1;
+  }
+
   private updateScrollState(reachedEnd: boolean = false): void {
     const threadId = this.thread.id;
     // Native layout/snapshot flushes can invoke scrolling callbacks inside a render.
@@ -585,7 +647,7 @@ export struct ChatPanel {
     return (key: string, values: UiValues, action: string) => this.app.interactUi(threadId, messageId, key, values, action);
   }
   private send(): void {
-    if (this.speechActive()) { return; }
+    if (this.speechActive() || !this.app.canNavigateNow) { return; }
     if (!this.account.signedIn) { this.onAccount(); return; }
     this.inspectingOutput = false; this.followOutput = true;
     const context = this.getUIContext();
@@ -946,7 +1008,7 @@ export struct ChatPanel {
         Row({ space: 6 }) {
           SymbolGlyph($r('sys.symbol.folder')).fontSize(17).fontColor([$r('app.color.text_primary')])
           Text(this.app.activeProject?.name || t('普通聊天')).fontSize(14).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')])
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
         }.constraintSize({ maxWidth: 240 })
       }.id('workbench-project-picker').height(40).padding({ left: 10, right: 10 }).borderRadius(10)
         .backgroundColor(Color.Transparent).fontColor($r('app.color.text_primary')).enabled(!this.app.busy && !this.app.saveError)
@@ -955,7 +1017,7 @@ export struct ChatPanel {
         Row({ space: 6 }) {
           SymbolGlyph($r('sys.symbol.person_2')).fontSize(17).fontColor([$r('app.color.text_secondary')])
           Text(this.thread.teamEnabled ? t('团队模式') : t('标准模式')).fontSize(14)
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')])
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
         }
       }.id('workbench-team-mode').height(40).padding({ left: 10, right: 10 }).borderRadius(10)
         .backgroundColor(Color.Transparent).fontColor($r('app.color.text_secondary'))
@@ -1034,11 +1096,12 @@ export struct ChatPanel {
   @Builder
   messageList() {
     Stack({ alignContent: Alignment.Bottom }) {
-      List({ space: 22, scroller: this.scroller }) {
+      List({ space: 22, scroller: this.scroller,
+        initialIndex: this.app.searchMessageId ? 0 : Math.max(0, this.lastMessageListIndex()) }) {
         if (this.app.visibleMessageCount < this.thread.messages.length) {
           ListItem() {
             Button(t("加载更早的消息")).fontFamily(this.appearance.fontFamily).id('load-earlier-messages').attributeModifier(Btn.textSmall)
-              .onClick(() => { this.app.visibleMessageCount += 60; })
+              .onClick(() => this.loadEarlierMessages())
           }.width('100%')
         }
         LazyForEach(this.messageSource, (message: MessageViewModel) => {
@@ -1078,6 +1141,8 @@ export struct ChatPanel {
       .scrollBar(this.desktop ? BarState.Auto : BarState.Off)
       .edgeEffect(this.desktop ? EdgeEffect.None : EdgeEffect.Spring)
       .cachedCount(1).maintainVisibleContentPosition(true)
+      .onAppear(() => { this.transcriptAttached = true; })
+      .onDisAppear(() => { this.transcriptAttached = false; })
       .onScrollStart(() => this.setScrollActivity(true))
       .onScrollStop(() => this.stopScrollActivity())
       .onTouch((event: TouchEvent) => { if (event.type === TouchType.Down) { this.followOutput = false; } })
@@ -1161,7 +1226,8 @@ export struct ChatPanel {
         .maxLines(2).textAlign(TextAlign.Center)
     }
     .id(compId).layoutWeight(1).opacity(enabled ? 1 : 0.4).enabled(enabled)
-    .clickEffect(enabled ? Motion.press : null)
+    .hoverEffect(enabled ? HoverEffect.Highlight : HoverEffect.None)
+    .clickEffect(enabled && this.appearance.effectStrength > 0 ? Motion.press : null)
     .onClick(action)
   }
 
@@ -1174,10 +1240,11 @@ export struct ChatPanel {
         .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
         .fontColor(enabled ? $r('app.color.text_primary') : $r('app.color.text_tertiary'))
       if (withChevron) {
-        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'right' })
       }
     }
     .id(compId).width('100%').height(46).padding({ left: 10, right: 8 }).borderRadius(10)
+    .hoverEffect(enabled ? HoverEffect.Highlight : HoverEffect.None)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .opacity(enabled ? 1 : 0.45).enabled(enabled).onClick(action)
   }
@@ -1198,7 +1265,7 @@ export struct ChatPanel {
       this.plusMenuRow($r('sys.symbol.doc_text'), t('文本文件'), 'plus-menu-text',
         this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false,
         () => this.dismissPlusMenu(() => this.attach('file')))
-      this.plusMenuRow($r('sys.symbol.square_and_pencil'), t('画板'), 'plus-menu-drawing',
+      this.plusMenuRow($r('sys.symbol.pencil_tip'), t('画板'), 'plus-menu-drawing',
         this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, false,
         () => this.dismissPlusMenu(() => this.openDrawing()))
       Divider().strokeWidth(0.5).color($r('app.color.divider')).margin({ left: 10, right: 10, top: 4, bottom: 4 })
@@ -1232,7 +1299,7 @@ export struct ChatPanel {
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('camera')))
           this.plusTile($r('sys.symbol.doc_text'), t("文本文件"), 'attach-text',
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.attach('file')))
-          this.plusTile($r('sys.symbol.square_and_pencil'), t('画板'), 'attach-drawing',
+          this.plusTile($r('sys.symbol.pencil_tip'), t('画板'), 'attach-drawing',
             this.canAttach() && this.thread.attachments.length < MAX_MESSAGE_ATTACHMENTS, () => this.fromSheet(() => this.openDrawing()))
           this.plusTile($r('sys.symbol.folder'), t("工作区"), 'open-workspace', !this.app.busy,
             () => { this.showPlus = false; this.onFiles(); })
@@ -1252,7 +1319,7 @@ export struct ChatPanel {
       if (item.mime === 'image/jpeg') {
         Image('file://' + Attachments.path(item)).width('100%').height('100%').objectFit(ImageFit.Cover)
       } else {
-        SymbolGlyph($r('sys.symbol.doc_text')).fontSize(size < 32 ? 14 : 20).fontColor([this.appearance.accent])
+        SymbolGlyph(filePreviewIcon(item.name)).fontSize(size < 32 ? 14 : 20).fontColor([this.appearance.accent]).accessibilityLevel('no')
       }
     }.width(size).height(size).borderRadius(radius).clip(true).backgroundColor($r('app.color.surface_variant'))
   }
@@ -1281,7 +1348,7 @@ export struct ChatPanel {
         Row({ space: Space.xs }) {
           Text(t('{0} 条网页批注', [items.length])).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.small).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
-          SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')])
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
             .rotate({ angle: this.showBrowserAnnotations ? 0 : 180 }).accessibilityLevel('no')
         }
       }.id('draft-browser-annotations').attributeModifier(Btn.tonalSmall)
@@ -1304,7 +1371,7 @@ export struct ChatPanel {
           .backgroundColor(Color.Transparent).accessibilityText(item.name).onClick(() => this.previewAttachment(item))
       } else {
         Column({ space: 2 }) {
-          SymbolGlyph($r('sys.symbol.doc_text')).fontSize(18).fontColor([this.appearance.accent])
+          SymbolGlyph(filePreviewIcon(item.name)).fontSize(18).fontColor([this.appearance.accent]).accessibilityLevel('no')
           Text(item.name).fontFamily(this.appearance.fontFamily).fontSize(11).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
           Text(fileSize(item.size)).fontFamily(this.appearance.fontFamily).fontSize(10).fontColor($r('app.color.text_tertiary'))
@@ -1312,10 +1379,11 @@ export struct ChatPanel {
           .alignItems(HorizontalAlign.Start).borderRadius(Radius.md).backgroundColor($r('app.color.surface_variant'))
       }
       Button({ type: ButtonType.Circle }) {
-        SymbolGlyph($r('sys.symbol.xmark')).fontSize(10).fontColor([Color.White])
-      }.id('remove-attachment-' + item.id).width(20).height(20).backgroundColor('#99000000')
+        SymbolGlyph($r('sys.symbol.xmark')).fontSize(16).fontColor([Color.White]).accessibilityLevel('no')
+      }.id('remove-attachment-' + item.id).width(20).height(20).padding(0).backgroundColor('#99000000')
         .margin({ top: 4, right: 4 }).accessibilityText(t('移除 ') + item.name)
-        .hitTestBehavior(HitTestMode.Block).responseRegion({ x: -10, y: -10, width: 40, height: 40 })
+        .bindTips(t('移除 ') + item.name, { appearingTime: 550 })
+        .hitTestBehavior(HitTestMode.Block).responseRegion({ x: -20, y: -4, width: 44, height: 44 })
         .enabled(this.canAttach()).onClick(() => this.removeAttachment(item.id))
     }.enabled(!this.app.busy)
   }
@@ -1422,7 +1490,7 @@ export struct ChatPanel {
         Text(fileSize(item.size)).fontFamily(this.appearance.fontFamily).fontSize(10)
           .fontColor($r('app.color.text_secondary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-      IconButton({ icon: $r('sys.symbol.trash'), label: t('移除 ') + item.name, compId: 'remove-attachment-' + item.id,
+      IconButton({ icon: $r('sys.symbol.xmark'), label: t('移除 ') + item.name, compId: 'remove-attachment-' + item.id,
         iconSize: 15, fill: '#00000000', tint: $r('app.color.text_secondary'), disabled: !this.canAttach(),
         onTap: () => this.removeAttachment(item.id) })
     }.width(this.panelWidth >= 330 ? 'calc(50% - 4vp)' : '100%').constraintSize({ minHeight: 48 })
@@ -1643,7 +1711,7 @@ export struct ChatPanel {
         Text(t("主 Agent 自主招募员工、并行分工并汇总结果")).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_tertiary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-      SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+      Chevron({ pointing: 'right' })
     }
     .id('slash-team').width('100%').padding({ left: Space.md, right: Space.md, top: 10, bottom: 10 })
     .borderRadius(Radius.lg).backgroundColor(this.commandSearch && this.completionIndex === 0 ? $r('app.color.selection') : $r('app.color.surface'))
@@ -1704,16 +1772,13 @@ export struct ChatPanel {
   @Builder
   modelButton() {
     Button({ type: ButtonType.Capsule }) {
-      Row({ space: 6 }) {
-        Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
-          .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
-        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(10).fontColor([$r('app.color.text_secondary')]).flexShrink(0)
-          .rotate({ angle: this.showModelMenu ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
-      }
+      Text(this.thread.modelRef?.modelId || t('选择模型')).fontFamily(this.appearance.fontFamily).fontSize(13).maxLines(1)
+        .fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis })
     }.id('composer-model-picker').height(this.workbench ? 36 : 44)
       .constraintSize({ minWidth: 64, maxWidth: Math.max(64, Math.min(220, this.panelWidth / 2)) })
       .padding({ left: 12, right: 12 }).backgroundColor(Color.Transparent)
       .border({ width: 0.5, color: $r('app.color.divider') }).focusOnTouch(false)
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .enabled(this.app.ready && !this.app.busy && !this.thread.archived && !this.app.saveError)
       .accessibilityText(this.thread.modelRef ? t('选择模型') + '：' + this.app.currentModelLabel : t('选择模型'))
       .onAreaChange((_previous: Area, current: Area) => { this.modelButtonTop = Number(current.globalPosition.y); })
@@ -1748,7 +1813,7 @@ export struct ChatPanel {
   toolApprovalOption(mode: ToolApprovalMode, description: string) {
     Button({ type: ButtonType.Normal }) {
       Row({ space: 12 }) {
-        SymbolGlyph(mode === 'ask' ? $r('sys.symbol.lock') : $r('sys.symbol.bolt')).fontSize(18).width(20)
+        SymbolGlyph(mode === 'ask' ? $r('sys.symbol.lock') : $r('sys.symbol.checkmark_shield')).fontSize(18).width(20)
           .fontColor([$r('sys.color.icon_primary')]).accessibilityLevel('no')
         Column({ space: 4 }) {
           Text(toolApprovalModeName(mode)).fontFamily(this.appearance.fontFamily).fontSize(14)
@@ -1779,16 +1844,19 @@ export struct ChatPanel {
   toolApprovalButton() {
     Button({ type: ButtonType.Capsule }) {
       Row({ space: 5 }) {
-        SymbolGlyph(this.thread.toolApprovalMode === 'full' ? $r('sys.symbol.bolt') : $r('sys.symbol.lock'))
+        SymbolGlyph(this.thread.toolApprovalMode === 'full' ? $r('sys.symbol.checkmark_shield') : $r('sys.symbol.lock'))
           .fontSize(14).fontColor([this.thread.toolApprovalMode === 'full' ? this.appearance.accent : $r('app.color.text_secondary')])
+          .accessibilityLevel('no')
         Text(toolApprovalModeName(this.thread.toolApprovalMode)).fontFamily(this.appearance.fontFamily)
           .fontSize(12).maxLines(1).fontColor($r('app.color.text_primary')).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
     }.id('composer-tool-approval').height(this.workbench ? 36 : 44).constraintSize({ minWidth: this.workbench ? 36 : 44 })
       .padding({ left: 8, right: 8 }).focusOnTouch(false)
       .backgroundColor(Color.Transparent)
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .enabled(this.app.ready && !this.app.busy && !this.thread.archived && this.app.saveError.length === 0)
       .accessibilityText(t('工具审批') + '：' + toolApprovalModeName(this.thread.toolApprovalMode))
+      .bindTips(t('工具审批') + '：' + toolApprovalModeName(this.thread.toolApprovalMode), { appearingTime: 550 })
       .onClick(() => { this.showToolApprovalMode = !this.showToolApprovalMode; })
       .bindPopup(this.showToolApprovalMode, { builder: this.toolApprovalMenu, placement: Placement.Top,
         systemMaterial: this.appearance.menu, popupColor: $r('app.color.surface'), radius: 20,
@@ -1813,9 +1881,12 @@ export struct ChatPanel {
   @Builder
   composerOptionsButton() {
     Button({ type: ButtonType.Circle }) {
-      SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
-    }.id('composer-options').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
+      SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+    }.id('composer-options').width(this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE)
+      .height(this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE)
       .backgroundColor(Color.Transparent).accessibilityText(t('输入选项'))
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+      .bindTips(t('输入选项'), { appearingTime: 550 })
       .bindMenu(this.composerOptions, { systemMaterial: this.appearance.menu, mask: false })
   }
 
@@ -1838,6 +1909,7 @@ export struct ChatPanel {
         .backgroundColor($r('app.color.divider')).accessibilityLevel('no')
     }.id('context-usage').width(this.workbench ? 36 : 44).height(this.workbench ? 36 : 44)
       .padding(0).backgroundColor(Color.Transparent)
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
       .focusOnTouch(false).accessibilityText(this.app.contextLabel)
       .onClick(() => { this.showContext = true; })
       .bindSheet($$this.showContext, this.contextSheet(), { radius: Radius.sheet,
@@ -1849,7 +1921,8 @@ export struct ChatPanel {
 
   @Builder
   composerAddButton() {
-    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板或文件'), compId: 'add-attachment', diameter: this.workbench ? 36 : 44,
+    IconButton({ icon: $r('sys.symbol.plus'), label: t('添加图片、画板或文件'), compId: 'add-attachment',
+      diameter: this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE,
       iconSize: 18, fill: '#00000000', animatedIcon: 'plus', animatedSelected: this.showPlus || this.showPlusMenu,
       disabled: this.thread.archived || this.app.saveError.length > 0 || this.speechActive() || this.speechHolding,
       onTap: () => {
@@ -1925,6 +1998,23 @@ export struct ChatPanel {
         .onFocus(() => { this.composerFocused = true; this.inspectingOutput = false; this.followOutput = true; this.follow(); })
         .onBlur(() => { this.composerHasPreview = false; this.composerFocused = false; })
         .onEditChange((editing: boolean) => { this.composerFocused = editing; })
+  }
+
+  private composerToolbarHeight(): number {
+    if (this.speechActive()) { return this.workbench ? 48 : 56; }
+    if (this.composerExpanded()) { return this.workbench ? 44 : 52; }
+    return this.workbench ? 46 : 54;
+  }
+
+  private composerBorderWidth(): number {
+    return this.composerActiveInLayout() ? 1 : 0.5;
+  }
+
+  private composerCorners(): BorderRadiuses {
+    const top = this.desktop ? Radius.lg : this.composerExpanded() ? Radius.xl : 28;
+    const bottom = this.workbench || this.voiceMode ? top :
+      PHONE_COMPOSER_ACTION_SIZE / 2 + Space.sm + this.composerBorderWidth();
+    return { topLeft: top, topRight: top, bottomLeft: bottom, bottomRight: bottom };
   }
 
   @Builder
@@ -2007,8 +2097,8 @@ export struct ChatPanel {
           .accessibilityLevel(this.composerExpanded() ? 'auto' : 'no-hide-descendants')
           .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.None)
         }
-        IconButton({ icon: $r('sys.symbol.mic'), label: t('切换到语音输入'), compId: 'start-speech', diameter: this.workbench ? 36 : 44,
-          iconSize: 19, fill: $r('app.color.surface_variant'), disabled: !this.canRecordSpeech(),
+        IconButton({ icon: $r('sys.symbol.mic'), label: t('切换到语音输入'), compId: 'start-speech',
+          diameter: this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE, iconSize: 19, fill: $r('app.color.surface_variant'), disabled: !this.canRecordSpeech(),
           onTap: () => this.enterVoiceMode() })
           .margin({ left: 4 })
         if (this.app.generating) {
@@ -2028,8 +2118,8 @@ export struct ChatPanel {
                 .onClick(() => this.app.enqueueInput('followUp'))
             }
           }
-          IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
-            iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
+          IconButton({ icon: $r('sys.symbol.square_fill'), label: t('停止生成'), compId: 'stop-generation',
+            diameter: this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE, iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
             onTap: () => { this.app.stop(); } })
             .margin({ left: 4 })
             .transition(Motion.pop())
@@ -2040,28 +2130,32 @@ export struct ChatPanel {
               .enabled(this.app.canQueueInput).onClick(() => this.app.enqueueInput('followUp'))
           }
           Row() {
-          IconButton({ icon: $r('sys.symbol.arrow_up'), label: t("发送"), compId: 'send-message', diameter: this.workbench ? 36 : 44, iconSize: 18,
+          IconButton({ animatedIcon: 'send', label: t('发送'), compId: 'send-message',
+            diameter: this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE, iconSize: 18,
             fill: this.canSend() ? this.appearance.accent : $r('app.color.surface_variant'),
             tint: this.canSend() ? this.appearance.onAccent : $r('app.color.text_tertiary'),
             disabled: !this.canSend(), onTap: () => this.send() })
             .bindContextMenu(this.sendMenu, ResponseType.LongPress, {
               systemMaterial: this.appearance.menu, mask: false })
-          }.width((this.workbench || this.hasDraft()) && !this.speechActive() ? this.workbench ? 40 : 48 : 0).height(this.workbench ? 36 : 44)
+          }.width((this.workbench || this.hasDraft()) && !this.speechActive() ? this.workbench ? 40 : PHONE_COMPOSER_ACTION_SIZE + 4 : 0)
+            .height(this.workbench ? 36 : PHONE_COMPOSER_ACTION_SIZE)
             .padding({ left: (this.workbench || this.hasDraft()) && !this.speechActive() ? 4 : 0 }).clip(true)
             .opacity((this.workbench || this.hasDraft()) && !this.speechActive() ? 1 : 0)
             .animation({ duration: Motion.fast, curve: Motion.standard })
             .hitTestBehavior((this.workbench || this.hasDraft()) && !this.speechActive() ? HitTestMode.Default : HitTestMode.None)
             .accessibilityLevel((this.workbench || this.hasDraft()) && !this.speechActive() ? 'auto' : 'no-hide-descendants')
         }
-      }.width('100%').height(this.speechActive() ? this.workbench ? 48 : 56 : this.composerExpanded() ? this.workbench ? 44 : 52 : this.workbench ? 46 : 54)
-        .padding({ left: 8, right: 8, bottom: this.composerExpanded() ? 8 : 10 })
+      }.width('100%').height(this.composerToolbarHeight())
+        .padding({ left: Space.sm, right: Space.sm,
+          top: this.workbench ? 0 : this.composerToolbarHeight() - PHONE_COMPOSER_ACTION_SIZE - Space.sm,
+          bottom: this.workbench && !this.composerExpanded() ? 10 : Space.sm })
         .animation({ duration: Motion.medium, curve: Motion.standard })
         .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.Transparent)
       }
-    }.id('composer-shell').width('100%').borderRadius(this.desktop ? Radius.lg : this.composerExpanded() ? Radius.xl : 28).clip(true)
+    }.id('composer-shell').width('100%').borderRadius(this.composerCorners()).clip(true)
     .onAreaChange((_previous: Area, current: Area) => { this.composerWindowTop = Number(current.globalPosition.y); })
     .backgroundColor($r('app.color.surface'))
-    .border({ width: this.composerActiveInLayout() ? 1 : 0.5,
+    .border({ width: this.composerBorderWidth(),
       color: this.composerActiveInLayout() ? this.appearance.accentOutline : $r('app.color.divider') })
     .shadow(this.desktop ? { radius: 8, color: '#0A000000', offsetY: 2 }
       : this.composerActiveInLayout() ? { radius: 28, color: this.appearance.accentGlow, offsetY: 4 }
@@ -2086,7 +2180,7 @@ export struct ChatPanel {
         iconSize: 20, fill: $r('app.color.surface_variant'), disabled: this.voiceOverlayVisible(),
         onTap: () => this.showSpeechKeyboard() })
       if (this.app.generating) {
-        IconButton({ icon: $r('sys.symbol.square_fill'), label: t("停止"), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
+        IconButton({ icon: $r('sys.symbol.square_fill'), label: t('停止生成'), compId: 'stop-generation', diameter: this.workbench ? 36 : 44,
           iconSize: 14, fill: $r('app.color.text_primary'), tint: $r('app.color.page_background'),
           onTap: () => { this.app.stop(); } })
           .transition(Motion.pop())
@@ -2098,7 +2192,7 @@ export struct ChatPanel {
   approvalCard() {
     Column({ space: 10 }) {
       Row({ space: Space.sm }) {
-        SymbolGlyph($r('sys.symbol.connection')).fontSize(20).fontColor([this.appearance.accent])
+        SymbolGlyph($r('sys.symbol.lock')).fontSize(20).fontColor([this.appearance.accent]).accessibilityLevel('no')
         Column({ space: 2 }) {
           Text(t('允许调用工具？')).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
           Text(this.approval.title).fontFamily(this.appearance.fontFamily).id('approval-title').fontSize(15).fontWeight(FontWeight.Medium).maxLines(2)
@@ -2245,7 +2339,10 @@ export struct ChatPanel {
       Text(t('AI生成内容可能有误，请仔细鉴别。')).fontFamily(this.appearance.fontFamily).id('ai-disclaimer')
         .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         .textAlign(TextAlign.Center).width('100%')
-        .padding({ left: Space.sm + (this.workbench ? 24 : 10), right: Space.sm + (this.workbench ? 24 : 10), bottom: Space.sm })
+        .padding({ left: Space.sm + (this.workbench ? 24 : 10), right: Space.sm + (this.workbench ? 24 : 10),
+          bottom: this.workbench ? Space.sm : 2 })
+        // Let the notice use the top of the gesture inset while keeping the system handle clear.
+        .margin({ bottom: this.workbench ? 0 : -Math.min(Space.lg, Math.max(0, this.viewport.bottom - Space.md)) })
         .visibility(this.keyboardVisibleInLayout() ? Visibility.None : Visibility.Visible)
     }.height('100%').width('100%').padding({ top: this.centeredWelcome() ? this.topInset : 0 })
       .bindSheet($$this.showMemoryDraft, this.memoryDraftSheet(), { radius: Radius.sheet, title: { title: t("提炼并确认记忆") }, detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,

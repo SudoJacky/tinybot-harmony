@@ -1,8 +1,9 @@
 // Runs inside the native-adapter harness with real files, production import code and real AES-GCM.
-module.exports = async function completeBackup({ load, fs, nativePath, secrets, model, crypto, ConversationStore, idleRuntime, Attachments, backupAccount, preferences }) {
+module.exports = async function completeBackup({ load, fs, nativePath, selectFile, secrets, model, crypto, ConversationStore, idleRuntime, Attachments, backupAccount, preferences }) {
   const assert = require('node:assert/strict');
   const { legacyBackupFixture } = require('./backup-fixture.cjs');
-  const { createBackupFile, readBackupFile } = load('services/Backup');
+  const { exportBackup, readBackup, readBackupFile } = load('services/Backup');
+  const { discardBackupImport } = load('model/BackupImport');
   const { SessionService } = load('services/SessionService');
   const { CredentialStore } = load('services/CredentialStore');
   const { MailAccounts } = load('services/MailAccounts');
@@ -94,7 +95,15 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   preferences.getPreferencesSync(source, { name: 'tinybot-feedback' }).putSync('seenReplies', JSON.stringify({ replyOld: '2026-11-07T00:00:00Z' }));
   settings.putSync('privacyConsent', true); settings.putSync('huaweiAccountToken', 'NEVER_MIGRATE');
   Attachments.configure(source.filesDir);
-  const original = JSON.stringify(data), archive = await createBackupFile(source, data), bytes = fs.readFileSync(nativePath(archive));
+  const original = JSON.stringify(data), archive = 'file://docs/sandbox/saved-backup.tinybot';
+  selectFile(undefined);
+  assert.equal(await exportBackup(source, data), false);
+  assert.deepEqual(fs.readdirSync(nativePath(source.cacheDir)), [], 'Cancelling save removes the staged archive');
+  fs.writeFileSync(nativePath(archive), ''); // The document picker creates the file before granting its URI.
+  selectFile(archive);
+  assert.equal(await exportBackup(source, data), true);
+  assert.deepEqual(fs.readdirSync(nativePath(source.cacheDir)), [], 'Saving removes the staged archive');
+  const bytes = fs.readFileSync(nativePath(archive));
   assert.equal(JSON.stringify(data), original, 'Export never mutates live settings');
   const envelope = legacyBackupFixture(bytes), publicText = JSON.stringify(envelope);
   for (const key of [...rawSecrets, balanceKey, feedbackIdentity, 'OAUTH_PRIVATE_COMPLETE', 'REFRESH_PRIVATE_COMPLETE', 'NEVER_MIGRATE']) assert.ok(!publicText.includes(key), 'No credential or system authorization in public backup metadata');
@@ -116,7 +125,13 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
     tools: () => ({ definitions: () => [], execute: async () => { throw Error('No tools run during restore'); } }) };
   const repository = new ConversationStore(destination.filesDir);
   const session = new SessionService(repository, idleRuntime(vault), vault, resources); await session.initialize();
-  const restored = await readBackupFile(destination, archive, session.snapshot());
+  selectFile(undefined);
+  assert.equal(await readBackup(destination, session.snapshot()), undefined);
+  selectFile(archive);
+  const cancelled = await readBackup(destination, session.snapshot());
+  await discardBackupImport(cancelled);
+  assert.equal(fs.existsSync(nativePath(destination.filesDir + '/workspace/orphan/note.txt')), false, 'Cancelling confirmation removes prepared files');
+  const restored = await readBackup(destination, session.snapshot());
   assert.equal(await session.importSnapshot(restored), true, session.state.error);
   const result = session.snapshot();
   assert.equal(result.threads.find(item => item.id === 'owner').draft, 'Unfinished draft');
@@ -251,4 +266,11 @@ module.exports = async function completeBackup({ load, fs, nativePath, secrets, 
   assert.equal(JSON.stringify(capacitySession.snapshot()), capacityBefore);
   assert.equal(secrets.size, 0);
   assert.equal(fs.existsSync(nativePath(capacityTarget.filesDir + '/workspace/' + panelPath('api'))), false, 'Admission failure discards newly prepared files too');
+
+  const blockedTarget = context('/sandbox/complete-blocked');
+  write(blockedTarget.filesDir, 'retired-owner/mini-apps', 'Keep existing file');
+  await assert.rejects(readBackup(blockedTarget, model.emptyData()), /工作区路径必须是目录/);
+  assert.equal(fs.existsSync(nativePath(blockedTarget.filesDir + '/workspace/owner/mini-apps/ledger/app.json')), false,
+    'A later extraction failure removes files prepared for earlier workspaces');
+  assert.equal(fs.readFileSync(nativePath(blockedTarget.filesDir + '/workspace/retired-owner/mini-apps'), 'utf8'), 'Keep existing file');
 };

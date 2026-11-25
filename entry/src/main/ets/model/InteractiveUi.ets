@@ -215,6 +215,7 @@ export class UiCompiler {
 }
 // Other code fences are never interpreted as UI, including examples nested in longer fences.
 export function uiParts(content: string, streaming: boolean): UiPart[] {
+  if (!content.includes('```')) { return content ? [{ kind: 'text', key: 'text-0', content: content, closed: true }] : []; }
   const parts: UiPart[] = []; let plain = ''; let body = ''; let inUi = false; let otherFence = ''; let fenceLength = 0; let ordinal = 0;
   const lines = content.split('\n');
   for (let index = 0; index < lines.length; index++) {

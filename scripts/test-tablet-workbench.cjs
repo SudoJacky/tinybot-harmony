@@ -12,6 +12,7 @@ function sourceModule(file, globals = {}) {
 }
 const { WorkbenchLayout } = sourceModule('entry/src/main/ets/model/WorkbenchLayout.ets');
 const { iconPath } = sourceModule('entry/src/main/ets/common/IconArtwork.ets');
+const HoverEffect = { None: 'none', Highlight: 'highlight' };
 function emitted(file, name) {
   const original = path.join(root, 'entry/src/main/ets', file + '.ets');
   const compiled = path.join(root, 'entry/build/default/cache/default/default@CompileArkTS/esmodule/debug/entry/src/main/ets', file + '.ts');
@@ -28,6 +29,52 @@ function probe(file, name, methods, globals = {}) {
   }).outputText, { exports, ...globals });
   return exports.Probe;
 }
+
+const MouseButton = { Left: 'left', Right: 'right' };
+const MouseAction = { Press: 'press', Release: 'release' };
+const TouchType = { Down: 'down', Up: 'up', Cancel: 'cancel' };
+const SourceType = { Mouse: 'mouse', TouchScreen: 'touch' };
+const IconControl = probe('common/Widgets', 'IconButton',
+  ['pressed', 'iconScale', 'disabledChanged', 'iconHover', 'iconMouse', 'iconTouch'],
+  { MouseButton, MouseAction, TouchType, SourceType });
+const iconControl = Object.assign(new IconControl(), {
+  appearance: { effectStrength: 1 }, disabled: false, iconHovered: false, mousePressed: false, touchPressed: false
+});
+iconControl.iconHover(true);
+assert.ok(iconControl.iconScale() > 1);
+iconControl.iconMouse({ button: MouseButton.Right, action: MouseAction.Press });
+assert.equal(iconControl.pressed(), false);
+iconControl.iconMouse({ button: MouseButton.Left, action: MouseAction.Press });
+iconControl.iconTouch({ source: SourceType.Mouse, type: TouchType.Down });
+assert.ok(iconControl.iconScale() < 1);
+iconControl.iconHover(false);
+assert.equal(iconControl.pressed(), false, 'Dragging a mouse press off the icon clears feedback');
+assert.equal(iconControl.iconScale(), 1);
+iconControl.iconTouch({ source: SourceType.TouchScreen, type: TouchType.Down });
+assert.ok(iconControl.iconScale() < 1);
+iconControl.iconTouch({ source: SourceType.TouchScreen, type: TouchType.Cancel });
+assert.equal(iconControl.iconScale(), 1);
+iconControl.iconHover(true);
+iconControl.iconMouse({ button: MouseButton.Left, action: MouseAction.Press });
+iconControl.iconMouse({ button: MouseButton.Left, action: MouseAction.Release });
+assert.ok(iconControl.iconScale() > 1, 'Releasing the mouse over the button restores the hover state');
+iconControl.disabled = true; iconControl.disabledChanged();
+iconControl.disabled = false;
+assert.equal(iconControl.iconScale(), 1);
+iconControl.appearance.effectStrength = 0;
+iconControl.iconHover(true);
+iconControl.iconTouch({ source: SourceType.TouchScreen, type: TouchType.Down });
+assert.equal(iconControl.iconScale(), 1);
+for (const name of ['panelLeft', 'panelRight', 'elementPicker', 'draw', 'send', 'backup', 'restore']) {
+  const rest = iconPath(name, 1, 1);
+  assert.notEqual(iconPath(name, 0.6, 1), rest);
+  assert.equal(iconPath(name, 0, 1), rest);
+  assert.equal(iconPath(name, 0.6, 0), rest);
+}
+assert.notEqual(iconPath('panelLeft', 1, 1), iconPath('panelRight', 1, 1));
+assert.notEqual(iconPath('backup', 1, 1), iconPath('restore', 1, 1));
+console.log('PASS reactive icon geometry, mouse leave/release, touch cancellation, disabled controls, and motion preference');
+
 const RAIL = WorkbenchLayout.RAIL_WIDTH;
 const ChatViewportLayout = probe('views/ChatPanel', 'ChatViewportLayout', ['onMeasureSize', 'onPlaceChildren']);
 const chatViewport = Object.assign(new ChatViewportLayout(), { centeredHeight: 742 });
@@ -382,9 +429,9 @@ class ModelListStub { constructor(_, params) { modelControls.push({ type: 'model
 const { reasoningEfforts } = sourceModule('entry/src/main/ets/model/ReasoningEffort.ets');
 const Picker = probe('views/ChatPanel', 'ChatPanel', ['modelButton', 'toggleModelMenu', 'modelMenu', 'modelMenuHeight', 'popupHeightLimit', 'selectedProvider'], {
   Button: modelButton, Row: gesture, Text: gesture, SymbolGlyph: gesture, Column: gesture, If: gesture, __Common__: gesture,
-  ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
+  ViewPU: { create() {} }, Context: { animation() {} }, Motion: {}, HoverEffect, ButtonType: {}, TextOverflow: {}, Color: {}, BlurStyle: {},
   Placement: { TopRight: 'top-right' }, $r: value => value, t: value => value, reasoningEfforts,
-  ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
+  Chevron: class {}, ReasoningEffortPicker: EffortStub, ModelPickerPanel: ModelListStub
 });
 const picker = Object.assign(new Picker(), { showModelMenu: false, appearance: {}, panelWidth: 360, panelTop: 0, modelButtonTop: 420,
   thread: { id: 'chat', modelRef: { providerId: 'openai', modelId: 'gpt-5.4' }, reasoningEffort: 'high' },
@@ -423,7 +470,7 @@ class HeaderIcon { constructor(_, params) { headerControls.push(params.compId); 
 const Header = probe('pages/Index', 'Index', ['phoneHeader'], {
   Row: gesture, If: gesture, Blank: gesture, SymbolGlyph: gesture,
   Button: new Proxy({}, { get: (_, name) => name === 'id' ? id => headerControls.push(id) : () => {} }),
-  IconButton: HeaderIcon, ViewPU: { create() {} }, CHAT_HEADER_HEIGHT: 56, HitTestMode: {}, ButtonType: {},
+  IconButton: HeaderIcon, ViewPU: { create() {} }, CHAT_HEADER_HEIGHT: 56, HoverEffect, Motion: {}, HitTestMode: {}, ButtonType: {},
   systemMaterialAttribute() {}, t: value => value
 });
 const header = Object.assign(new Header(), { appearance: {}, moreMenu() {}, drawerReveal: 0,
@@ -660,10 +707,15 @@ const modeIcons = [];
 const toolbarButtons = new Map();
 const noopUi = new Proxy({}, { get: () => () => {} });
 const captureButton = (props) => Object.assign(toolbarButtons.get(buttonId), props);
+const modeRows = [];
 const cardGlobals = { Column: new Proxy({}, { get: (_, name) => ({
     bindContentCover: (...args) => { fullscreenCover = args; }, padding: value => { previewPadding = value; }
   })[name] || (() => {}) }),
-  Row: new Proxy({}, { get: (_, name) => name === 'translate' ? value => { modeOffset = value.x; } : () => {} }),
+  Row: new Proxy({}, { get: (_, name) => value => {
+    if (name === 'create') { modeRows.push({}); return; }
+    if (name === 'translate') { modeOffset = value.x; }
+    if (['width', 'height', 'borderRadius', 'padding', 'translate'].includes(name)) { modeRows.at(-1)[name] = value; }
+  } }),
   Context: { animation(value) { if (value) { modeDuration = value.duration; } } },
   Text: noopUi, Blank: noopUi, SymbolGlyph: noopUi, ForEach: noopUi, Span: noopUi, Stack: noopUi, ListItem: noopUi, Divider: noopUi,
   AnimatedIcon: class { constructor(_parent, props) { modeIcons.push(props); } },
@@ -687,9 +739,13 @@ const cardGlobals = { Column: new Proxy({}, { get: (_, name) => ({
     id: value => { buttonId = value; toolbarButtons.set(value, {}); },
     onClick: onClick => captureButton({ onClick }),
     accessibilityText: text => captureButton({ text }),
-    enabled: enabled => captureButton({ enabled })
+    accessibilitySelected: selected => captureButton({ selected }),
+    enabled: enabled => captureButton({ enabled }),
+    hoverEffect: hover => captureButton({ hover }),
+    clickEffect: press => captureButton({ press })
   })[name] || (() => {}) }),
-  Btn: {}, Font: {}, Space: { md: 12 }, Motion: { fast: 160 }, MODE_TARGET: 44, Radius: {}, HorizontalAlign: {}, ButtonType: {}, Color: {}, ModalTransition: { NONE: 1 }, $r: value => value,
+  Btn: {}, Font: {}, Space: { md: 12 }, Motion: { fast: 160, press: 'scale on press' }, HoverEffect, MODE_TARGET: 44, MODE_TRACK_RADIUS: 17, MODE_INSET: 3,
+  Radius: {}, HorizontalAlign: {}, ButtonType: {}, Color: {}, ModalTransition: { NONE: 1 }, $r: value => value,
   Alignment: {}, HitTestMode: { None: 'no hit', Default: 'hit' }, EdgeEffect: {}, BarState: {}, WordBreak: {}, CopyOptions: {},
   NestedScrollMode: { SELF_FIRST: 'self first' },
   t: value => value,
@@ -717,9 +773,23 @@ card.initialRender(); assert.equal(surfaces, 1);
 const codeModeId = 'preview-mode-code-preview', liveModeId = 'preview-mode-live-preview';
 assert.deepEqual([...toolbarButtons.keys()], [codeModeId, liveModeId, 'fullscreen-preview-preview']);
 assert.equal(toolbarButtons.get(codeModeId).enabled, false);
-assert.equal(toolbarButtons.get(liveModeId).text, '预览，已选中');
+assert.equal(toolbarButtons.get(codeModeId).hover, HoverEffect.None);
+assert.equal(toolbarButtons.get(codeModeId).press, null);
+assert.equal(toolbarButtons.get(liveModeId).hover, HoverEffect.Highlight);
+assert.equal(toolbarButtons.get(liveModeId).press, 'scale on press');
+assert.equal(toolbarButtons.get(liveModeId).text, '预览');
+assert.equal(toolbarButtons.get(liveModeId).selected, true);
+assert.equal(toolbarButtons.get(codeModeId).selected, false);
 assert.deepEqual(modeIcons.slice(-2).map(icon => [icon.iconName, icon.selected]), [['code', false], ['preview', true]]);
 assert.equal(modeOffset, 44); assert.equal(modeDuration, 160);
+const track = modeRows.find(row => row.borderRadius === 17);
+const thumb = modeRows.find(row => row.translate?.x === modeOffset);
+const inset = modeRows.find(row => row.padding?.left === 3).padding.left;
+assert.equal(track.borderRadius, thumb.borderRadius + inset);
+assert.equal(track.height, thumb.height + inset * 2);
+assert.equal(track.width / 2, thumb.width + inset * 2);
+assert.equal(track.width - inset - modeOffset - thumb.width, inset);
+assert.equal(modeOffset, track.width / 2);
 fullscreenBounds({}, { height: 420 }); assert.equal(card.inlineHeight, 420);
 card.initialRender();
 assert.equal(toolbarButtons.get(codeModeId).text, '代码');
@@ -732,7 +802,9 @@ assert.equal(previewHeight, 420); assert.equal(codeHeight, 420);
 assert.equal(virtualizedCode, true);
 assert.equal(previewPadding.left, 12); assert.equal(previewPadding.right, 12);
 assert.equal(nestedScroll.scrollForward, 'self first'); assert.equal(nestedScroll.scrollBackward, 'self first');
-assert.equal(toolbarButtons.get(codeModeId).text, '代码，已选中');
+assert.equal(toolbarButtons.get(codeModeId).text, '代码');
+assert.equal(toolbarButtons.get(codeModeId).selected, true);
+assert.equal(toolbarButtons.get(liveModeId).selected, false);
 assert.equal(toolbarButtons.get(liveModeId).text, '预览');
 assert.deepEqual(modeIcons.slice(-2).map(icon => [icon.iconName, icon.selected]), [['code', true], ['preview', false]]);
 assert.equal(modeOffset, 0);
@@ -741,6 +813,8 @@ toolbarButtons.get(liveModeId).onClick();
 card.appearance.effectStrength = 0;
 assert.equal(card.showCode, false); card.initialRender(); assert.equal(previewHitTest, 'hit');
 assert.equal(modeOffset, 44); assert.equal(modeDuration, 0);
+assert.equal(toolbarButtons.get(liveModeId).hover, HoverEffect.Highlight);
+assert.equal(toolbarButtons.get(liveModeId).press, null);
 for (const icon of ['code', 'preview']) {
   const rest = iconPath(icon, 1, 1);
   assert.notEqual(iconPath(icon, 0.45, 1), rest);

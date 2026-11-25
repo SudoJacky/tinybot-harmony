@@ -47,10 +47,10 @@ export struct BrowserAnnotationCard {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
           if (this.editable) {
             IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('编辑批注'), compId: 'edit-browser-annotation',
-              diameter: 32, iconSize: 15, disabled: this.disabled || this.saving,
+              iconSize: 15, disabled: this.disabled || this.saving,
               onTap: () => { this.note = this.item?.browserAnnotation?.note || ''; this.editing = true; } })
             IconButton({ icon: $r('sys.symbol.trash'), label: t('删除批注'), compId: 'remove-browser-annotation',
-              diameter: 32, iconSize: 15, disabled: this.disabled || this.saving, onTap: () => this.save() })
+              iconSize: 15, disabled: this.disabled || this.saving, onTap: () => this.save() })
           }
         }.width('100%')
         if (this.editing) {

@@ -1,4 +1,7 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { AnimatedIcon } from '../common/AnimatedIcon';
+import { AnimatedIconName } from '../common/IconArtwork';
 import { TutorialControl, TutorialScreen, TUTORIAL_WIDTH, TUTORIAL_HEIGHT, tutorialRect } from '../model/HelpTutorial';
 import { EN_MESSAGES, ZH_MESSAGES } from '../model/LocaleCatalog';
 import { SpeechOrb } from '../common/SpeechOrb';
@@ -46,7 +49,7 @@ export struct HelpTutorialScreen {
   @Builder
   pageTitle(title: string) {
     Row({ space: 8 }) {
-      Stack() { this.glyph($r('sys.symbol.chevron_left'), 22) }
+      Stack() { Chevron({ pointing: 'left', tint: $r('app.color.text_secondary') }) }
         .width(40).height(40).borderRadius(20).border({ width: 0.5, color: $r('app.color.divider') })
       Text(title).fontFamily(this.appearance.fontFamily).fontSize(22).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
     }.width(344).height(56).position({ x: 16, y: 24 })
@@ -58,8 +61,9 @@ export struct HelpTutorialScreen {
   }
 
   @Builder
-  controlRow(control: TutorialControl, title: string, icon: Resource, subtitle: string = '', accent: boolean = false) {
-    NavRow({ title, subtitle, icon, accent }).width(tutorialRect(control).width).height(tutorialRect(control).height)
+  controlRow(control: TutorialControl, title: string, icon: Resource | undefined, subtitle: string = '',
+    accent: boolean = false, animatedIcon?: AnimatedIconName) {
+    NavRow({ title, subtitle, icon, accent, animatedIcon }).width(tutorialRect(control).width).height(tutorialRect(control).height)
       .position({ x: tutorialRect(control).x, y: tutorialRect(control).y })
   }
 
@@ -78,17 +82,19 @@ export struct HelpTutorialScreen {
 
   @Builder
   chat() {
-      Stack() { this.glyph($r('sys.symbol.line_3_horizontal')) }.width(44).height(44).position({ x: 6, y: 28 })
+      Stack() { AnimatedIcon({ iconName: 'history', tint: $r('app.color.text_secondary'), iconSize: 20 }) }
+        .width(44).height(44).position({ x: 6, y: 28 })
       Column({ space: 1 }) {
         Text(this.text('新对话')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
         Row({ space: 4 }) {
           Image(providerLogo('deepseek')).width(14).height(14)
           Text(this.screen === 'chat-v4' ? '· deepseek-v4-pro' : '· deepseek-flash').fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-          this.glyph($r('sys.symbol.chevron_down'), 12)
+          Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
         }
       }.width(202).height(44).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center).position({ x: 54, y: 28 })
-      Stack() { this.glyph($r('sys.symbol.dot_grid_1x2')) }.width(44).height(44).position({ x: 264, y: 28 })
-      Stack() { this.glyph($r('sys.symbol.square_and_pencil')) }.width(40).height(44).position({ x: 310, y: 28 })
+      Stack() { this.glyph($r('sys.symbol.ellipsis_circle')) }.width(44).height(44).position({ x: 264, y: 28 })
+      Stack() { AnimatedIcon({ iconName: 'newChat', tint: $r('app.color.text_primary'), iconSize: 20 }) }
+        .width(40).height(44).position({ x: 310, y: 28 })
     if (this.screen === 'answer' || this.screen === 'running' || this.screen === 'error') {
       Text(this.text('帮我把下面的想法整理成可执行的步骤：')).fontFamily(this.appearance.fontFamily).fontSize(16).lineHeight(24)
         .fontColor($r('app.color.text_primary')).padding(14).width(258).borderRadius(18)
@@ -123,7 +129,7 @@ export struct HelpTutorialScreen {
       Row({ space: 8 }) {
         this.glyph($r('sys.symbol.picture'), 18)
         Text('image.jpg').fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_primary'))
-        this.glyph($r('sys.symbol.xmark'), 12)
+        this.glyph($r('sys.symbol.xmark'), 16)
       }.padding(12).borderRadius(12).backgroundColor($r('app.color.surface')).position({ x: 20, y: 588 })
     }
     if (this.screen === 'team') {
@@ -176,17 +182,23 @@ export struct HelpTutorialScreen {
       .position({ x: 124, y: 99 })
     this.menuRow(this.text('工具范围'), $r('sys.symbol.wrench_and_screwdriver'), 132)
     this.menuRow(this.text('工作区文件'), $r('sys.symbol.folder'), 176)
-    this.menuRow(this.text('分支关系'), $r('sys.symbol.rectangle_stack'), 220)
-    this.menuRow(this.text('创建分支'), $r('sys.symbol.split'), 264)
+    this.menuRow(this.text('分支关系'), $r('app.media.message_branch'), 220, true)
+    this.menuRow(this.text('创建分支'), $r('app.media.message_branch'), 264, true)
     this.menuRow(this.text('分享对话'), $r('sys.symbol.share'), 308)
     this.menuRow(this.text('导出为 Markdown'), $r('sys.symbol.square_and_arrow_down'), 352)
     this.menuRow(this.text('设置'), $r('sys.symbol.gearshape'), 396)
   }
 
   @Builder
-  menuRow(title: string, icon: Resource, y: number) {
-    Row({ space: 12 }) { this.glyph(icon, 18); Text(title).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_primary')) }
-      .width(200).height(44).padding({ left: 16, right: 8 }).position({ x: 108, y })
+  menuRow(title: string, icon: Resource, y: number, image: boolean = false) {
+    Row({ space: 12 }) {
+      if (image) {
+        Image(icon).width(18).height(18).objectFit(ImageFit.Contain).fillColor($r('app.color.text_secondary'))
+      } else {
+        this.glyph(icon, 18)
+      }
+      Text(title).fontFamily(this.appearance.fontFamily).fontSize(14).fontColor($r('app.color.text_primary'))
+    }.width(200).height(44).padding({ left: 16, right: 8 }).position({ x: 108, y })
   }
 
   @Builder
@@ -205,14 +217,14 @@ export struct HelpTutorialScreen {
     if (this.screen === 'settings-memory') {
       this.heading(this.text('助手偏好'), 92)
       this.card(16, 132, 328, 128)
-      this.controlRow('user-document', this.text('称呼与回答偏好'), $r('sys.symbol.square_and_pencil'), this.text('填写称呼、背景和回答偏好'))
+      this.controlRow('user-document', this.text('称呼与回答偏好'), $r('sys.symbol.person_text_rectangle'), this.text('填写称呼、背景和回答偏好'))
       this.line(196)
       this.switchAt(this.text('自动保存任务结果'), 196, false)
       this.heading(this.text('记忆与上下文'), 284)
       this.card(16, 324, 328, 192)
       this.switchAt(this.text('自动提取长期记忆'), 324, true)
       this.line(388)
-      this.controlRow('memory', this.text('管理长期记忆'), $r('sys.symbol.lightbulb'), this.text('查看、编辑所有对话或当前对话的记忆'))
+      this.controlRow('memory', this.text('管理长期记忆'), $r('sys.symbol.bookmark_notepad'), this.text('查看、编辑所有对话或当前对话的记忆'))
       this.line(452)
       this.switchAt(this.text('自动压缩历史'), 452, true)
       this.heading(this.text('工具与权限'), 540)
@@ -245,7 +257,7 @@ export struct HelpTutorialScreen {
       this.rowAt(this.text('模型分工与能力'), $r('sys.symbol.gearshape'), 252, this.text('专用模型与能力配置'))
       this.heading(this.text('助手偏好'), 332)
       this.card(16, 372, 328, 128)
-      this.rowAt(this.text('称呼与回答偏好'), $r('sys.symbol.square_and_pencil'), 372, this.text('填写称呼、背景和回答偏好'))
+      this.rowAt(this.text('称呼与回答偏好'), $r('sys.symbol.person_text_rectangle'), 372, this.text('填写称呼、背景和回答偏好'))
       this.line(436)
       this.switchAt(this.text('自动保存任务结果'), 436, false)
       this.heading(this.text('记忆与上下文'), 524)
@@ -340,7 +352,7 @@ export struct HelpTutorialScreen {
       this.tile(this.text('图片'), $r('sys.symbol.picture'))
       this.tile(this.text('文本文件'), $r('sys.symbol.doc_text'))
       this.tile(this.text('工作区'), $r('sys.symbol.folder'))
-      this.tile(this.text('记忆'), $r('sys.symbol.lightbulb'))
+      this.tile(this.text('记忆'), $r('sys.symbol.bookmark_notepad'))
       this.tile(this.text('Agent 团队'), $r('sys.symbol.person_2'))
     }.position({ x: 24, y: 438 })
     Text(this.text('每条消息最多 10 个附件 · 图片需模型支持视觉输入')).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
@@ -374,7 +386,7 @@ export struct HelpTutorialScreen {
     this.pageTitle(this.text('备份与恢复'))
     this.heading(this.text('华为云空间'), 92)
     this.card(16, 132, 328, 200)
-    this.controlRow('cloud-backup', this.text('备份到华为云空间'), $r('sys.symbol.cloud'), this.text('模型密钥随华为账号加密备份'))
+    this.controlRow('cloud-backup', this.text('备份到华为云空间'), undefined, this.text('模型密钥随华为账号加密备份'), false, 'backup')
     this.line(212)
     this.rowAt(this.text('刷新备份列表'), $r('sys.symbol.arrow_clockwise'), 212)
     this.line(268)
@@ -409,7 +421,7 @@ export struct HelpTutorialScreen {
         this.pageTitle(this.screen === 'memory' ? this.text('管理长期记忆') : this.text('工作区文件'))
         this.card(16, 132, 328, 64)
         this.rowAt(this.screen === 'memory' ? this.text('请简洁回答') : 'USER.md',
-          this.screen === 'memory' ? $r('sys.symbol.lightbulb') : $r('sys.symbol.doc_plaintext'), 132)
+          this.screen === 'memory' ? $r('sys.symbol.bookmark_notepad') : $r('sys.symbol.doc_plaintext'), 132)
       } else {
         this.chat()
         if (this.screen === 'menu') { this.menu() }

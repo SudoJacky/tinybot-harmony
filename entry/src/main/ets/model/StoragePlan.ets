@@ -27,16 +27,21 @@ export interface StorageEntryResult {
   failedPaths: string[];
 }
 
+export interface BundleStorageSummary {
+  totalBytes: number;
+  appBytes: number;
+  dataBytes: number;
+  cacheBytes: number;
+}
+
 export interface StorageReport {
   categories: StorageCategorySummary[];
   incomplete: boolean;
   failedPaths: string[];
-  totalBytes: number;
+  categorizedBytes: number;
   freeBytes: number;
   deviceBytes: number;
-  appBytes: number;
-  dataBytes: number;
-  cacheBytes: number;
+  bundle?: BundleStorageSummary;
   safeBytes: number;
   safeFiles: number;
   cacheCleanBytes: number;
@@ -66,6 +71,19 @@ export interface DiskFile {
 
 const HOUR: number = 60 * 60 * 1000;
 const DAY: number = 24 * HOUR;
+
+// System Settings displays decimal storage units with up to two fractional digits.
+export function storageSize(bytes: number): string {
+  const units: string[] = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1000 && unit < units.length - 1) {
+    size /= 1000;
+    unit++;
+  }
+  const precision = unit === 0 || size >= 100 ? 0 : 2;
+  return Number(size.toFixed(precision)) + ' ' + units[unit];
+}
 
 // New cache files may still be in use by an export or share sheet.
 export function isCacheCleanable(modifiedAt: number, now: number): boolean {
@@ -107,8 +125,8 @@ export function storageCategorySummary(id: StorageCategoryId, bytes: number, fil
 export function emptyStorageReport(): StorageReport {
   const categories: StorageCategorySummary[] = [];
   for (const id of STORAGE_CATEGORIES) { categories.push(storageCategorySummary(id, 0, 0)); }
-  return { categories: categories, incomplete: false, failedPaths: [], totalBytes: 0, freeBytes: 0, deviceBytes: 0,
-    appBytes: 0, dataBytes: 0, cacheBytes: 0, safeBytes: 0, safeFiles: 0, cacheCleanBytes: 0,
+  return { categories: categories, incomplete: false, failedPaths: [], categorizedBytes: 0, freeBytes: 0, deviceBytes: 0,
+    safeBytes: 0, safeFiles: 0, cacheCleanBytes: 0,
     orphanAttachmentBytes: 0, orphanWorkspaceBytes: 0, tempBytes: 0, orphanAttachments: 0,
     orphanWorkspaces: 0, staleTemps: 0, scannedAt: 0 };
 }

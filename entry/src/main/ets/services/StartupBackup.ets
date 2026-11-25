@@ -2,7 +2,7 @@ import { bundleManager, common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { AppData } from '../model/Conversation';
-import { isOnboardingCandidate } from '../model/Onboarding';
+import { ONBOARDING_STEP_KEY, isOnboardingCandidate } from '../model/Onboarding';
 import { CloudBackup, CloudBackupItem, latestCloudBackup } from './CloudBackup';
 
 // Installation-local marker. Capture BEFORE ConversationStore creates an empty manifest.
@@ -26,7 +26,9 @@ export class StartupBackup {
     this.save(fresh ? 'pending' : 'done');
   }
   untouched(data: AppData): boolean {
-    return this.store.getSync('onboardingComplete', false) !== true && isOnboardingCandidate(data) &&
+    const step = this.store.getSync(ONBOARDING_STEP_KEY, 0);
+    return this.store.getSync('onboardingComplete', false) !== true && !(typeof step === 'number' && step > 1) &&
+      isOnboardingCandidate(data) &&
       !(data.config.userDocument || '').trim() && !(data.productivity?.servers || []).length &&
       !(data.productivity?.memories || []).length;
   }

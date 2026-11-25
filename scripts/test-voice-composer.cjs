@@ -44,9 +44,12 @@ function panel() {
   const value = new scope.exports.Panel();
   Object.assign(value, { speechEnabled: true, importing: false, speechHolding: false, voiceMode: false, speechTarget: 'send',
     keyboardFocusRequest: 0, foreground: true, lifecycle: 0, composerMounted: false,
-    thread: { id: 'chat', archived: false }, appearance: {}, viewport: { observe() {} },
+    thread: { id: 'chat', messages: [], archived: false }, appearance: {}, viewport: { observe() {} },
+    messageSource: { update(id, messages, limit) {
+      assert.equal(id, value.thread.id); assert.equal(messages, value.thread.messages); assert.equal(limit, 60);
+    } },
     reading: { stop() {} }, syncMessages() {}, receiveVoiceShortcut() {}, follow() {},
-    app: { active: { id: 'chat' }, draft: '原草稿', ready: true, busy: false, canQueueInput: false,
+    app: { active: { id: 'chat' }, visibleMessageCount: 60, draft: '原草稿', ready: true, busy: false, canQueueInput: false,
       setDraft(text) { this.draft = text; }, flushDraft() { events.push('saved'); },
       enqueueInput(kind) { events.push(['queue', kind, this.draft]); this.draft = ''; } },
     speech: { phase: 'idle', text: '', permissionSettingsPending: false,

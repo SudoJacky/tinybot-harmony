@@ -1,4 +1,6 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { BrowserActionFeedback, BrowserSession } from '../services/BrowserSession';
 import { NativeBrowserDriver, NativeBrowserCapture } from '../services/NativeBrowserDriver';
 import { BrowserAnnotation, AnnotationPage } from '../model/BrowserAnnotation';
@@ -290,8 +292,10 @@ export struct BrowserPanel {
       MenuItem({ content: t('下一页') }).enabled(this.browser.canGoForward).onClick(() => this.driver?.userForward())
       MenuItem({ content: t('复制链接') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(false))
       MenuItem({ content: t('在系统浏览器中打开') }).enabled(this.hasWebAddress()).onClick(() => this.useLink(true))
-      MenuItem({ content: t('截图到消息') }).id('browser-screenshot').enabled(this.canCapturePage()).onClick(() => this.annotate(true))
-      MenuItem({ content: t('选择网页元素') }).id('browser-pick-element').enabled(this.canCapturePage()).onClick(() => this.startElementPicking())
+      MenuItem({ content: t('截图到消息'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.camera')) })
+        .id('browser-screenshot').enabled(this.canCapturePage()).onClick(() => this.annotate(true))
+      MenuItem({ content: t('选择网页元素'), symbolStartIcon: new SymbolGlyphModifier($r('sys.symbol.viewfinder_square')) })
+        .id('browser-pick-element').enabled(this.canCapturePage()).onClick(() => this.startElementPicking())
       if (this.recent.length) { MenuItem({ content: t('最近访问'), builder: this.recentMenu }) }
       MenuItem({ content: t('设置') }).onClick(this.onSettings)
     }
@@ -300,9 +304,10 @@ export struct BrowserPanel {
   @Builder
   moreButton(size: number) {
     Button({ type: ButtonType.Circle }) {
-      SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_primary')])
+      SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(19).fontColor([$r('app.color.text_primary')])
     }.id('browser-more').width(size).height(size).padding(0).backgroundColor(Color.Transparent)
-      .accessibilityText(t('更多'))
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+      .accessibilityText(t('浏览器操作')).bindTips(t('浏览器操作'), { appearingTime: 550 })
       .bindMenu(this.browserMenu, { systemMaterial: this.appearance.menu, mask: false })
   }
 
@@ -321,8 +326,8 @@ export struct BrowserPanel {
   @Builder
   phoneHeader() {
     Row({ space: 4 }) {
-      IconButton({ icon: $r('sys.symbol.chevron_down'), label: t('收起浏览器'), compId: 'browser-collapse',
-        iconSize: 18, fill: '#00000000', onTap: this.onDismiss })
+      IconButton({ chevron: 'down', label: t('收起浏览器'), compId: 'browser-collapse',
+        fill: '#00000000', onTap: this.onDismiss })
       Column({ space: 1 }) {
         Text(this.browser.url && this.browser.title ? this.browser.title : t('应用内浏览器'))
           .fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontWeight(FontWeight.Medium)
@@ -358,8 +363,8 @@ export struct BrowserPanel {
         })
         .onSubmit(() => this.navigate())
       if (this.addressDirty && this.address.trim().length > 0) {
-        IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('打开'), compId: 'browser-go', diameter: 36,
-          fill: '#00000000', tint: this.appearance.accent, iconSize: 15, onTap: () => this.navigate() })
+        IconButton({ chevron: 'right', label: t('打开'), compId: 'browser-go', diameter: 36,
+          fill: '#00000000', tint: this.appearance.accent, onTap: () => this.navigate() })
       }
     }.layoutWeight(1).backgroundColor($r('app.color.surface_variant')).borderRadius(Radius.lg)
   }
@@ -367,15 +372,15 @@ export struct BrowserPanel {
   @Builder
   navigationToolbar() {
     Row({ space: 2 }) {
-      IconButton({ icon: $r('sys.symbol.chevron_left'), label: t('上一页'), compId: 'browser-back',
-        diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000', disabled: !this.browser.canGoBack,
+      IconButton({ chevron: 'left', label: t('上一页'), compId: 'browser-back',
+        diameter: this.tabbed ? 36 : 44, fill: '#00000000', disabled: !this.browser.canGoBack,
         onTap: () => this.driver?.userBack() })
       if (this.tabbed && this.webWidth >= 360) {
-        IconButton({ icon: $r('sys.symbol.chevron_right'), label: t('下一页'), compId: 'browser-forward',
-          diameter: 36, iconSize: 18, fill: '#00000000', disabled: !this.browser.canGoForward,
+        IconButton({ chevron: 'right', label: t('下一页'), compId: 'browser-forward',
+          diameter: 36, fill: '#00000000', disabled: !this.browser.canGoForward,
           onTap: () => this.driver?.userForward() })
       }
-      IconButton({ icon: this.browser.loading ? $r('sys.symbol.xmark') : $r('sys.symbol.arrow_clockwise'),
+      IconButton({ icon: this.browser.loading ? $r('sys.symbol.stop_circle') : $r('sys.symbol.arrow_clockwise'),
         label: this.browser.loading ? t('停止加载') : t('重新加载'), compId: 'browser-reload',
         diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000',
         disabled: !this.browser.loading && !this.browser.url && !this.browser.loadFailed,
@@ -383,8 +388,8 @@ export struct BrowserPanel {
           if (this.browser.loading) { this.driver?.userStop(); } else { this.driver?.userReload(); }
         } })
       this.addressField()
-      IconButton({ icon: this.pickingElement ? $r('sys.symbol.xmark') : $r('sys.symbol.square_and_pencil'),
-        label: this.pickingElement ? t('取消选择') : t('批注当前页面'), compId: 'browser-annotate',
+      IconButton({ icon: $r('sys.symbol.xmark'), animatedIcon: this.pickingElement ? undefined : 'elementPicker',
+        label: this.pickingElement ? t('取消选择') : t('选择网页元素'), compId: 'browser-annotate',
         diameter: this.tabbed ? 36 : 44, iconSize: 18, fill: '#00000000',
         disabled: !this.pickingElement && !this.canCapturePage(),
         onTap: () => { if (this.pickingElement) { this.cancelElementPicking(); } else { this.annotate(); } } })
@@ -427,7 +432,7 @@ export struct BrowserPanel {
   startPage() {
     Scroll() {
       Column({ space: Space.md }) {
-        SymbolGlyph($r('sys.symbol.connection')).fontSize(30).fontColor([this.appearance.accent])
+        SymbolGlyph($r('sys.symbol.worldclock')).fontSize(30).fontColor([this.appearance.accent])
           .backgroundColor(this.appearance.accentTint).borderRadius(Radius.lg).padding(14)
         Text(t('打开网页或预览')).fontFamily(this.appearance.fontFamily).fontSize(20)
           .fontWeight(FontWeight.Medium).fontColor($r('app.color.text_primary'))
@@ -630,14 +635,14 @@ export struct BrowserStatusCard {
       } else if (this.browser.open) {
         Button() {
           Row({ space: Space.sm }) {
-            SymbolGlyph($r('sys.symbol.connection')).fontSize(18).fontColor([this.appearance.accent])
+            SymbolGlyph($r('sys.symbol.worldclock')).fontSize(18).fontColor([this.appearance.accent])
             Column({ space: 2 }) {
               Text(this.browser.owner === 'agent' ? t('Tinybot 正在使用浏览器') : this.browser.hasTask ? t('浏览器由你控制 · 任务已暂停') : t('浏览器由你控制')).fontFamily(this.appearance.fontFamily)
                 .fontSize(13).fontColor($r('app.color.text_primary'))
               Text(this.browser.handoffReason || this.browser.title || this.browser.url).fontFamily(this.appearance.fontFamily).fontSize(12).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_secondary'))
             }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+            Chevron({ pointing: 'right', tint: $r('app.color.text_secondary') })
           }.width('100%')
         }.fontFamily(this.appearance.fontFamily).id('open-agent-browser').attributeModifier(Btn.plainSmall).width('100%').onClick(this.onOpen)
       }

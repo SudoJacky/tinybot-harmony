@@ -53,7 +53,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { requestAppReview } from '../services/AppInformation';
 import { ReviewPreferences } from '../services/ReviewPreferences';
 import { ReviewChoice, ReviewInvitationDialog } from '../views/ReviewInvitationDialog';
-import { KeyboardAvoidMode } from '@kit.ArkUI';
+import { FrameCallback, KeyboardAvoidMode } from '@kit.ArkUI';
 import { materialMenuContent, materialMenuHeader } from '../common/MaterialMenu';
 import { ShareInbox } from '../services/NativeActions';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
@@ -102,6 +102,12 @@ const DRAWER_MAX_WIDTH: number = 340;
 const CHAT_HEADER_HEIGHT: number = 56;
 const PC_CHAT_HEADER_HEIGHT: number = 48;
 
+class SessionStreamFrame extends FrameCallback {
+  private readonly flush: () => void;
+  constructor(flush: () => void) { super(); this.flush = flush; }
+  onFrame(): void { this.flush(); }
+}
+
 @Entry
 @Component
 struct Index {
@@ -110,7 +116,8 @@ struct Index {
   @StorageProp('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = false;
   @StorageProp('tinybot.pcWindowVisible') @Watch('pcWindowVisibilityChanged') private pcWindowVisible: boolean = true;
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
-  @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
+  @StorageProp('tinybot.locale') @Watch('syncNavigationLocale') private locale: string = 'zh-CN';
+  @State private navigationLocale: string = getLocale();
   @StorageProp('tinybot.freeWindow') @Watch('desktopModeChanged') private desktop: boolean = false;
   @State private app: ChatViewModel = new ChatViewModel();
   @State private account: HuaweiAccount = huaweiAccount;
@@ -199,8 +206,8 @@ struct Index {
   private startupBackupRestoring: boolean = false;
   private startupBackupDialog?: CustomDialogController;
   private onboardingChecked: boolean = false;
-  private onboardingDraftThread: string = '';
-  private onboardingFinishing: boolean = false;
+  private onboardingStep: number = 1;
+  @State private onboardingBackRequest: number = 0;
   @State private onboardingActive: boolean = false;
   @State private providerEditorActive: boolean = false;
   @State private settingsActive: boolean = false;
@@ -239,7 +246,9 @@ struct Index {
       if (this.desktop) { this.restoreDesktopLayout(context); }
       try { this.startupBackup = new StartupBackup(context); }
       catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
-      this.session = createNativeSessionService(context, this.approval, this.browser);
+      const ui = this.getUIContext();
+      this.session = createNativeSessionService(context, this.approval, this.browser,
+        (flush) => ui.postFrameCallback(new SessionStreamFrame(flush)));
       this.session.subscribe((event) => {
         if (event.state.canNavigate && ShareInbox.peek()) { this.receiveShare(); }
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
@@ -450,6 +459,11 @@ struct Index {
     return new OnboardingPreferences(this.getUIContext().getHostContext() as common.UIAbilityContext);
   }
 
+  private syncNavigationLocale(): void {
+    // The guide translates in place. Apply the new key to the rest of the shell after the guide leaves the stack.
+    if (!this.paths.getAllPathName().includes('onboarding')) { this.navigationLocale = this.locale; }
+  }
+
   private privacyChanged(): void {
     if (this.privacyAllowed) { this.startBusiness(); }
     else {
@@ -475,10 +489,21 @@ struct Index {
     this.onboardingChecked = true;
     if (this.receiving || this.launching || ShareInbox.peek() || this.paths.size() > 0) { return; }
     try {
-      if (this.onboardingPreferences().shouldShow(this.app.exportSnapshot())) {
-        this.onboardingDraftThread = ''; this.onboardingActive = true; this.paths.pushPath({ name: 'onboarding' });
-      }
+      const preferences = this.onboardingPreferences();
+      const step = preferences.resumeStep(this.app.exportSnapshot());
+      if (step > 0) { preferences.begin(); this.openOnboarding(step); }
     } catch (error) { this.app.error = t('无法读取首次使用记录：{0}', [(error as Error).message]); }
+  }
+
+  private openOnboarding(step: number): void {
+    this.onboardingStep = step;
+    this.onboardingActive = true;
+    this.paths.pushPath({ name: 'onboarding' });
+  }
+
+  private moveOnboarding(step: number, forward: boolean): void {
+    if (forward) { this.onboardingPreferences().reach(step); }
+    this.onboardingStep = step;
   }
 
   private canOfferStartupBackup(): boolean {
@@ -547,35 +572,13 @@ struct Index {
     finally { this.startupBackupRestoring = false; }
   }
 
-  private async finishOnboarding(action: string, prompt: string): Promise<void> {
-    if (this.onboardingFinishing) { return; }
-    this.onboardingFinishing = true;
-    try {
-      if (action !== 'skip') {
-        if (!this.app.canNavigate) { throw new Error(t('无法创建新对话。')); }
-        await this.app.flushDraft();
-        if (this.app.saveError) { throw new Error(this.app.saveError); }
-        if (this.onboardingDraftThread !== this.app.active.id) {
-          // SessionService owns the full untouched-chat check, including references and queued input.
-          if (!await this.app.newThread('')) { throw new Error(this.app.error || this.app.saveError || t('无法创建新对话。')); }
-          this.onboardingDraftThread = this.app.active.id;
-        }
-        this.app.setDraft(prompt); await this.app.flushDraft();
-        if (this.app.saveError) { throw new Error(this.app.saveError); }
-      }
-      this.onboardingPreferences().complete();
-      if (action === 'skip') { this.paths.pop(); }
-      else { this.paths.clear(); this.rootSection = ''; this.setDrawer(false); if (action === 'connect') { this.openSettings(); } }
-    } finally { this.onboardingFinishing = false; }
-  }
-
-  // Opening a real provider editor must never complete onboarding. The editor's
-  // existing onSaved pop returns to the still-mounted model-connection scene.
-  private connectOnboardingProvider(preset: string): void {
-    if (!this.onboardingActive || this.onboardingFinishing) { return; }
-    if (!this.app.beginProvider(preset, '')) { throw new Error(this.app.error || t('请先完成当前任务，再开始新的对话。')); }
+  private closeOnboarding(completed: boolean): void {
+    if (!this.onboardingActive) { return; }
+    if (completed) { this.onboardingPreferences().complete(); }
     this.onboardingActive = false;
-    this.paths.pushPath({ name: 'provider' });
+    this.revealChat();
+    this.syncNavigationLocale();
+    this.receiveShare(); this.receiveLaunch();
   }
 
   private async createChat(projectId?: string): Promise<void> {
@@ -669,9 +672,10 @@ struct Index {
   }
 
   private revealChat(): void {
-    this.paths.clear(); this.rootSection = ''; this.setDrawer(false);
+    if (this.paths.size() > 0) { this.paths.clear(); }
+    this.rootSection = ''; this.setDrawer(false);
     // Collapse the phone overlay without disposing retained editors or their drafts.
-    if (!this.workbench().docked) { this.setDetailPane(false); }
+    if (!this.workbench().docked && this.detailPaneOpen) { this.setDetailPane(false); }
   }
 
   private hasPreview(): boolean { return this.previewId.length > 0 && this.previewThreadId === this.app.active.id; }
@@ -761,7 +765,7 @@ struct Index {
           'browser'));
       } else if (tab.startsWith('side:')) {
         const thread = this.app.sideChats().find((item) => 'side:' + item.id === tab);
-        if (thread) { items.push(new DetailTabItem(tab, thread.messages.length ? thread.displayTitle : t('旁聊'), 'compose')); }
+        if (thread) { items.push(new DetailTabItem(tab, thread.messages.length ? thread.displayTitle : t('旁聊'), 'sideChat')); }
       }
     }
     return items;
@@ -1430,7 +1434,15 @@ struct Index {
       return;
     }
     if (page === 'guide') {
-      this.onboardingDraftThread = ''; this.onboardingActive = true; this.paths.pushPath({ name: 'onboarding' }); return;
+      try {
+        const preferences = this.onboardingPreferences();
+        const step = preferences.resumeStep(this.app.exportSnapshot());
+        if (step > 0) { preferences.begin(); }
+        this.openOnboarding(step || 1);
+      } catch (error) {
+        this.getUIContext().getPromptAction().showToast({ message: t('无法读取首次使用记录：{0}', [(error as Error).message]) });
+      }
+      return;
     }
     if (page !== 'rating') {
       this.paths.pushPath({ name: 'support', param: page });
@@ -1550,7 +1562,7 @@ struct Index {
           .onClick(() => { this.showToolScope = true; })
         MenuItem(() => this.moreMenuContent($r('sys.symbol.folder'), t('工作区文件')))
           .enabled(!this.app.busy).onClick(() => this.openFiles())
-        MenuItem(() => this.moreMenuContent($r('sys.symbol.connection'), t('应用内浏览器')))
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.worldclock'), t('应用内浏览器')))
           .id('open-browser').enabled(this.app.ready && !this.browser.permissionSaving && this.app.saveError.length === 0)
           .onClick(() => this.openBrowser())
         if (this.largeScreen) {
@@ -1561,7 +1573,7 @@ struct Index {
               this.setDetailPane(true);
             })
         }
-        MenuItem(() => this.moreMenuContent($r('sys.symbol.rectangle_stack'), t('分支关系')))
+        MenuItem(() => this.moreMenuContent($r('app.media.message_branch'), t('分支关系'), true))
           .enabled(!this.app.busy).onClick(() => this.paths.pushPath({ name: 'branches' }))
         MenuItem(() => this.moreMenuContent($r('app.media.message_branch'), t('创建分支'), true))
           .enabled(!this.app.busy && this.app.saveError.length === 0 && this.app.active.messages.length > 0)
@@ -1614,20 +1626,16 @@ struct Index {
   destination(name: string, param: Object) {
     if (name === 'onboarding') {
       NavDestination() {
-        OnboardingPanel({ app: this.app, active: this.onboardingActive, configured: this.app.configured,
-          connectedPreset: this.currentProviderPreset(), busy: this.app.busy, account: this.account,
-          onFinish: (action: string, prompt: string) => this.finishOnboarding(action, prompt),
-          onConnect: (preset: string) => this.connectOnboardingProvider(preset),
+        OnboardingPanel({ app: this.app, active: this.onboardingActive, account: this.account,
+          initialStep: this.onboardingStep, backRequest: this.onboardingBackRequest,
+          onMove: (step: number, forward: boolean) => this.moveOnboarding(step, forward),
+          onClose: (completed: boolean) => this.closeOnboarding(completed),
           onLegal: (page: string) => { this.openSupport(page); } })
       }.hideTitleBar(true).backgroundColor($r('app.color.page_background'))
-        .onBackPressed(() => {
-          this.finishOnboarding('skip', '').catch((error: Error) => {
-            this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: error.message });
-          });
-          return true;
-        })
+        .onBackPressed(() => { this.onboardingBackRequest++; return true; })
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
+        .onDisAppear(() => this.syncNavigationLocale())
     } else if (name === 'life-panels') {
       LifePanelsPanel({ app: this.app, onShown: () => { this.rootSection = 'life-panels'; }, onChat: () => this.revealChat(), requestedTarget: this.lifePanelTarget })
     } else if (name === 'branches') {
@@ -1802,10 +1810,6 @@ struct Index {
     }
   }
 
-  private currentProviderPreset(): string {
-    return this.app.providerProfiles.find((profile) => profile.id === this.app.active.modelRef?.providerId)?.presetId || '';
-  }
-
   @Builder
   header() {
     if (this.largeScreen) {
@@ -1814,19 +1818,22 @@ struct Index {
       // On the plain tablet title surface, API-26 light-sense material erases
       // the control fill; keep an opaque tint and reserve material for phones.
       Row({ space: 4 }) {
-        IconButton({ icon: this.workbench().expanded || this.drawerOpen ? $r('sys.symbol.open_sidebar') : $r('sys.symbol.close_sidebar'),
+        IconButton({ animatedIcon: 'panelLeft', animatedSelected: this.workbench().expanded || this.drawerOpen,
           label: this.workbench().expanded || this.drawerOpen ? t('收起会话栏') : t('展开会话列表'), compId: 'open-history',
+          tint: this.workbench().expanded || this.drawerOpen ? this.appearance.accent : $r('app.color.text_primary'),
           fill: $r('app.color.surface_variant'), disabled: !this.app.ready, onTap: () => this.toggleHistory() })
         Blank().layoutWeight(1)
         if (this.app.active.messages.length > 0) {
           Button({ type: ButtonType.Circle, stateEffect: true }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(19).fontColor([$r('app.color.text_secondary')])
+            SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(19).fontColor([$r('app.color.text_secondary')])
           }.id('workbench-chat-more').width(44).height(44).borderRadius(22)
             .backgroundColor($r('app.color.surface_variant'))
-            .accessibilityText(t('更多操作'))
+            .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+            .accessibilityText(t('会话操作')).bindTips(t('会话操作'), { appearingTime: 550 })
             .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
-          IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
+          IconButton({ animatedIcon: 'panelRight', animatedSelected: this.detailPaneOpen,
             label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+            tint: this.detailPaneOpen ? this.appearance.accent : $r('app.color.text_primary'),
             fill: $r('app.color.surface_variant'),
             disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
         }
@@ -1838,9 +1845,9 @@ struct Index {
   @Builder
   desktopHeader() {
     Row({ space: 4 }) {
-      // The system sidebar symbols point towards the right-hand panel by default.
-      IconButton({ icon: this.workbench().expanded || this.drawerOpen ? $r('sys.symbol.open_sidebar') : $r('sys.symbol.close_sidebar'),
+      IconButton({ animatedIcon: 'panelLeft', animatedSelected: this.workbench().expanded || this.drawerOpen,
         label: this.workbench().expanded || this.drawerOpen ? t('收起会话栏') : t('展开会话列表'), compId: 'open-history',
+        tint: this.workbench().expanded || this.drawerOpen ? this.appearance.accent : $r('app.color.text_primary'),
         diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
         disabled: !this.app.ready, onTap: () => this.toggleHistory() })
       Row({ space: 6 }) {
@@ -1855,8 +1862,8 @@ struct Index {
           .fontColor($r('app.color.text_primary')).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
       }.layoutWeight(1)
       if (this.workbench().historyWidth === 0) {
-        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t('新建对话'), compId: 'new-chat',
-          animatedIcon: 'compose', diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
+        IconButton({ label: t('新建对话'), compId: 'new-chat',
+          animatedIcon: 'newChat', diameter: this.desktop ? 36 : 44, iconSize: 18, fill: $r('app.color.surface'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(this.app.activeProject?.id); } })
       }
       if (this.desktop && this.workbench().chatWidth >= 620) {
@@ -1876,13 +1883,16 @@ struct Index {
           onTap: () => this.showDesktopCommands() })
       }
       Button({ type: ButtonType.Normal }) {
-        SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+        SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(18).fontColor([$r('app.color.text_secondary')])
       }.id('pc-chat-more').width(this.desktop ? 36 : 44).height(this.desktop ? 36 : 44).padding(0).borderRadius(Radius.sm)
-        .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(this.app.ready)
+        .backgroundColor(Color.Transparent).accessibilityText(t('会话操作')).enabled(this.app.ready)
+        .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+        .bindTips(t('会话操作'), { appearingTime: 550 })
         .bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
       if (!this.detailCoversChat()) {
-        IconButton({ icon: this.detailPaneOpen ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.open_sidebar'),
+        IconButton({ animatedIcon: 'panelRight', animatedSelected: this.detailPaneOpen,
           label: this.detailPaneOpen ? t('关闭侧栏') : t('打开侧栏'), compId: 'workbench-toggle-detail',
+          tint: this.detailPaneOpen ? this.appearance.accent : $r('app.color.text_primary'),
           diameter: this.desktop ? 36 : 44, iconSize: 18, fill: this.detailPaneOpen ? $r('app.color.surface_variant') : $r('app.color.surface'),
           disabled: !this.app.ready, onTap: () => this.toggleDetailPane() })
       }
@@ -1899,16 +1909,19 @@ struct Index {
       Blank().layoutWeight(1)
       if (this.app.active.messages.length > 0) {
         Button({ type: ButtonType.Circle, stateEffect: true }) {
-          SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(20).fontColor([$r('sys.color.font_primary')])
+          SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(20).fontColor([$r('sys.color.font_primary')])
         }.id('chat-more').width(44).height(44).borderRadius(22).backgroundColor(this.appearance.controlBackground)
           .border({ width: this.appearance.materialEnabled ? 0 : 0.5, color: $r('app.color.divider') })
-          .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t("更多操作"))
+          .hoverEffect(HoverEffect.Highlight)
+          .clickEffect(!this.appearance.control && this.appearance.effectStrength > 0 ? Motion.press : null)
+          .attributeModifier(systemMaterialAttribute<ButtonAttribute>(this.appearance.control)).accessibilityText(t('会话操作'))
+          .bindTips(t('会话操作'), { appearingTime: 550 })
           .enabled(this.app.ready).bindMenu(this.moreMenu, { systemMaterial: this.appearance.menu, mask: false })
-        IconButton({ icon: $r('sys.symbol.square_and_pencil'), label: t("新建对话"), compId: 'new-chat', animatedIcon: 'compose',
+        IconButton({ label: t('新建对话'), compId: 'new-chat', animatedIcon: 'newChat',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(); } })
       } else {
-        IconButton({ icon: $r('sys.symbol.connection'), label: t('应用内浏览器'), compId: 'empty-open-browser',
+        IconButton({ animatedIcon: 'browser', label: t('应用内浏览器'), compId: 'empty-open-browser',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.ready || this.browser.permissionSaving, onTap: () => this.openBrowser() })
       }
@@ -2000,7 +2013,7 @@ struct Index {
           .backgroundColor($r('app.color.page_background'))
           .onFocus(() => this.privacy.onGateFocus(true)).onBlur(() => this.privacy.onGateFocus(false))
       } else {
-      ForEach([this.locale], (_locale: string) => {
+      ForEach([this.navigationLocale], (_locale: string) => {
     Stack() {
     Row() {
     if (this.workbench().rail) {
@@ -2067,7 +2080,7 @@ struct Index {
                     Text(this.recoveryCloudStatus).id('storage-recovery-cloud-status')
                       .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
                   }
-                  Button(t('从其他设备接收')).id('storage-recover-device').attributeModifier(Btn.tonal)
+                  Button(t('打开备份与恢复')).id('storage-recover-options').attributeModifier(Btn.tonal)
                     .enabled(!this.recoveryBusy).onClick(() => this.recoverStorage(false))
                   if (this.recoveryLegacy) {
                     Text(t('升级前副本 · {0} 个会话 · {1}', [this.recoveryLegacy.threads,

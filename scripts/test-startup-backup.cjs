@@ -32,6 +32,11 @@ async function main(){
   items.unshift({name:'tinybot-auto-11111111-1111-4111-8111-111111111111.tinybot',createdAt:200,size:100,location:2});
   assert.equal((await state.find(fresh())).name,items[0].name,'Newest automatic backup is preferred over an older manual backup');
   state.finish();working=new Map(saved);state=new StartupBackup(context);assert.equal(await state.find(fresh()),undefined);assert.equal(syncs,2);
+  reset();state=new StartupBackup(context);working.set('onboardingStep',1);
+  assert.equal(state.untouched(fresh()),true,'An available backup can still be restored during sign-in');
+  working.set('onboardingStep',2);
+  assert.equal(state.untouched(fresh()),false,'A late restore cannot overwrite onboarding preferences');
+  assert.equal(await state.find(fresh()),undefined);assert.equal(syncs,0);
   for(const upgrade of ['timestamp','manifest','legacy','completed','pending-upgrade']){
     reset();
     if(upgrade==='timestamp') info.updateTime=200;

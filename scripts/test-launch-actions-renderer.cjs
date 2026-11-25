@@ -32,7 +32,8 @@ function page() {
     flushDraft: async () => page.events.push('saved'),
     newThread: async project => { page.events.push(['new', project]); page.app.active.id = 'new'; return true; }
   };
-  page.paths = { clear: () => page.events.push('navigation') };
+  let pathCount = 1;
+  page.paths = { size: () => pathCount, clear: () => { pathCount = 0; page.events.push('navigation'); } };
   page.setDrawer = value => page.events.push(['drawer', value]);
   page.detailPaneOpen = true; page.workspaceOpen = true; page.editorDraft = 'Unsaved text';
   page.workbench = () => ({ docked: false });
@@ -54,6 +55,8 @@ function card(wide) {
   } });
   const view = controller('widget/pages/WidgetCard', 'WidgetCard', ['initialRender', 'mascot', 'actions'], {
     ...Object.fromEntries(['Stack', 'Row', 'Column', 'If', 'FormLink', 'Circle', 'Image', 'Text', 'SymbolGlyph'].map(type => [type, element(type)])),
+    Chevron: class { constructor(_parent, props) { element('Chevron').create(props); } },
+    ViewPU: { create() {} },
     Alignment: { TopStart: 'top-start' }, Color: { Transparent: 'transparent' }, LineCapStyle: { Round: 'round' },
     FontWeight: { Bold: 'bold', Medium: 'medium' }, TextOverflow: { Ellipsis: 'ellipsis' },
     FlexAlign: { Center: 'center' }, TextAlign: { Start: 'start' }
@@ -158,7 +161,11 @@ function card(wide) {
   for (const dimension of [2, 3]) {
     const data = provider.onAddForm({ parameters: { 'ohos.extra.param.key.form_dimension': dimension } });
     assert.equal(data.wide, dimension === 3);
-    const links = card(data.wide).filter(node => node.type === 'FormLink');
+    const nodes = card(data.wide);
+    const links = nodes.filter(node => node.type === 'FormLink');
+    const chevrons = nodes.filter(node => node.type === 'Chevron');
+    assert.deepEqual(chevrons.map(node => node.value.pointing), data.wide ? ['right'] : []);
+    if (data.wide) assert.equal(chevrons[0].parent.parent, links[2]);
     assert.deepEqual(links.map(node => node.value.params.tinybotAction),
       dimension === 3 ? ['new-chat', 'voice-input', 'continue-chat'] : ['new-chat', 'voice-input']);
     for (const link of links) {

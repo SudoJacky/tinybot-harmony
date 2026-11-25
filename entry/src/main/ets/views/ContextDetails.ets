@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { ContextTokenItem } from '../model/ContextBreakdown';
@@ -119,7 +120,7 @@ export struct ContextDetails {
               .fontColor($r('app.color.text_primary')).layoutWeight(1).textAlign(TextAlign.Start)
             Text(this.percent(this.app.contextWindow > 0 ? this.app.contextUsed / this.app.contextWindow : 0))
               .fontFamily(this.appearance.fontFamily).fontSize(12).fontColor($r('app.color.text_secondary'))
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
+            Chevron({ pointing: 'down' })
               .rotate({ angle: this.showBreakdown ? 180 : 0 })
           }.width('100%').constraintSize({ minHeight: 32 })
         }.id('context-toggle').width('100%').padding(0).backgroundColor(Color.Transparent)

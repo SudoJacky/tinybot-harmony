@@ -58,7 +58,6 @@ const suites = {
     'test-storage-usage.cjs',
     'test-startup-backup.cjs',
     'test-auto-cloud-backup.cjs',
-    'test-stream-reveal.cjs',
     'test-system-bars-native.cjs',
     'test-team-toggle.cjs',
     'test-tool-catalog.cjs',
@@ -123,6 +122,7 @@ const suites = {
     'test-browser-dom.cjs',
     'test-builtin-widgets-browser.cjs',
     'test-markdown-mermaid.cjs',
+    'test-office-preview-browser.cjs',
     'test-web-ui-browser.cjs',
   ],
 };

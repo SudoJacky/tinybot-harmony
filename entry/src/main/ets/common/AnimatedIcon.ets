@@ -8,8 +8,9 @@ export struct AnimatedIcon {
   @StorageProp('tinybot.foreground') @Watch('availabilityChanged') private foreground: boolean = false;
   @Prop @Watch('selectionChanged') selected: boolean = false;
   @Prop @Watch('interactionChanged') interacting: boolean = false;
+  @Prop @Watch('pressedChanged') pressed: boolean = false;
   @Prop tint: ResourceColor = $r('app.color.text_secondary');
-  iconName: AnimatedIconName = 'mountain';
+  @Prop iconName: AnimatedIconName = 'appearance';
   iconSize: number = 18;
   playOnAppear: boolean = false;
   @State private progress: number = 1;
@@ -21,6 +22,7 @@ export struct AnimatedIcon {
 
   private selectionChanged(): void { if (this.selected) { this.play(); } }
   private interactionChanged(): void { if (this.interacting) { this.play(); } }
+  private pressedChanged(): void { if (this.pressed) { this.play(); } }
   private availabilityChanged(): void {
     if (!this.foreground || this.appearance.effectStrength === 0) { this.stop(); }
   }
@@ -28,7 +30,7 @@ export struct AnimatedIcon {
   private play(): void {
     if (!this.mounted || !this.foreground || this.appearance.effectStrength === 0 || this.animator) { return; }
     const animator = this.getUIContext().createAnimator({
-      duration: 300, easing: 'linear', delay: 0, fill: 'forwards',
+      duration: 220, easing: 'linear', delay: 0, fill: 'forwards',
       direction: 'normal', iterations: 1, begin: 0, end: 1
     });
     animator.onFrame = (progress: number): void => {

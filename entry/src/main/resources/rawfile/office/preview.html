@@ -11,8 +11,17 @@
     body { margin: 0; height: 100dvh; display: flex; flex-direction: column; }
     button, textarea { font: inherit; }
     button { cursor: pointer; color: inherit; border: 1px solid #d9dfe8; border-radius: 8px; background: #fff; min-height: 36px; padding: 0 10px; }
-    button:disabled { opacity: .35; }
+    button:disabled { opacity: .35; cursor: default; }
     button[aria-current=true], button[aria-pressed=true] { border-color: #3767da; color: #1749b4; background: #eaf0ff; }
+    button:focus-visible { outline: 2px solid #1749b4; outline-offset: -3px; }
+    @media (hover: hover) and (pointer: fine) {
+      button:enabled:hover { box-shadow: inset 0 0 0 100vmax #1749b40d; }
+    }
+    button:enabled:active { box-shadow: inset 0 0 0 100vmax #1749b420; }
+    @media (prefers-reduced-motion: no-preference) {
+      button { transition: transform 130ms cubic-bezier(.2, 0, 0, 1), box-shadow 120ms ease-out; }
+      button:enabled:active { transform: scale(.97); }
+    }
     #toolbar { flex: none; display: flex; gap: 6px; padding: 0 8px; overflow: auto; background: #f1f3f6; }
     #toolbar button { margin: 6px 0; white-space: nowrap; }
     #viewport { flex: 1; min-height: 0; overflow: auto; }
@@ -20,6 +29,7 @@
     .word p, .word h1, .word h2, .word h3 { white-space: pre-wrap; overflow-wrap: anywhere; position: relative; }
     .word h1, .word h2, .word h3 { font-family: system-ui, sans-serif; color: #24374a; }
     .word img { max-width: 100%; }
+    ::highlight(office-annotation) { background-color: #c4d8ff; color: #14264a; text-decoration: underline; }
     table { border-collapse: separate; border-spacing: 0; }
     .word table { width: 100%; }
     .word td { border: 1px solid #ccd4df; padding: 0 8px; }
@@ -50,8 +60,9 @@
     .shape svg { width: 100%; height: 100%; overflow: visible; display: block; }
     .shape p { margin: 0; }
     .annotating .stage .slide { cursor: crosshair; touch-action: none; user-select: none; }
-    .annotating .shape:hover { outline: 2px dashed #3770e4; }
     .annotating .shape:focus-visible { outline: 2px dashed #3770e4; }
+    .slide-hover { display: none; position: absolute; z-index: 2; border: 3px solid #3770e4; box-shadow: inset 0 0 0 1px white; pointer-events: none; }
+    .annotating .stage .slide-hover { display: block; }
     .slide-selection { position: absolute; border: 2px dashed #3770e4; background: #3770e420; pointer-events: none; }
     .grid { height: 100%; display: flex; flex-direction: column; }
     .grid-controls { display: flex; align-items: center; gap: 5px; padding: 5px 8px; }
@@ -63,13 +74,22 @@
     .grid-scroll thead th:first-child { z-index: 3; }
     .grid-scroll td { position: relative; min-width: 84px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
     .annotating td { cursor: crosshair; touch-action: none; user-select: none; }
-    .grid-scroll td.selected { box-shadow: inset 0 0 0 2px #3770e4; }
+    .annotating .grid-scroll td.cell-hover { box-shadow: inset 0 0 0 2px #3770e4; }
+    .grid-scroll td.selected { background-image: linear-gradient(#3770e420, #3770e420); box-shadow:
+      inset 0 var(--range-top, 0px) #3770e4, inset var(--range-right, 0px) 0 #3770e4,
+      inset 0 var(--range-bottom, 0px) #3770e4, inset var(--range-left, 0px) 0 #3770e4; }
+    .grid-scroll td[data-edges~=top] { --range-top: 2px; }
+    .grid-scroll td[data-edges~=right] { --range-right: -2px; }
+    .grid-scroll td[data-edges~=bottom] { --range-bottom: -2px; }
+    .grid-scroll td[data-edges~=left] { --range-left: 2px; }
+    .cell-range { color: #1749b4; background: #eaf0ff; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
     .pin { position: absolute; top: 1px; right: 1px; z-index: 1; min-width: 19px; padding: 2px; border: 1px solid white; border-radius: 100px; color: white; background: #2769d9; font: 600 11px/15px system-ui, sans-serif; text-align: center; user-select: none; }
     #comment, #text-action { position: fixed; z-index: 5; box-shadow: 0 8px 32px #14233c35; }
-    #comment { display: grid; gap: 8px; background: white; padding: 12px; width: min(310px, calc(100vw - 16px)); border: 1px solid #d9dfe8; border-radius: 16px; }
-    #comment textarea { width: 100%; min-height: 68px; resize: vertical; padding: 4px; border: 0; border-radius: 4px; }
+    #comment { display: flex; flex-direction: column; gap: 8px; overflow: auto; background: white; padding: 12px; width: 310px; border: 1px solid #d9dfe8; border-radius: 16px; }
+    #comment-excerpt { flex: none; margin: 0; padding-left: 8px; border-left: 2px solid #3770e4; color: #3c4f68; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #comment textarea { width: 100%; height: 68px; min-height: 36px; resize: vertical; padding: 4px; border: 0; border-radius: 4px; }
     #comment textarea:focus-visible { outline: 2px solid #b9ceff; }
-    #comment footer { display: flex; justify-content: flex-end; gap: 6px; }
+    #comment footer { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   </style>
 </head>
 <body>
@@ -77,7 +97,8 @@
   <main id="viewport"></main>
   <button type="button" id="text-action" hidden></button>
   <form id="comment" hidden>
-    <textarea maxlength="2000" required></textarea>
+    <blockquote id="comment-excerpt" hidden></blockquote>
+    <textarea maxlength="2000" aria-describedby="comment-excerpt" required></textarea>
     <footer><button type="button"></button><button type="submit"></button></footer>
   </form>
   <script src="preview.bundle.js"></script>

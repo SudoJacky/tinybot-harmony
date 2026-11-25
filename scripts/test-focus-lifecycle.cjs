@@ -32,9 +32,10 @@ function fixture(name, names, state) {
 }
 const checks = [];
 function check(name, action) { checks.push({ name, action }); }
-const searchMethods = ['searchRequested', 'searchAvailabilityChanged', 'searchVisibilityChanged', 'aboutToAppear', 'aboutToDisappear', 'closeCloudPicker', 'locked'];
+const searchMethods = ['searchRequested', 'searchAvailabilityChanged', 'searchVisibilityChanged', 'aboutToAppear', 'aboutToDisappear',
+  'closeCloudPicker', 'locked', 'searchInputChanged', 'updateQuery'];
 function search() { return fixture('ThreadList', searchMethods, { mounted: true, foreground: true, active: true,
-  searchOpen: false, focusRequest: 0, searchRequest: 0, app: { canNavigate: true } }); }
+  searchOpen: false, focusRequest: 0, searchRequest: 0, searchInputRevision: 0, query: '', app: { canNavigate: true } }); }
 check('search waits for render instead of a timer and does not swallow failures', () => {
   const f = search(); f.panel.searchRequested(); f.timers(); assert.deepEqual(f.focus, []);
   f.render(); assert.deepEqual(f.focus, ['search-threads']);
@@ -48,6 +49,22 @@ check('search cancels locked, hidden, destroyed and close/reopen callbacks', () 
     p => { p.active = false; p.searchAvailabilityChanged(); p.active = true; }]) {
     const f = search(); f.nativeReady(); f.panel.searchRequested(); change(f.panel); f.timers(); f.render(); assert.deepEqual(f.focus, []);
   }
+});
+check('native search input defers render-time callbacks and ignores obsolete text', async () => {
+  const { panel } = search();
+  panel.searchOpen = true;
+  panel.searchInputChanged('first'); panel.searchInputChanged('latest');
+  assert.equal(panel.query, '');
+  await Promise.resolve();
+  assert.equal(panel.query, 'latest');
+  panel.searchInputChanged('closed editor');
+  panel.searchOpen = false; panel.searchVisibilityChanged();
+  panel.searchOpen = true;
+  await Promise.resolve();
+  assert.equal(panel.query, 'latest');
+  panel.searchInputChanged('unmounted editor'); panel.aboutToDisappear();
+  await Promise.resolve();
+  assert.equal(panel.query, 'latest');
 });
 const providerMethods = ['save', 'locked', 'focusField', 'focusAvailabilityChanged', 'advancedChanged', 'aboutToDisappear'];
 function provider(field = 'context') { return fixture('ProviderEditorPanel', providerMethods, {
@@ -67,26 +84,23 @@ check('provider cancels collapsed, locked, covered and disposed targets', async 
   const key = provider('key'); key.nativeReady(); await key.panel.save(); key.panel.editor.noApiKey = true;
   key.timers(); key.render(); assert.deepEqual(key.focus, []);
 });
-function onboarding(field = 'key') { return fixture('OnboardingPanel', ['connectSelected', 'focusConnectionField', 'endConnectionEditing'], {
-  mounted: true, active: true, foreground: true, step: 3, focusRequest: 0, selectedPreset: 'test', providerEditing: true,
-  saving: false, busy: false, transitioning: false, connectionEditing: false,
-  app: { providerEditor: { noApiKey: false, fieldError: name => name === field ? 'invalid' : '' } }
+function onboarding(field = 'key') { return fixture('OnboardingProviderForm', ['focusInvalidField', 'invalidateFocus', 'aboutToDisappear'], {
+  invalidField: field, focusRevision: 0, locked: false, custom: true, advanced: false, manualModel: false,
+  editor: { noApiKey: false }
 }); }
-check('onboarding only focuses rendered fields after the frame', async () => {
-  for (const field of ['name', 'context', 'models']) {
-    const f = onboarding(field); f.nativeReady(); await f.panel.connectSelected(); f.render();
-    assert.deepEqual(f.focus, [], field + ' is absent from this inline form'); assert.equal(f.panel.error, 'invalid');
+check('onboarding opens and renders invalid fields before requesting focus', () => {
+  for (const field of ['name', 'url', 'key', 'model-id']) {
+    const f = onboarding(field); f.panel.focusInvalidField();
+    assert.equal(f.panel.advanced, field === 'name' || field === 'url');
+    assert.equal(f.panel.manualModel, field === 'model-id');
+    assert.deepEqual(f.focus, []);
+    f.render(); assert.deepEqual(f.focus, ['onboarding-provider-' + field]);
   }
-  const f = onboarding(); await f.panel.connectSelected(); assert.deepEqual(f.focus, []); f.render();
-  assert.deepEqual(f.focus, ['onboarding-inline-key']);
-  for (const field of ['url', 'models']) {
-    const local = onboarding(field); local.panel.app.providerEditor.noApiKey = true;
-    await local.panel.connectSelected(); local.render(); assert.deepEqual(local.focus, ['onboarding-inline-' + field]);
+  for (const change of [p => { p.locked = true; }, p => p.aboutToDisappear(), p => { p.editor.noApiKey = true; },
+    p => { p.invalidField = ''; p.focusInvalidField(); }, p => p.invalidateFocus()]) {
+    const stale = onboarding(); stale.panel.focusInvalidField(); change(stale.panel); stale.render(); assert.deepEqual(stale.focus, []);
   }
-  for (const change of [p => { p.active = false; }, p => { p.step = 4; }, p => { p.saving = true; },
-    p => { p.app.providerEditor.noApiKey = true; }, p => { p.selectedPreset = 'other'; }, p => p.endConnectionEditing()]) {
-    const stale = onboarding(); await stale.panel.connectSelected(); change(stale.panel); stale.render(); assert.deepEqual(stale.focus, []);
-  }
+  const absent = onboarding('context'); absent.panel.focusInvalidField(); absent.render(); assert.deepEqual(absent.focus, []);
 });
 function chat() { return fixture('ChatPanel', ['fork', 'showSpeechKeyboard', 'speechActive', 'selectSkill', 'dismissPlusMenu',
   'queueComposerFocus', 'composerActionCurrent', 'speechAvailabilityChanged', 'focusForegroundChanged', 'afterRender'], {

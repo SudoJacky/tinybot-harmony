@@ -5,8 +5,8 @@ import { common } from '@kit.AbilityKit';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { StorageUsage } from '../services/StorageUsage';
 import { StorageCategorySummary, StorageEntry, StorageEntryResult, StorageReport, emptyStorageEntryResult,
-  emptyStorageReport, storageCategoryKey } from '../model/StoragePlan';
-import { Btn, Font, Radius, Space, storageSize } from '../common/Theme';
+  emptyStorageReport, storageCategoryKey, storageSize } from '../model/StoragePlan';
+import { Btn, Font, Radius, Space } from '../common/Theme';
 import { Banner, EmptyState, GroupCard, IconButton, NavRow, RowDivider, SectionHeader, Tag } from '../common/Widgets';
 
 function categoryIcon(id: string): Resource {
@@ -89,8 +89,8 @@ export struct StoragePanel {
       Column({ space: Space.md }) {
         Row() {
           Column({ space: 2 }) {
-            Text(t('Tinybot 数据')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
-            Text(storageSize(this.report.totalBytes)).fontFamily(this.appearance.fontFamily)
+            Text(t('应用占用')).fontFamily(this.appearance.fontFamily).fontSize(13).fontColor($r('app.color.text_secondary'))
+            Text(this.report.bundle ? storageSize(this.report.bundle.totalBytes) : '—').fontFamily(this.appearance.fontFamily)
               .fontSize(28).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           if (this.deviceKnown()) {
@@ -101,16 +101,22 @@ export struct StoragePanel {
             }.alignItems(HorizontalAlign.End)
           }
         }.width('100%')
-        if (this.deviceKnown()) {
-          Progress({ value: this.report.totalBytes, total: this.report.deviceBytes, type: ProgressType.Linear })
+        if (this.report.bundle && this.deviceKnown()) {
+          Progress({ value: this.report.bundle.totalBytes, total: this.report.deviceBytes, type: ProgressType.Linear })
             .width('100%').color(this.appearance.accent).backgroundColor($r('app.color.surface_variant'))
           Text(t('Tinybot 占设备空间 {0}% · 设备整体已用 {1}%',
-            [this.report.totalBytes > 0 && this.report.totalBytes / this.report.deviceBytes < 0.0001 ? '<0.01' :
-              (this.report.totalBytes / this.report.deviceBytes * 100).toFixed(2), this.devicePercent()])).fontFamily(this.appearance.fontFamily)
+            [this.report.bundle.totalBytes > 0 && this.report.bundle.totalBytes / this.report.deviceBytes < 0.0001 ? '<0.01' :
+              (this.report.bundle.totalBytes / this.report.deviceBytes * 100).toFixed(2), this.devicePercent()])).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
         }
-        Text(t('统计只包含 Tinybot 私有目录，不含共享文件夹中的文件。')).fontFamily(this.appearance.fontFamily)
-          .fontSize(Font.caption).lineHeight(18).fontColor($r('app.color.text_tertiary'))
+        if (this.report.bundle) {
+          Text(t('安装文件 {0} · 数据 {1} · 系统缓存 {2}', [storageSize(this.report.bundle.appBytes),
+            storageSize(this.report.bundle.dataBytes), storageSize(this.report.bundle.cacheBytes)]))
+            .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).lineHeight(18).fontColor($r('app.color.text_secondary'))
+        } else if (!this.loading && this.error.length === 0) {
+          Text(t('无法读取系统存储统计')).fontFamily(this.appearance.fontFamily)
+            .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
+        }
       }.width('100%').padding(Space.lg)
     }
   }
@@ -151,7 +157,8 @@ export struct StoragePanel {
 
   @Builder
   categories() {
-    SectionHeader({ title: t('占用明细'), caption: t('点按类别查看占用最大的文件') })
+    SectionHeader({ title: t('占用明细'), caption: t('已分类 {0} · 点按类别查看占用最大的文件',
+      [storageSize(this.report.categorizedBytes)]) })
     GroupCard() {
       Column() {
         ForEach(this.report.categories, (item: StorageCategorySummary, index: number) => {

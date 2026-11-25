@@ -30,6 +30,12 @@ import { MessageViewModel, ThreadViewModel } from './SessionViewModels';
 
 export { AgentStepViewModel, MessageViewModel, ThreadViewModel, ToolExecutionViewModel } from './SessionViewModels';
 
+interface ThreadSearchCache {
+  query: string;
+  archived: boolean;
+  results?: ThreadViewModel[];
+}
+
 @Observed
 export class SettingsViewModel {
   userDocument: string = '';
@@ -87,6 +93,8 @@ export class ChatViewModel {
   visibleMessageCount: number = 60;
   config: ModelConfig = defaultConfig();
   threads: ThreadViewModel[] = [];
+  private readonly threadSearch: ThreadSearchCache = { query: '', archived: false };
+  private readonly threadLists: Map<boolean, ThreadViewModel[]> = new Map();
   active: ThreadViewModel = new ThreadViewModel({ id: '', title: '新对话', updatedAt: 0, messages: [] });
   settings: SettingsViewModel = new SettingsViewModel();
   providerEditor: ProviderEditorViewModel = new ProviderEditorViewModel();
@@ -115,8 +123,13 @@ export class ChatViewModel {
   private project(event: SessionEvent): void {
     const diagnosticMark = Diagnostics.begin();
     try {
+      if (event.data || event.kind === 'thread') { this.threadLists.clear(); }
+      if (event.data || event.kind === 'thread' || event.kind === 'message' || event.stream?.some((update) => update.content !== undefined)) {
+        this.threadSearch.results = undefined;
+      }
       this.projectState(event.state);
       if (event.data) { this.projectData(event.data); }
+      if (event.kind === 'selection' && event.threadId) { this.projectSelection(event.threadId, event.teams || []); }
       if (event.preferences) {
         this.config = event.preferences.config; this.extensions = event.preferences.extensions;
         this.productivity = event.preferences.productivity; this.selectedConfig = this.requireSession().currentConfig;
@@ -141,6 +154,17 @@ export class ChatViewModel {
         if (thread) { thread.draft = draft; }
         if (event.threadId === this.active.id) { this.draft = draft; this.active.draft = draft; }
       }
+      let activeStreamChanged = false;
+      for (const update of event.stream || []) {
+        const isActive = update.threadId === this.active.id;
+        const thread = isActive ? this.active : this.threads.find((item) => item.id === update.threadId);
+        if (!thread) { continue; }
+        const tail = thread.messages[thread.messages.length - 1];
+        const message = tail?.id === update.messageId ? tail : thread.messages.find((item) => item.id === update.messageId);
+        if (!message) { continue; }
+        message.updateStream(update.step, update.content, update.stepContent, update.reasoningContent);
+        if (isActive) { activeStreamChanged = true; }
+      }
       if (event.kind === 'message' && event.message) {
         const thread = this.threads.find((thread) => thread.id === event.threadId);
         thread?.messages.find((message) => message.id === event.message?.id)?.update(event.message);
@@ -152,21 +176,9 @@ export class ChatViewModel {
         if (event.tool.status === 'complete' && (event.tool.call.function.name === 'publish_preview' ||
           (event.tool.children || []).some((child) => child.call.function.name === 'publish_preview'))) { thread?.refreshPreviews(); }
       }
-      if (event.kind === 'reasoning') {
-        const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
-        if (message) {
-          message.updateReasoning(event.step || 0, event.stepContent || '');
-        }
-      }
-      if (event.kind === 'text') {
-        const message = this.threads.find((thread) => thread.id === event.threadId)?.messages.find((item) => item.id === event.messageId);
-        if (message) {
-          message.updateText(event.content || '', event.step || 0, event.stepContent || '');
-        }
-      }
-      if (['text', 'reasoning', 'message', 'tool', 'snapshot', 'thread', 'teams'].includes(event.kind)) {
-        if (!event.threadId || event.threadId === this.active.id) { this.outputs.get(this.active.id)?.(); }
-      }
+      const activeOutputChanged = (!event.threadId || event.threadId === this.active.id) &&
+        ['message', 'tool', 'snapshot', 'selection', 'thread', 'teams'].includes(event.kind);
+      if (activeStreamChanged || activeOutputChanged) { this.outputs.get(this.active.id)?.(); }
     } finally { if (Diagnostics.recording) { Diagnostics.end('viewmodel.project', diagnosticMark); } }
   }
   private projectState(state: SessionState): void {
@@ -180,8 +192,7 @@ export class ChatViewModel {
     const warnings = state.compatibilityWarnings || [];
     if (JSON.stringify(warnings) !== JSON.stringify(this.compatibilityWarnings)) { this.compatibilityWarnings = warnings; }
     this.contextStatus = state.contextStatus; this.contextTokens = state.contextTokens;
-    // Session snapshots clone this array for every token; retain the observed value
-    // until its contents change so deltas do not invalidate the whole chat panel.
+    // Retain the observed context array across updates with the same contents.
     const items = state.contextBreakdown || [];
     if (items.length !== this.contextItems.length || items.some((item, index) => {
       const previous = this.contextItems[index];
@@ -192,7 +203,6 @@ export class ChatViewModel {
   }
   private projectData(data: AppData): void {
     this.projects = data.projects || [];
-    this.teams = data.threads.find((thread) => thread.id === data.activeThreadId)?.teams || [];
     this.productivity = data.productivity || defaultProductivity();
     this.config = data.config; this.extensions = data.extensions || defaultExtensions(); this.providerProfiles = data.providerProfiles || [];
     const existing = new Map<string, ThreadViewModel>();
@@ -202,7 +212,11 @@ export class ChatViewModel {
       if (view) { view.update(thread); return view; }
       return new ThreadViewModel(thread);
     });
-    const active = this.threads.find((thread) => thread.id === data.activeThreadId);
+    this.projectSelection(data.activeThreadId, data.threads.find((thread) => thread.id === data.activeThreadId)?.teams || []);
+  }
+  private projectSelection(id: string, teams: TeamRun[]): void {
+    this.teams = teams;
+    const active = this.threads.find((thread) => thread.id === id);
     if (active) {
       if (this.active.id !== active.id) { this.visibleMessageCount = 60; this.searchQuery = ''; this.searchMessageId = ''; }
       this.active = active; this.draft = active.draft;
@@ -219,7 +233,6 @@ export class ChatViewModel {
     const name = this.providerProfiles.find((item) => item.id === ref.providerId)?.name || t('已删除服务');
     return name + ' · ' + ref.modelId + (this.configured ? '' : t(' · 不可用'));
   }
-  get visibleMessages(): MessageViewModel[] { return this.active.messages.slice(-this.visibleMessageCount); }
   get contextDraft(): ContextTokenItem[] { return draftBreakdown(this.draft,
     referenceContext(this.active.references) + (this.active.panelContext || '') + fileAnnotationContext(this.active.annotations), this.active.attachments); }
   get contextDetails(): ContextTokenItem[] { return this.contextItems.concat(this.contextDraft); }
@@ -230,7 +243,15 @@ export class ChatViewModel {
     return this.canNavigate && !this.active.archived && (this.phase === 'idle' || this.phase === 'running');
   }
   filteredThreads(query: string, archived: boolean): ThreadViewModel[] {
-    return matchingThreads(this.threads.filter((thread) => !thread.sideChat), query, archived) as ThreadViewModel[];
+    const search = query.trim();
+    const cache = this.threadSearch;
+    const existing = search ? (cache.query === search && cache.archived === archived ? cache.results : undefined) :
+      this.threadLists.get(archived);
+    if (existing) { return existing; }
+    const results = matchingThreads(this.threads.filter((thread) => !thread.sideChat), search, archived) as ThreadViewModel[];
+    if (search) { cache.query = search; cache.archived = archived; cache.results = results; }
+    else { this.threadLists.set(archived, results); }
+    return results;
   }
 
   changeMcp(request: McpSettingsCommand, cancellation: Cancellation): Promise<McpSettingsResult> { return this.requireSession().changeMcp(request, cancellation); }
@@ -273,6 +294,7 @@ export class ChatViewModel {
   switchThreadWorkspace(threadId: string, projectId?: string): Promise<boolean> {
     return this.requireSession().switchThreadWorkspace(threadId, projectId);
   }
+  get canNavigateNow(): boolean { return this.session?.canNavigate ?? this.canNavigate; }
   selectThread(id: string): Promise<boolean> { return this.requireSession().selectThread(id); }
   deleteThread(id: string): Promise<boolean> { return this.requireSession().deleteThread(id); }
   deleteThreads(ids: string[]): Promise<boolean> { return this.requireSession().deleteThreads(ids); }

@@ -2,6 +2,7 @@ import { PageStyles } from '../common/PageStyles';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { getLocale, t } from '../model/I18n';
 import { common } from '@kit.AbilityKit';
+import { discardBackupImport } from '../model/BackupImport';
 import { Diagnostics } from '../model/Diagnostics';
 import { CloudBackup, CloudBackupItem, cloudBackupError, latestCloudBackup } from '../services/CloudBackup';
 import { reviewBackupRestore } from './BackupRestoreReview';
@@ -13,7 +14,7 @@ import { BackupLoginRequired, huaweiAccount } from '../services/HuaweiAccount';
 import { NativeData } from '../services/NativeData';
 import { DeviceSyncStore, SyncDevice, trustedDevices } from '../services/DeviceSyncStore';
 import { sendDeviceData, receiveDeviceData } from '../services/DeviceTransfer';
-import { withBackupOperation } from '../services/Backup';
+import { exportBackup, readBackup, withBackupOperation } from '../services/Backup';
 
 @Component
 export struct BackupPanel {
@@ -77,7 +78,7 @@ export struct BackupPanel {
       this.backupDate = latest ? new Date(latest.createdAt).toLocaleString(getLocale()) : '';
     } catch (error) {
       Diagnostics.log('warn', 'backup', 'cloud_list_failed', undefined, error as Error);
-      if (this.visible && (!this.error || this.statusError)) { this.error = cloudBackupError(error as Error); this.statusError = true; }
+      if (this.visible && !this.status && (!this.error || this.statusError)) { this.error = cloudBackupError(error as Error); this.statusError = true; }
     }
   }
   private async chooseRestore(): Promise<void> {
@@ -110,9 +111,12 @@ export struct BackupPanel {
         this.recoveryPending = false;
         if (this.visible) { this.status = t('备份已恢复，已保留本机已有数据。'); }
       } else {
-        const completed = await CloudBackup.create(context, this.app.configurationSnapshot());
-        if (completed) { NativeData.forFilesDir(context.filesDir)?.allowAutoBackup(); this.recoveryPending = false; }
-        if (this.visible) { this.status = completed ? t('备份已上传到云端。') : t('备份已保存在本机，等待上传。请联网后再次备份。'); }
+        const result = await CloudBackup.create(context, this.app.configurationSnapshot());
+        if (result === 'uploaded') { NativeData.forFilesDir(context.filesDir)?.allowAutoBackup(); this.recoveryPending = false; }
+        if (this.visible) {
+          this.status = result === 'uploaded' ? t('备份已上传到云端。') : result === 'blocked' ?
+            t('已有配置备份等待上传。上传完成后，再创建新版本。') : t('备份已保存在本机，等待上传。请联网后再次备份。');
+        }
       }
     } catch (error) {
       if (this.visible) {
@@ -123,6 +127,35 @@ export struct BackupPanel {
       if (!this.needsLogin) { await this.refreshStatus(); }
       this.busy = false;
     }
+  }
+
+  private async localBackup(restore: boolean): Promise<void> {
+    if (this.locked()) { return; }
+    this.busy = true; this.error = ''; this.statusError = false; this.needsLogin = false;
+    this.status = restore ? t('正在读取备份文件…') : t('正在准备完整备份…');
+    try {
+      await withBackupOperation(async () => {
+        const context = this.context();
+        if (restore) {
+          const data = await readBackup(context, this.app.exportSnapshot());
+          if (!data) { this.status = ''; return; }
+          if (!this.visible) { this.status = ''; await discardBackupImport(data); return; }
+          if (!await reviewBackupRestore(this.getUIContext(), data)) { this.status = ''; return; }
+          if (!await this.app.importSnapshot(data)) {
+            throw new Error(this.app.error || this.app.saveError || t('当前无法导入数据。'));
+          }
+          NativeData.forFilesDir(context.filesDir)?.allowAutoBackup();
+          this.recoveryPending = false;
+          this.status = t('备份已恢复，已保留本机已有数据。');
+        } else {
+          this.status = await exportBackup(context, this.app.exportSnapshot()) ? t('完整备份已保存。') : '';
+        }
+      });
+    } catch (error) {
+      this.status = ''; this.needsLogin = error instanceof BackupLoginRequired;
+      this.error = (error as Error).message;
+      if (!this.needsLogin) { Diagnostics.log('error', 'backup', restore ? 'local_import_failed' : 'local_export_failed', undefined, error as Error); }
+    } finally { this.busy = false; }
   }
 
   private async discover(sending: boolean): Promise<void> {
@@ -180,7 +213,7 @@ export struct BackupPanel {
             NavRow({ title: t('从其他设备接收'), icon: $r('sys.symbol.arrow_down'), compId: 'device-sync-receive',
               disabled: this.locked(), onTap: () => this.discover(false) })
             ForEach(this.devices, (device: SyncDevice) => {
-              NavRow({ title: device.name, icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(),
+              NavRow({ title: device.name, icon: $r('sys.symbol.arrow_left_arrow_right'), disabled: this.locked(),
                 onTap: () => this.transfer(device) })
             }, (device: SyncDevice) => device.id)
           }
@@ -193,11 +226,11 @@ export struct BackupPanel {
         SectionHeader({ title: t('华为云空间') })
         GroupCard() {
           Column() {
-            NavRow({ title: t('备份'), subtitle: t('只上传配置与加密连接凭据，保留最近 3 个配置版本'),
-              compId: 'create-cloud-backup', icon: $r('sys.symbol.cloud'), disabled: this.locked(), onTap: () => this.cloud(false) })
+            NavRow({ title: t('备份'), subtitle: t('只保留一份配置，自动清理旧备份（含完整备份）。'),
+              compId: 'create-cloud-backup', animatedIcon: 'backup', disabled: this.locked(), onTap: () => this.cloud(false) })
             RowDivider()
             NavRow({ title: t('恢复备份'), subtitle: t('选择设备与版本，确认恢复内容'),
-              compId: 'restore-cloud-backup', icon: $r('sys.symbol.arrow_clockwise'), disabled: this.locked(), onTap: () => this.chooseRestore() })
+              compId: 'restore-cloud-backup', animatedIcon: 'restore', disabled: this.locked(), onTap: () => this.chooseRestore() })
           }
         }
         if (this.showVersions) {
@@ -215,9 +248,19 @@ export struct BackupPanel {
           Text(t('云端备份 · {0}', [this.backupDate])).id('cloud-backup-date').fontSize(13)
             .fontColor($r('app.color.text_secondary')).width('100%')
         }
-        Text(this.recoveryPending ? t('数据恢复期间已暂停自动备份。恢复云备份或手动完成新备份后，将继续自动备份。') : this.automatic.status)
+        Text(this.recoveryPending ? t('数据恢复期间已暂停自动备份。恢复备份或手动上传配置后，将继续自动备份。') : this.automatic.status)
           .id('auto-cloud-backup-status').fontSize(13)
           .fontColor($r('app.color.text_secondary')).width('100%')
+        SectionHeader({ title: t('本地备份'), caption: t('聊天和文件在备份中未加密，请妥善保管。') })
+        GroupCard() {
+          Column() {
+            NavRow({ title: t('导出完整备份'), subtitle: t('将会话、项目、附件、工作区与配置保存到 .tinybot 文件'),
+              icon: $r('sys.symbol.square_and_arrow_down'), compId: 'export-local-backup', disabled: this.locked(), onTap: () => this.localBackup(false) })
+            RowDivider()
+            NavRow({ title: t('从备份导入'), subtitle: t('选择备份文件并合并到此设备'),
+              icon: $r('sys.symbol.arrow_down'), compId: 'import-local-backup', disabled: this.locked(), onTap: () => this.localBackup(true) })
+          }
+        }
         if (this.busy) {
           Row({ space: Space.sm }) {
             LoadingProgress().width(20).height(20).color(this.appearance.accent)

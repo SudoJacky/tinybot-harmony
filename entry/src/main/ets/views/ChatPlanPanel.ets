@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { PlanItem } from '../model/RichArtifacts';
@@ -63,7 +64,7 @@ export struct ChatPlanPanel {
               Text(this.plan.completed + ' / ' + this.plan.steps.length).fontFamily(this.appearance.fontFamily).id('chat-plan-count')
                 .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
             }
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
+            Chevron({ pointing: 'down' })
               .rotate({ angle: this.plan.expanded ? 180 : 0 })
           }.width('100%').constraintSize({ minHeight: 44 }).padding({ left: 12, right: 12, top: 6, bottom: 6 })
         }.fontFamily(this.appearance.fontFamily).id('chat-plan-toggle').width('100%').backgroundColor(Color.Transparent).borderRadius(Radius.md)

@@ -1,0 +1,6 @@
+{
+  "name": "tinybot-offline-math-engine",
+  "private": true,
+  "scripts": { "build": "node build.cjs", "check": "node build.cjs --check" },
+  "devDependencies": { "esbuild": "0.25.12", "mathjax-full": "3.2.2" }
+}

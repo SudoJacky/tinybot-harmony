@@ -1,12 +1,12 @@
 import { PageStyles } from '../common/PageStyles';
 import { Space } from '../common/Theme';
-import { AppLanguage, t } from '../model/I18n';
+import { AppLanguage, getLocale, t } from '../model/I18n';
 import { LanguagePreferences } from '../services/LanguagePreferences';
 import { ChatViewModel } from '../viewmodel/ChatViewModel';
 import { Banner, GroupCard, NavRow, RowDivider } from '../common/Widgets';
 
-export function languageName(choice: string): string {
-  return choice === 'system' ? t('跟随系统') : choice === 'zh-CN' ? '简体中文' : 'English';
+export function languageName(choice: string, locale: string = getLocale()): string {
+  return choice === 'system' ? t('跟随系统', [], locale) : choice === 'zh-CN' ? '简体中文' : 'English';
 }
 
 @Component

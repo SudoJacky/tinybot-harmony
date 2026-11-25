@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AnimatedPage } from '../common/AnimatedPage';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -18,13 +19,14 @@ import { aiAssistedFile } from '../model/ConversationExport';
 import { MarkdownView } from './MarkdownView';
 import { DataTable } from './DataTable';
 import { OfficePreview, OfficePreviewSource } from './OfficePreview';
+import { filePreviewIcon } from '../common/FileArtwork';
 import { HtmlFilePreview } from './HtmlFilePreview';
 import { WebUiSpec, htmlPreviewLibrary } from '../model/WebUi';
 import { parseDelimited } from '../model/RichArtifacts';
 import { FileBaseline, WorkspaceEntry } from '../services/WorkspaceFiles';
 import { ToolFailure } from '../model/ToolFailure';
 import { Diagnostics } from '../model/Diagnostics';
-import { Btn, Font, Radius, Space, systemInsets } from '../common/Theme';
+import { Btn, Font, Motion, Radius, Space, systemInsets } from '../common/Theme';
 import { Banner, BottomBar, EmptyState, IconButton } from '../common/Widgets';
 
 const IMAGE_FILE: RegExp = /\.(png|jpe?g|webp|gif|bmp)$/i;
@@ -356,9 +358,8 @@ export struct WorkspacePanel {
     if (entry.kind === 'directory') {
       return this.files?.isCloudPath(this.join(entry.name)) ? $r('sys.symbol.cloud') : $r('sys.symbol.folder_fill');
     }
-    if (IMAGE_FILE.test(entry.name)) { return $r('sys.symbol.picture'); }
     if (entry.kind === 'symlink') { return $r('sys.symbol.link'); }
-    return MARKDOWN_FILE.test(entry.name) ? $r('sys.symbol.doc_plaintext') : $r('sys.symbol.doc_text');
+    return filePreviewIcon(entry.name);
   }
 
   private kindLabel(entry: WorkspaceEntry): string {
@@ -374,7 +375,7 @@ export struct WorkspacePanel {
   entryRow(entry: WorkspaceEntry) {
     Row({ space: Space.md }) {
       Column() {
-        SymbolGlyph(this.icon(entry)).fontSize(22)
+        SymbolGlyph(this.icon(entry)).fontSize(22).accessibilityLevel('no')
           .fontColor([entry.kind === 'directory' ? this.appearance.accent : $r('app.color.text_secondary')])
       }.width(40).height(40).borderRadius(Radius.sm).justifyContent(FlexAlign.Center)
       .backgroundColor(entry.kind === 'directory' ? this.appearance.accentContainer : $r('app.color.surface_variant'))
@@ -384,11 +385,12 @@ export struct WorkspacePanel {
         Text(this.kindLabel(entry)).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_tertiary'))
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       if (entry.kind === 'directory') {
-        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'right' })
       }
     }
     .width('100%').height(64).padding({ left: Space.page, right: Space.lg }).backgroundColor($r('app.color.surface'))
     .opacity(entry.kind === 'symlink' ? 0.5 : 1)
+    .hoverEffect(entry.kind === 'symlink' ? HoverEffect.None : HoverEffect.Highlight)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor($r('app.color.surface')) } })
     .onClick(() => this.open(entry))
   }
@@ -402,7 +404,7 @@ export struct WorkspacePanel {
           .fontWeight(this.directory ? FontWeight.Normal : FontWeight.Medium)
           .onClick(() => { if (this.directory) { this.go(''); } })
         ForEach(this.crumbs(), (part: string, index: number) => {
-          SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('app.color.text_tertiary')])
+          Chevron({ pointing: 'right' })
           Text(part).fontFamily(this.appearance.fontFamily).fontSize(14).padding({ left: 8, right: 8 }).height(32).borderRadius(16).maxLines(1)
             .fontColor(index === this.crumbs().length - 1 ? $r('app.color.text_primary') : this.appearance.accent)
             .fontWeight(index === this.crumbs().length - 1 ? FontWeight.Medium : FontWeight.Normal)
@@ -420,6 +422,7 @@ export struct WorkspacePanel {
       Text(label).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor(danger ? $r('app.color.danger') : $r('app.color.text_secondary'))
     }.id(compId).layoutWeight(1).height(56).justifyContent(FlexAlign.Center).enabled(!this.locked())
     .opacity(this.locked() ? 0.4 : 1)
+    .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .onClick(action)
   }
@@ -439,9 +442,10 @@ export struct WorkspacePanel {
     Column() {
       Row({ space: 4 }) {
         Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.chevron_left')).fontSize(22).fontColor([$r('app.color.text_primary')])
+          Chevron({ pointing: 'left', tint: $r('app.color.text_primary') }).accessibilityLevel('no')
         }.id('workspace-preview-back').fontFamily(this.appearance.fontFamily).width(44).height(44).backgroundColor(Color.Transparent)
-          .accessibilityText(t("返回")).onClick(() => this.closePreview())
+          .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+          .accessibilityText(t('返回')).bindTips(t('返回'), { appearingTime: 550 }).onClick(() => this.closePreview())
         Column({ space: 1 }) {
           Text(this.fileName(this.selected)).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary'))
@@ -460,9 +464,12 @@ export struct WorkspacePanel {
         }
         if (!this.editing && this.baseline?.existed) {
           Button({ type: ButtonType.Circle }) {
-            SymbolGlyph($r('sys.symbol.dot_grid_1x2')).fontSize(22).fontColor([$r('app.color.text_primary')])
+            SymbolGlyph($r('sys.symbol.ellipsis_circle')).fontSize(22).fontColor([$r('app.color.text_primary')]).accessibilityLevel('no')
           }.fontFamily(this.appearance.fontFamily).id('workspace-backup-menu').width(40).height(40)
-            .backgroundColor(Color.Transparent).accessibilityText(t('更多操作')).enabled(!this.locked())
+            .backgroundColor(Color.Transparent).accessibilityText(t('文件操作')).bindTips(t('文件操作'), { appearingTime: 550 })
+            .hoverEffect(this.locked() ? HoverEffect.None : HoverEffect.Highlight)
+            .clickEffect(!this.locked() && this.appearance.effectStrength > 0 ? Motion.press : null)
+            .enabled(!this.locked())
             .bindMenu(this.backupMenu, { systemMaterial: this.appearance.menu, mask: false })
         }
         if (this.embedded && !this.tabbed) {

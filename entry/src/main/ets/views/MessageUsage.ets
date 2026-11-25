@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
 import { MessageUsageSummary, summarizeUsage } from '../model/MessageUsage';
@@ -33,9 +34,9 @@ export struct MessageUsage {
   private speed(): string { return this.usage().latestOutputTokensPerSecond!.toFixed(1) + ' tok/s'; }
 
   @Builder
-  metric(icon: Resource, value: () => string) {
+  metric(icon: Resource | undefined, value: () => string) {
     Row({ space: 3 }) {
-      SymbolGlyph(icon).fontSize(12).fontColor([$r('app.color.text_tertiary')])
+      if (icon) { SymbolGlyph(icon).fontSize(12).fontColor([$r('app.color.text_tertiary')]).accessibilityLevel('no') }
       Text(value()).fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
         .maxLines(1)
     }
@@ -61,21 +62,23 @@ export struct MessageUsage {
                 this.metric($r('sys.symbol.gauge_with_dots_needle_33percent'), () => this.speed())
               }
               if (this.usage().reported > 0) {
-                this.metric($r('sys.symbol.arrow_up'), () => compactNumber(this.usage().input))
-                this.metric($r('sys.symbol.arrow_down'), () => compactNumber(this.usage().output))
+                this.metric(undefined, () => t('输入 {0}', [compactNumber(this.usage().input)]))
+                this.metric(undefined, () => t('输出 {0}', [compactNumber(this.usage().output)]))
               }
-              this.metric($r('sys.symbol.arrow_2_circlepath'), () => this.rate())
+              this.metric(undefined, () => t('缓存命中 {0}', [this.rate()]))
               if (this.usage().reported < this.usage().requests) {
                 Text(t(' · {0} 次用量未报告', [this.usage().requests - this.usage().reported]))
                   .fontFamily(this.appearance.fontFamily).fontSize(11).fontColor($r('app.color.text_tertiary'))
               }
             }.layoutWeight(1)
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(11).fontColor([$r('app.color.text_tertiary')])
-              .rotate({ angle: this.message.usageOpen ? 180 : 0 })
+            Chevron({ pointing: 'down' })
+              .rotate({ angle: this.message.usageOpen ? 180 : 0 }).accessibilityLevel('no')
           }.width('100%').padding({ top: 8, bottom: 8 })
         }.fontFamily(this.appearance.fontFamily).id('usage-' + this.message.id).width('100%').backgroundColor(Color.Transparent)
           .borderRadius(Radius.sm).clickEffect(Motion.pressSmall)
           .accessibilityText(this.summary() + ' · ' + (this.message.usageOpen ? t('收起用量详情') : t('展开用量详情')))
+          .accessibilityDescription(this.message.usageOpen ? t('已展开') : t('已收起'))
+          .bindTips(this.message.usageOpen ? t('收起用量详情') : t('展开用量详情'), { appearingTime: 550 })
           .onClick(() => { this.message.usageOpen = !this.message.usageOpen; })
         if (this.message.usageOpen) {
           Column({ space: 10 }) {

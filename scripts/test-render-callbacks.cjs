@@ -24,9 +24,10 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     if (key === 'onChange' || key === 'onTextSelectionChange') editorEvents.at(-1)[key] = args[0];
   } });
   const Panel = compile(methods('views/ChatPanel', ['composerChanged', 'composerSelectionChanged', 'speechActive', 'composerEditor', 'updateScrollState',
-    'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest']), {
+    'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest', 'lastMessageListIndex', 'loadEarlierMessages']), {
     TextArea: editor, Context: { animation() {} }, Motion: {}, Font: {}, Color: {}, Alignment: {}, Visibility: {},
-    ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end' }, Diagnostics: { recording: false },
+    ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end', START: 'start' }, Diagnostics: { recording: false },
+    Space: { sm: 8 }, LengthMetrics: { vp: value => value },
     ChatLayoutFrame: class { constructor(action) { this.action = action; } onIdle() { this.action(); } }
   });
   let building = false, changes = 0, selectionWrites = 0;
@@ -77,8 +78,8 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     focusOwner: 0, messageSyncRevision: 0, sendingMessageId: '',
     cancelPlusAction() { assert.equal(building, false); }, cancelAttachmentDrop() { assert.equal(building, false); },
     reading: { stop() { assert.equal(building, false); } },
-    messageSource: { update() { assert.equal(building, false); } } });
-  panel.thread.id = panel.app.active.id = 'c'; panel.app.visibleMessages = [];
+    messageSource: { update() { assert.equal(building, false); }, totalCount() { return 0; } } });
+  panel.thread.id = panel.app.active.id = 'c'; panel.thread.messages = [];
   building = true; panel.speechThreadChanged(); panel.syncMessages();
   assert.equal(panel.composerSelectionStart, 5, 'Prop watches cannot synchronously reset selection during a render');
   building = false; await drain(); assert.equal(panel.composerSelectionStart, -1);
@@ -87,57 +88,82 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
 
   const frames = [], jumps = [];
   let sourceReady = false, layoutReady = false;
-  Object.assign(panel, { positionedThreadId: '', followOutput: true,
+  let currentRows = [];
+  let itemRect = { y: 112, height: 50 };
+  Object.assign(panel, { positionedThreadId: '', transcriptAttached: false, followOutput: true,
     getUIContext: () => ({ postFrameCallback: frame => frames.push(frame) }),
-    messageSource: { update() { assert.equal(building, false); sourceReady = true; } },
-    scroller: { scrollToIndex(...args) {
-      assert.ok(sourceReady && layoutReady, 'Position only after data reload and native layout'); jumps.push(args);
+    topInset: 60, panelHeight: 500,
+    messageSource: { update(_id, rows, limit) { assert.equal(building, false); sourceReady = true; currentRows = rows.slice(rows.length - Math.min(rows.length, limit)); },
+      getData(index) { return currentRows[index]; }, totalCount() { return currentRows.length; },
+      indexOf(id) { return currentRows.findIndex(row => row.id === id); } },
+    scroller: { getItemRect() { return itemRect; }, scrollToIndex(...args) {
+      assert.ok(sourceReady && layoutReady, 'Position after the data source is ready'); jumps.push(args);
     } } });
   const render = () => { layoutReady = true; frames.splice(0).forEach(frame => frame.onIdle()); };
   panel.thread.messages = Array.from({ length: 120 }, (_, id) => ({ id }));
-  Object.assign(panel.app, { visibleMessages: panel.thread.messages.slice(-60), visibleMessageCount: 60, teams: [], searchMessageId: '' });
+  Object.assign(panel.app, { visibleMessageCount: 60, teams: [], searchMessageId: '' });
   building = true; panel.syncMessages(); panel.syncMessages(); building = false;
   await drain(); assert.equal(jumps.length, 0); assert.equal(frames.length, 1);
   render(); assert.deepEqual(jumps.pop(), [60, false, 'end'], 'Cold start targets the unmounted tail, accounting for the earlier-messages row');
   assert.equal(panel.followOutput, true);
-  panel.followOutput = false; panel.app.visibleMessageCount = 120; panel.app.visibleMessages = panel.thread.messages;
-  panel.syncMessages(); await drain(); render(); assert.equal(jumps.length, 0, 'Loading history preserves the reading position');
+  panel.loadEarlierMessages();
+  assert.equal(panel.app.visibleMessageCount, 120); assert.equal(panel.followOutput, false);
+  panel.syncMessages(); await drain(); render();
+  const restored = jumps.pop();
+  assert.deepEqual(restored.slice(0, 3), [60, false, 'start'], 'Last page restores the original message without the removed header');
+  assert.equal(restored[3].extraOffset, -44, 'History insertion preserves the old message position');
   const open = async id => { panel.thread.id = panel.app.active.id = id; panel.syncMessages(); await drain(); };
   panel.app.teams = [{ ownerMessageId: '' }];
-  await open('with-team'); render(); assert.deepEqual(jumps.pop(), [120, false, 'end'], 'Include a trailing team card');
+  panel.transcriptAttached = true;
+  await open('with-team'); assert.equal(frames.length, 0);
+  assert.deepEqual(jumps.pop(), [120, false, 'end'], 'An attached List targets the new tail before laying out the previous offset, including a trailing team card');
+  panel.transcriptAttached = false;
   await open('touched'); panel.followOutput = false; render(); assert.equal(jumps.length, 0, 'Touch cancels pending initial positioning');
   panel.app.searchMessageId = 'match'; await open('search'); render(); assert.equal(jumps.length, 0, 'Search owns its initial position');
   panel.app.searchMessageId = ''; await open('late-search'); panel.app.searchMessageId = 'match';
   render(); assert.equal(jumps.length, 0);
   panel.app.searchMessageId = ''; await open('stale'); panel.thread.id = 'different'; render(); assert.equal(jumps.length, 0);
   await open('disposed'); panel.lifecycle++; render(); assert.equal(jumps.length, 0, 'Disposal cancels pending positioning');
-  panel.app.visibleMessages = []; panel.thread.messages = []; panel.app.teams = [];
+  panel.thread.messages = []; panel.app.teams = [];
   await open('empty'); assert.equal(frames.length, 0);
-  panel.thread.messages = panel.app.visibleMessages = [{ id: 'first' }];
+  panel.thread.messages = [{ id: 'first' }];
   panel.syncMessages(); await drain(); assert.equal(frames.length, 0, 'First send remains owned by send motion');
   await open('short'); render(); assert.deepEqual(jumps.pop(), [0, false, 'end']);
   panel.scrollToLatest(); assert.deepEqual(jumps.pop(), [0, true, 'end']); assert.equal(panel.followOutput, false);
+  itemRect = { y: 0, height: 2800 };
+  panel.scrollToLatest(); assert.deepEqual(jumps.pop(), [0, false, 'end']); assert.equal(panel.followOutput, true);
+  itemRect = { y: 0, height: 0 };
+  panel.scrollToLatest(); assert.deepEqual(jumps.pop(), [0, false, 'end'], 'An offscreen tail does not animate through intervening rows');
   console.log('PASS emitted chat positioning: cold start, lazy tail, history, team card, touch, search, stale callbacks, empty chat and manual jump');
 
   const ResponsiveIcon = compile(methods('common/Widgets', ['updateStateVars'], 'IconButton'));
-  let diameter = 44;
-  const icon = Object.assign(new ResponsiveIcon(), { __diameter: { reset(value) { diameter = value; } } });
+  let diameter = 44, animatedIcon, chevron;
+  const icon = Object.assign(new ResponsiveIcon(), {
+    __diameter: { reset(value) { diameter = value; } },
+    __chevron: { reset(value) { chevron = value; } },
+    __animatedIcon: { reset(value) { animatedIcon = value; } }
+  });
   for (const key of ['icon', 'tint', 'fill', 'disabled', 'label', 'animatedSelected']) { icon['__' + key] = { reset() {} }; }
-  for (const next of [36, 44, 36, 36]) {
-    icon.updateStateVars({ diameter: next });
-    assert.equal(diameter, next, 'A retained icon button must follow phone/tablet sizing updates');
+  for (const [nextDiameter, nextIcon, nextChevron] of [[36, 'plus'], [44, undefined, 'right'], [36, 'newChat'], [36, 'browser']]) {
+    icon.updateStateVars({ diameter: nextDiameter, animatedIcon: nextIcon, chevron: nextChevron });
+    assert.equal(diameter, nextDiameter, 'A retained icon button must follow phone/tablet sizing updates');
+    assert.equal(animatedIcon, nextIcon, 'A retained icon button must accept icon changes and removal');
+    assert.equal(chevron, nextChevron, 'A retained icon button must accept and clear chevron directions');
   }
-  console.log('PASS emitted icon button: retained instances accept responsive diameter updates');
+  console.log('PASS emitted icon button: retained instances accept diameter and animated icon updates');
 
   let addButton, updateAddButton;
-  const AddButton = compile(methods('views/ChatPanel', ['composerAddButton']), {
+  const AddButton = compile(methods('views/ChatPanel',
+    ['composerAddButton', 'composerToolbarHeight', 'composerBorderWidth', 'composerCorners']), {
+    PHONE_COMPOSER_ACTION_SIZE: 44, Radius: { lg: 18, xl: 24 }, Space: { sm: 8 },
     IconButton: class extends ResponsiveIcon {
       constructor(_parent, params) {
         super(); addButton = this; this.diameter = params.diameter;
         this.animatedIcon = params.animatedIcon; this.animatedSelected = params.animatedSelected;
         this.__diameter = { reset: value => { this.diameter = value; } };
+        this.__animatedIcon = { reset: value => { this.animatedIcon = value; } };
         this.__animatedSelected = { reset: value => { this.animatedSelected = value; } };
-        for (const key of ['icon', 'tint', 'fill', 'disabled', 'label']) { this['__' + key] = { reset() {} }; }
+        for (const key of ['icon', 'chevron', 'tint', 'fill', 'disabled', 'label']) { this['__' + key] = { reset() {} }; }
       }
     },
     __Common__: { create() {}, bindPopup() {}, pop() {} }, ViewPU: { create() {} },
@@ -161,7 +187,19 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     composer[state] = true; updateAddButton(); assert.equal(addButton.animatedSelected, true);
     composer[state] = false; updateAddButton(); assert.equal(addButton.animatedSelected, false);
   }
-  console.log('PASS emitted composer button: layout and attachment menu update the retained icon');
+  composer.workbench = false; updateAddButton();
+  for (const expanded of [false, true]) {
+    composer.composerExpanded = () => expanded;
+    composer.composerActiveInLayout = () => expanded;
+    const corners = composer.composerCorners();
+    assert.equal(composer.composerToolbarHeight(), expanded ? 52 : 54);
+    assert.equal(corners.topRight, expanded ? 24 : 28);
+    assert.equal(corners.bottomRight, addButton.diameter / 2 + 8 + composer.composerBorderWidth());
+    assert.equal(corners.bottomLeft, corners.bottomRight);
+  }
+  composer.voiceMode = true;
+  assert.equal(composer.composerCorners().bottomRight, 24);
+  console.log('PASS emitted composer: retained icon updates and concentric phone toolbar corners');
 
   let settingsParams, settingsUpdate, settingsSwipe;
   const Settings = compile(methods('pages/Index', ['settingsContent']), {

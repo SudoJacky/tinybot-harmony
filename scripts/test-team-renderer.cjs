@@ -58,6 +58,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, S
     if (id.includes('Theme&')) return { Font: {}, Motion: {}, Radius: {}, Space: {}, compactNumber: String };
     if (id.includes('MarkdownView&')) return { MarkdownView };
     if (id.includes('TeamMemberAvatar&')) return { TeamMemberAvatar };
+    if (id.includes('Chevron&')) return { Chevron: Child };
     if (id.includes('ToolReceipt&')) return { ToolReceipt };
     if (id.includes('DisclosureState&')) return disclosureExports;
     if (id.includes('/model/ToolPresentation&')) return loadModel('model/ToolPresentation');
@@ -69,7 +70,7 @@ const globals = { exports: {}, ViewPU, SynchedPropertyNesedObjectPU: Property, S
     throw Error('Unexpected dependency ' + id);
   }
 };
-for (const name of ['Column','Row','Stack','Text','SymbolGlyph','LoadingProgress','Progress','Divider','If','ForEach','Flex','Button','Scroll','Image']) globals[name] = noUi();
+for (const name of ['Column','Row','Stack','Text','SymbolGlyph','LoadingProgress','Progress','Divider','If','ForEach','Flex','Button','Scroll','Image','__Common__']) globals[name] = noUi();
 globals.Text = new Proxy({}, { get: (_, name) => name === 'create' ? text => currentView.texts.set(currentView.currentElmt, text) : () => {} });
 for (const name of ['FlexAlign','HorizontalAlign','VerticalAlign','FontWeight','TextOverflow','CopyOptions','FlexWrap','ProgressType','WordBreak','Color','ButtonType','Alignment','BarState','ImageFit']) globals[name] = {};
 globals.Scroller = class { scrollTo() {} };
@@ -112,9 +113,10 @@ test('completion reaches retained avatars and task status', () => {
   assert.ok([...f.view.texts.values()].some(text=>String(text).includes('Lin · succeeded')));
 });
 test('collapsed team updates busy rings and member names without remounting portraits', () => {
-  const f=mount(false), avatar=[...f.view.childViews.values()][0];
+  const f=mount(false), avatar=[...f.view.childViews.values()].find(v=>v instanceof TeamMemberAvatar);
   update(f, run=>{run.members[0].name='Updated name';run.tasks[0].status='succeeded';});
-  assert.equal(f.view.childViews.size,1);assert.equal(avatar.busy,false);assert.equal(avatar.label,'Updated name');
+  const avatars=[...f.view.childViews.values()].filter(v=>v instanceof TeamMemberAvatar);
+  assert.deepEqual(avatars,[avatar]);assert.equal(avatar.busy,false);assert.equal(avatar.label,'Updated name');
 });
 test('one worker streams without rebuilding another worker row', () => {
   const run=seed();const other=JSON.parse(JSON.stringify(run.tasks[0]));other.task.id='other-task';other.task.memberId='other-worker';other.attempts[0].id='other-attempt';

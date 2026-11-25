@@ -94,7 +94,8 @@ export class AppButton implements AttributeModifier<ButtonAttribute> {
   }
 
   applyDisabledAttribute(instance: ButtonAttribute): void {
-    instance.backgroundColor($r('app.color.surface_variant')).fontColor($r('app.color.text_secondary')).opacity(1);
+    instance.backgroundColor($r('app.color.surface_variant')).fontColor($r('app.color.text_secondary')).opacity(1)
+      .hoverEffect(HoverEffect.None).clickEffect(null);
   }
 
   applyNormalAttribute(instance: ButtonAttribute): void {
@@ -103,7 +104,8 @@ export class AppButton implements AttributeModifier<ButtonAttribute> {
     const large = this.size >= 44;
     instance.type(ButtonType.Normal).borderRadius(large ? 12 : Radius.sm).height(this.size).fontFamily(appearance.fontFamily)
       .fontSize(large ? 15 : 13).fontWeight(FontWeight.Medium)
-      .padding({ left: large ? 20 : 14, right: large ? 20 : 14 });
+      .padding({ left: large ? 20 : 14, right: large ? 20 : 14 })
+      .hoverEffect(HoverEffect.Highlight).clickEffect(appearance.effectStrength > 0 ? Motion.press : null);
     if (this.kind === 'primary') {
       if (large) { instance.constraintSize({ maxWidth: 320 }); }
       instance.backgroundColor(appearance.accent).fontColor(appearance.onAccent);
@@ -212,12 +214,6 @@ export function fileSize(bytes: number): string {
   if (bytes < 1024) { return bytes + ' B'; }
   if (bytes < 1024 * 1024) { return (bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0) + ' KB'; }
   return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-}
-
-// Storage totals reach gigabytes, where one decimal place of MB is unreadable.
-export function storageSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) { return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB'; }
-  return fileSize(bytes);
 }
 
 // Token counts and other large integers: 980 / 12.4K / 3.1M.

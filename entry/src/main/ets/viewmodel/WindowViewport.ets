@@ -6,6 +6,7 @@ import { window } from '@kit.ArkUI';
 @Observed
 export class WindowViewport {
   keyboardHeight: number = 0;
+  keyboardTop: number = -1;
   bottom: number = 0;
   onKeyboard: (shown: boolean) => void = () => {};
   private host?: window.Window;
@@ -30,6 +31,7 @@ export class WindowViewport {
     const rect = [area.bottomRect, area.topRect, area.leftRect, area.rightRect]
       .filter((item: window.Rect) => !!item && item.width > 0 && item.height > 0)
       .sort((a: window.Rect, b: window.Rect) => b.width * b.height - a.width * a.height)[0];
+    this.keyboardTop = rect ? this.ui.px2vp(rect.top) : -1;
     Diagnostics.log('info', 'appearance', 'keyboard_geometry', {
       width: rect ? this.ui.px2vp(rect.width) : 0, height: rect ? this.ui.px2vp(rect.height) : 0
     });

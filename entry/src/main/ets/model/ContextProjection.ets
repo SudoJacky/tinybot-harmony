@@ -26,9 +26,9 @@ export function stepEntry(messageId: string, answerId: string, step: AgentStep, 
 
 // The transcript stays complete. These entries are only the model-visible projection, grouped so
 // an assistant's tool calls, their results and validation feedback cannot be split by compaction.
-export function threadEntries(thread: ThreadData): ContextEntry[] {
+export function threadEntries(thread: ThreadData, start: number = 0): ContextEntry[] {
   const entries: ContextEntry[] = [];
-  for (let i = 0; i < thread.messages.length; i += 2) {
+  for (let i = start; i < thread.messages.length; i += 2) {
     const user = thread.messages[i]; const answer = thread.messages[i + 1];
     const active = answer?.status === 'generating';
     let replay = requestHistory(answer && !active ? [user, answer] : [user], '');

@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { ColorMetrics, LengthMetrics } from '@kit.ArkUI';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { t } from '../model/I18n';
@@ -34,11 +35,13 @@ export struct DetailLauncher {
       Text(label).fontFamily(this.appearance.fontFamily).fontSize(this.compact ? 14 : 15).fontWeight(FontWeight.Medium)
         .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         .fontColor($r('app.color.text_primary'))
-      SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([$r('app.color.text_tertiary')])
+      Chevron({ pointing: 'right' })
     }.width('100%').accessibilityLevel('no-hide-descendants')
     }.id(compId).width('100%').height(this.workbench ? 44 : 64).padding({ left: Space.md, right: Space.md })
     .borderRadius(Radius.sm).backgroundColor(this.hovered === compId ? $r('app.color.surface_variant') : $r('app.color.page_background'))
     .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
+    .hoverEffect(HoverEffect.None)
+    .clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
     .focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
           margin: LengthMetrics.vp(-2) })
     .accessibilityText(label).onClick(action)
@@ -66,7 +69,7 @@ export struct DetailLauncher {
           }
           this.option('folder', t('工作区文件'), 'detail-launcher-files', this.onFiles)
           this.option('browser', t('应用内浏览器'), 'detail-launcher-browser', this.onBrowser)
-          if (this.sideChatAvailable) { this.option('compose', t('新建旁聊'), 'detail-launcher-side-chat', this.onSideChat) }
+          if (this.sideChatAvailable) { this.option('sideChat', t('新建旁聊'), 'detail-launcher-side-chat', this.onSideChat) }
           if (this.workbench) { this.context() }
         }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)
       }.width('100%').layoutWeight(1).align(Alignment.Top)

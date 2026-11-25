@@ -86,7 +86,7 @@ export struct DrawingBoard {
         Blank()
         Button() {
           Row({ space: 5 }) {
-            SymbolGlyph($r('sys.symbol.checkmark')).fontSize(14).fontColor([this.appearance.onAccent])
+            SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).fontColor([this.appearance.onAccent])
             Text(this.draft.saving ? t('添加中…') : t('添加')).fontFamily(this.appearance.fontFamily)
               .fontSize(Font.small).fontWeight(FontWeight.Medium).fontColor(this.appearance.onAccent)
           }

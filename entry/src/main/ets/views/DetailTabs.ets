@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { ColorMetrics, LengthMetrics } from '@kit.ArkUI';
 import { materialMenuContent } from '../common/MaterialMenu';
 import { AppearanceStyle } from '../common/AppearanceStyle';
@@ -63,10 +64,10 @@ export struct DetailTabs {
     Menu() {
       MenuItem(() => materialMenuContent.bind(this)({ label: t('工作区文件'), icon: $r('sys.symbol.folder') }))
         .id('detail-add-files').onClick(() => this.onAddFiles())
-      MenuItem(() => materialMenuContent.bind(this)({ label: t('应用内浏览器'), icon: $r('sys.symbol.connection') }))
+      MenuItem(() => materialMenuContent.bind(this)({ label: t('应用内浏览器'), icon: $r('sys.symbol.worldclock') }))
         .id('detail-add-browser').onClick(() => this.onAddBrowser())
       if (this.sideChatAvailable) {
-        MenuItem(() => materialMenuContent.bind(this)({ label: t('新建旁聊'), icon: $r('sys.symbol.ellipsis_message') }))
+        MenuItem(() => materialMenuContent.bind(this)({ label: t('新建旁聊'), icon: $r('sys.symbol.text_bubble_left_2') }))
           .id('detail-add-side-chat').onClick(() => this.onAddSideChat())
       }
     }
@@ -86,14 +87,16 @@ export struct DetailTabs {
         }.accessibilityLevel('no-hide-descendants')
       }.id('detail-tab-' + tab.id).height(this.touch ? 44 : 32).padding({ left: 10, right: this.active === tab.id ? 4 : 10 })
         .borderRadius(Radius.sm).backgroundColor(Color.Transparent).focusOnTouch(false).nextFocus(this.tabFocus(tab.id))
+        .hoverEffect(HoverEffect.None).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
         .focusBox({ strokeWidth: LengthMetrics.vp(2), strokeColor: ColorMetrics.resourceColor(this.appearance.accent),
           margin: LengthMetrics.vp(-2) })
         .accessibilityText(tab.label).accessibilitySelected(this.active === tab.id)
         .bindTips(tab.label, { appearingTime: 550 }).onClick(() => this.onSelect(tab.id))
       if (this.active === tab.id) {
         Button({ type: ButtonType.Circle }) {
-          SymbolGlyph($r('sys.symbol.xmark')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+          SymbolGlyph($r('sys.symbol.xmark')).fontSize(16).fontColor([$r('app.color.text_secondary')])
         }.id('detail-tab-close-' + tab.id).width(this.touch ? 40 : 26).height(this.touch ? 40 : 26).padding(0).backgroundColor(Color.Transparent)
+          .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
           .accessibilityText(t('关闭') + ' · ' + tab.label)
           .bindTips(t('关闭') + ' · ' + tab.label, { appearingTime: 550 })
           .onClick(() => this.onClose(tab.id))
@@ -102,6 +105,7 @@ export struct DetailTabs {
     .height(this.touch ? 44 : 32).padding({ right: this.active === tab.id ? 4 : 0 })
     .borderRadius(Radius.sm).backgroundColor(this.active === tab.id ? $r('app.color.surface') :
       this.hoveredTab === tab.id ? $r('app.color.surface_variant') : Color.Transparent)
+    .animation({ duration: this.appearance.effectStrength > 0 ? Motion.desktop : 0, curve: Motion.standard })
     .border({ width: this.active === tab.id ? 0.5 : 0, color: $r('app.color.divider') })
     .onHover((hovered: boolean) => {
       if (hovered) { this.hoveredTab = tab.id; }
@@ -128,11 +132,13 @@ export struct DetailTabs {
             .fontFamily(this.appearance.fontFamily).fontSize(14).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor($r('app.color.text_primary')).layoutWeight(1)
           if (this.tabs.length > 1) {
-            SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(12).fontColor([$r('app.color.text_secondary')])
+            Chevron({ pointing: 'down', tint: $r('app.color.text_secondary') })
           }
         }.width('100%')
       }.id('detail-switch-tab').height(40).layoutWeight(1).borderRadius(Radius.sm)
         .backgroundColor(Color.Transparent).enabled(this.tabs.length > 1)
+        .hoverEffect(this.tabs.length > 1 ? HoverEffect.Highlight : HoverEffect.None)
+        .clickEffect(this.tabs.length > 1 && this.appearance.effectStrength > 0 ? Motion.press : null)
         .accessibilityText(t('切换侧栏页签') + ' · ' + (this.tabs.find(tab => tab.id === this.active)?.label || t('详情')))
         .bindTips(t('切换侧栏页签'), { appearingTime: 550 })
         .bindMenu(this.switchMenu, { systemMaterial: this.appearance.menu, mask: false })
@@ -148,15 +154,16 @@ export struct DetailTabs {
     Button({ type: ButtonType.Circle }) {
       SymbolGlyph($r('sys.symbol.plus')).fontSize(16).fontColor([$r('app.color.text_secondary')])
     }.id('detail-add-tab').width(this.touch ? 44 : 32).height(this.touch ? 44 : 32).padding(0).backgroundColor(Color.Transparent)
-      .clickEffect(Motion.pressSmall).accessibilityText(t('添加侧栏面板'))
+      .hoverEffect(HoverEffect.Highlight).clickEffect(this.appearance.effectStrength > 0 ? Motion.press : null)
+      .accessibilityText(t('添加侧栏面板'))
       .bindTips(t('添加侧栏面板'), { appearingTime: 550 })
       .bindMenu(this.addMenu, { systemMaterial: this.appearance.menu, mask: false })
     if (this.showMaximize) {
-      IconButton({ icon: this.maximized ? $r('sys.symbol.close_sidebar') : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
+      IconButton({ icon: this.maximized ? $r('sys.symbol.arrow_down_right_and_arrow_up_left') : $r('sys.symbol.arrow_up_left_and_arrow_down_right'),
         label: this.maximized ? t('恢复并排显示') : t('最大化侧栏'), compId: 'detail-toggle-maximized',
         diameter: this.touch ? 44 : 32, iconSize: 16, onTap: this.onMaximize })
     }
-    if (this.showCollapse) { IconButton({ icon: $r('sys.symbol.close_sidebar'), label: t('关闭侧栏'), compId: 'detail-collapse',
+    if (this.showCollapse) { IconButton({ animatedIcon: 'panelRight', label: t('关闭侧栏'), compId: 'detail-collapse',
       diameter: this.touch ? 44 : 32, iconSize: 17, onTap: this.onCollapse }) }
   }
 

@@ -6,6 +6,10 @@ export function providerLogo(presetId: string): Resource | undefined {
     case 'openai':
     case 'openai-responses': return $r('app.media.logo_openai');
     case 'zai': return $r('app.media.logo_zai');
+    case 'kimi': return $r('app.media.logo_kimi');
+    case 'minimax': return $r('app.media.logo_minimax');
+    case 'mimo': return $r('app.media.logo_mimo');
+    case 'volcengine': return $r('app.media.logo_volcengine');
     case 'ollama': return $r('app.media.logo_ollama');
     case 'anthropic': return $r('app.media.logo_anthropic');
     case 'google': return $r('app.media.logo_google');

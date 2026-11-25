@@ -1,3 +1,4 @@
+import { Chevron } from '../common/Chevron';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { systemMaterialAttribute } from '../common/MaterialAttributes';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
@@ -82,7 +83,7 @@ export struct ReasoningEffortPicker {
                   .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).flexShrink(1)
               }.width('100%')
             }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-            SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([$r('sys.color.font_secondary')])
+            Chevron({ pointing: 'right', tint: $r('sys.color.font_secondary') })
           }.width('100%')
         }.id('reasoning-choose-model').layoutWeight(1).constraintSize({ minHeight: 54 })
           .padding({ left: 12, right: 12, top: 6, bottom: 6 }).borderRadius(12)

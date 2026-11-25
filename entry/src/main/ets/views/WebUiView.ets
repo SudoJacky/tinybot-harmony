@@ -39,11 +39,12 @@ export struct WebUiView {
   @Prop @Watch('syncAnnotations') annotationMode: boolean = false;
   @Prop @Watch('syncAnnotations') annotationMarks: WebAnnotationMark[] = [];
   @Prop @Watch('syncAnnotations') annotationRevision: number = 0;
-  onAnnotationTarget?: (target: WebAnnotationTarget) => void;
+  onAnnotationTarget?: (target: WebAnnotationTarget) => boolean;
   storage?: WebUiStorage;
   viewStorage?: WebUiStorage;
   private browserAttachment: number = -1;
   private sentAnnotationRevision: number = -1;
+  private annotationSelection: string = '';
   onHeight: (height: number) => void = () => {};
   @StorageLink('tinybot.foreground') @Watch('foregroundChanged') private foreground: boolean = true;
   @StorageProp('tinybot.chat.scrolling') @Watch('visibilityChanged') private scrolling: boolean = false;
@@ -241,9 +242,9 @@ export struct WebUiView {
   private syncAnnotations(): void {
     if (!this.onAnnotationTarget || !this.ready || !this.ports.length) { return; }
     try {
-      const clear = this.sentAnnotationRevision !== this.annotationRevision;
+      if (this.sentAnnotationRevision !== this.annotationRevision) { this.annotationSelection = ''; }
       this.ports[0].postMessageEvent(JSON.stringify({ type: 'annotationState', enabled: this.annotationMode,
-        marks: this.annotationMarks, clear: clear }));
+        marks: this.annotationMarks, selected: this.annotationSelection }));
       this.sentAnnotationRevision = this.annotationRevision;
     } catch (error) { this.report(error as Error); }
   }
@@ -255,7 +256,9 @@ export struct WebUiView {
       if (typeof data !== 'string') { throw new Error('Web UI: expected a text message'); }
       const message = parseWebUiMessage(data); id = message.id || 0;
       if (message.type === 'annotationTarget') {
-        if (this.ready && this.foreground && this.visible && this.annotationMode) { this.onAnnotationTarget?.(message.target!); }
+        if (this.ready && this.foreground && this.visible && this.annotationMode && !this.annotationSelection &&
+          this.onAnnotationTarget?.(message.target!) === true) { this.annotationSelection = message.target!.location; }
+        this.syncAnnotations();
         return;
       }
       if (message.type === 'panelMailRead') {

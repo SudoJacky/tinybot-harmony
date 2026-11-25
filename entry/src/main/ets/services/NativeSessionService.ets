@@ -221,7 +221,8 @@ export class NativeSessionResources implements SessionResources {
 }
 
 // Native composition root. The session service can also run with an in-memory repository/model.
-export function createNativeSessionService(context: common.UIAbilityContext, approval: ToolApproval, browser?: BrowserSession): SessionService {
+export function createNativeSessionService(context: common.UIAbilityContext, approval: ToolApproval, browser: BrowserSession | undefined,
+  requestStreamFrame: (flush: () => void) => void): SessionService {
   const workspaceFilesDir = context.getApplicationContext().filesDir;
   const data = NativeData.forFilesDir(context.filesDir) ?? new NativeData(context, workspaceFilesDir);
   Attachments.configure(workspaceFilesDir);
@@ -236,7 +237,7 @@ export function createNativeSessionService(context: common.UIAbilityContext, app
   const credentials = new CredentialStore();
   const session = new SessionService(new ArkDataConversationStore(() => data.open()), new AgentRuntime(providers, credentials, new NativeUsageRecorder(),
     (content, cancellation) => WebUiPreflight.validate(content, cancellation), new NativeOrchestrationExecutor(), browser), credentials,
-    new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser), approval);
+    new NativeSessionResources(workspaceFilesDir, providers, approval, context, browser), approval, requestStreamFrame);
   installNativePanelAgent(workspaceFilesDir, providers, credentials, () => session.snapshot());
   backgroundGeneration.attach(session, context); completionNotifications.attach(session, context);
   if (browser) {

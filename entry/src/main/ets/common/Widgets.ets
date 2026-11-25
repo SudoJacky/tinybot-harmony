@@ -1,3 +1,4 @@
+import { Chevron, CHEVRON_SIZE, ChevronDirection } from './Chevron';
 import { AppearanceStyle } from './AppearanceStyle';
 import { systemMaterialAttribute } from './MaterialAttributes';
 import { t } from '../model/I18n';
@@ -13,28 +14,71 @@ import { AnimatedIconName } from './IconArtwork';
 export struct IconButton {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop icon: Resource = $r('sys.symbol.plus');
+  @Prop chevron: ChevronDirection | undefined = undefined;
   @Prop tint: ResourceColor = $r('app.color.text_primary');
   @Prop fill: ResourceColor = Color.Transparent;
-  @Prop disabled: boolean = false;
+  @Prop @Watch('disabledChanged') disabled: boolean = false;
   @Prop label: string = '';
   compId: string = '';
   @Prop diameter: number = 44;
   @Prop animatedSelected: boolean = false;
-  @State private iconInteracting: boolean = false;
+  @State private iconHovered: boolean = false;
+  @State private mousePressed: boolean = false;
+  @State private touchPressed: boolean = false;
   iconSize: number = 22;
-  animatedIcon?: AnimatedIconName;
+  @Prop animatedIcon: AnimatedIconName | undefined = undefined;
   // Native material is supported when the button lives in a navigation title bar.
   material?: uiMaterial.Material;
   onTap: () => void = () => {};
 
+  private pressed(): boolean { return !this.disabled && (this.mousePressed || this.touchPressed); }
+
+  private iconScale(): number {
+    if (this.disabled) { return 1; }
+    return 1 + (this.pressed() ? -0.08 : this.iconHovered ? 0.045 : 0) * this.appearance.effectStrength;
+  }
+
+  private disabledChanged(): void {
+    if (!this.disabled) { return; }
+    this.iconHovered = false;
+    this.mousePressed = false;
+    this.touchPressed = false;
+  }
+
+  private iconHover(hovered: boolean): void {
+    this.iconHovered = hovered && !this.disabled;
+    if (!hovered) { this.mousePressed = false; }
+  }
+
+  private iconMouse(event: MouseEvent): void {
+    if (event.button !== MouseButton.Left) { return; }
+    if (event.action === MouseAction.Press) { this.mousePressed = !this.disabled; }
+    else if (event.action === MouseAction.Release) { this.mousePressed = false; }
+  }
+
+  private iconTouch(event: TouchEvent): void {
+    if (event.source === SourceType.Mouse) { return; }
+    if (event.type === TouchType.Down) { this.touchPressed = !this.disabled; }
+    else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.touchPressed = false; }
+  }
+
   build() {
     Button({ type: ButtonType.Circle, stateEffect: true }) {
-      if (this.animatedIcon) {
-        AnimatedIcon({ iconName: this.animatedIcon, iconSize: this.iconSize, tint: this.tint,
-          interacting: this.iconInteracting && !this.disabled, selected: this.animatedSelected === true })
-      } else {
-        SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
+      Stack() {
+        if (this.animatedIcon) {
+          AnimatedIcon({ iconName: this.animatedIcon, iconSize: this.iconSize, tint: this.tint,
+            interacting: !this.disabled && this.iconHovered, pressed: this.pressed(), selected: !this.disabled && this.animatedSelected })
+        } else if (this.chevron) {
+          Chevron({ pointing: this.chevron, tint: this.tint })
+        } else {
+          SymbolGlyph(this.icon).fontSize(this.iconSize).fontColor([this.tint])
+        }
       }
+      .width(this.chevron ? CHEVRON_SIZE : this.iconSize)
+      .height(this.chevron ? CHEVRON_SIZE : this.iconSize)
+      .scale({ x: this.iconScale(), y: this.iconScale() })
+      .animation(this.appearance.effectStrength > 0 ? { duration: Motion.desktop, curve: Motion.standard } : null)
+      .hitTestBehavior(HitTestMode.None).accessibilityLevel('no-hide-descendants')
     }.fontFamily(this.appearance.fontFamily)
     .id(this.compId).width(this.diameter).height(this.diameter)
     .backgroundColor(this.fill === Color.Transparent ? this.appearance.controlBackground : this.fill)
@@ -43,13 +87,11 @@ export struct IconButton {
     // API 20 resets the native button color during repaint. Apply plain fills immediately so
     // draft/message updates cannot interpolate through the system's green accent color.
     .animation(this.appearance.materialEnabled ? { duration: Motion.fast, curve: Motion.standard } : null)
-    .clickEffect(this.disabled || this.material ? null : Motion.pressSmall)
-    .onHover((hovered: boolean) => { if (this.animatedIcon) { this.iconInteracting = hovered; } })
-    .onTouch((event: TouchEvent) => {
-      if (!this.animatedIcon) { return; }
-      if (event.type === TouchType.Down) { this.iconInteracting = true; }
-      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.iconInteracting = false; }
-    })
+    .hoverEffect(this.disabled ? HoverEffect.None : HoverEffect.Highlight)
+    .clickEffect(this.disabled || this.material || this.appearance.effectStrength === 0 ? null : Motion.press)
+    .onHover((hovered: boolean) => this.iconHover(hovered))
+    .onMouse((event: MouseEvent) => this.iconMouse(event))
+    .onTouch((event: TouchEvent) => this.iconTouch(event))
     .enabled(!this.disabled).accessibilityText(this.label).onClick(() => this.onTap())
     .bindTips(this.label, { appearingTime: 550, disappearingTime: 80 })
     .borderRadius(this.diameter / 2)
@@ -111,6 +153,9 @@ export struct NavRow {
   // Selected for 'select', expanded for 'expand'.
   @Prop active: boolean = false;
   icon?: Resource;
+  animatedIcon?: AnimatedIconName;
+  @State private iconHovered: boolean = false;
+  @State private iconPressed: boolean = false;
   image?: Resource;
   tintImage: boolean = false;
   compId: string = '';
@@ -121,9 +166,12 @@ export struct NavRow {
 
   build() {
     Row({ space: Space.md }) {
-        if (this.image || this.icon) {
+        if (this.image || this.icon || this.animatedIcon) {
           Stack() {
-            if (this.image) {
+            if (this.animatedIcon) {
+              AnimatedIcon({ iconName: this.animatedIcon, iconSize: 20, tint: $r('app.color.text_secondary'),
+                interacting: !this.disabled && this.iconHovered, pressed: !this.disabled && this.iconPressed })
+            } else if (this.image) {
               if (this.tintImage) {
                 Image(this.image).width(28).height(28).objectFit(ImageFit.Contain)
                   .fillColor(this.muted ? $r('app.color.text_tertiary') : $r('app.color.text_primary'))
@@ -158,14 +206,30 @@ export struct NavRow {
       if (this.trailing === 'select') {
         SymbolGlyph($r('sys.symbol.checkmark')).fontSize(18).fontColor([this.appearance.accent]).opacity(this.active ? 1 : 0)
       } else if (this.trailing === 'expand') {
-        SymbolGlyph($r('sys.symbol.chevron_down')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'down' })
           .rotate({ angle: this.active ? 180 : 0 }).animation({ duration: Motion.fast, curve: Motion.standard })
       } else if (!this.accent) {
-        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([$r('app.color.text_tertiary')])
+        Chevron({ pointing: 'right' })
       }
     }
     .id(this.compId).width('100%').constraintSize({ minHeight: 56 }).padding({ left: Space.lg, right: Space.lg, top: 10, bottom: 10 })
     .opacity(this.disabled ? 0.4 : 1).enabled(!this.disabled)
+    .hoverEffect(this.disabled ? HoverEffect.None : HoverEffect.Highlight)
+    .onHover((hovered: boolean) => {
+      if (!this.animatedIcon) { return; }
+      this.iconHovered = hovered;
+      if (!hovered) { this.iconPressed = false; }
+    })
+    .onMouse((event: MouseEvent) => {
+      if (!this.animatedIcon || event.button !== MouseButton.Left) { return; }
+      if (event.action === MouseAction.Press) { this.iconPressed = !this.disabled; }
+      else if (event.action === MouseAction.Release) { this.iconPressed = false; }
+    })
+    .onTouch((event: TouchEvent) => {
+      if (!this.animatedIcon || event.source === SourceType.Mouse) { return; }
+      if (event.type === TouchType.Down) { this.iconPressed = !this.disabled; }
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) { this.iconPressed = false; }
+    })
     .accessibilityText(this.trailing === 'select' && this.active ? this.title + t("，已选中") : '')
     .stateStyles({ pressed: { .backgroundColor($r('app.color.surface_variant')) }, normal: { .backgroundColor(Color.Transparent) } })
     .onClick(() => this.onTap())
@@ -267,10 +331,15 @@ export struct EmptyState {
   @Prop icon: Resource = $r('sys.symbol.doc_text');
   @Prop title: string = '';
   @Prop caption: string = '';
+  animatedIcon?: AnimatedIconName;
 
   build() {
     Column({ space: Space.md }) {
-      SymbolGlyph(this.icon).fontSize(40).fontColor([$r('app.color.text_tertiary')])
+      if (this.animatedIcon) {
+        AnimatedIcon({ iconName: this.animatedIcon, iconSize: 40, tint: $r('app.color.text_tertiary') })
+      } else {
+        SymbolGlyph(this.icon).fontSize(40).fontColor([$r('app.color.text_tertiary')]).accessibilityLevel('no')
+      }
       Text(this.title).fontFamily(this.appearance.fontFamily).fontSize(15).fontColor($r('app.color.text_secondary'))
       if (this.caption.length > 0) {
         Text(this.caption).fontFamily(this.appearance.fontFamily).fontSize(13).lineHeight(19).textAlign(TextAlign.Center).fontColor($r('app.color.text_tertiary'))
@@ -279,11 +348,13 @@ export struct EmptyState {
   }
 }
 
+const SEGMENT_TRACK_INSET: number = 3;
+
 // iOS/HarmonyOS-style segmented control. Options are short labels; onSelect receives the index.
 // Shared rubber motion; each surface keeps its existing dimensions and styling.
 @Component
 export struct Segmented {
-  @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
+  @StorageProp('tinybot.appearance.style') @Watch('motionChanged') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop @Watch('resetGeometry') options: string[] = [];
   @Prop @Watch('syncSelection') selected: number = 0;
   @State private segmentWidth: number = 0;
@@ -292,9 +363,11 @@ export struct Segmented {
   controlHeight: number = 36;
   labelSize: number = 14;
   trackRadius: number = Radius.sm;
-  thumbRadius: number = Radius.sm - 2;
   gap: number = 0;
   thumbShadow: boolean = true;
+  accentThumb: boolean = false;
+  trackFill: ResourceColor = $r('app.color.surface_variant');
+  trackOutline?: ResourceColor;
   optionIds: string[] = [];
   compIdPrefix: string = 'segment';
   onSelect: (index: number) => void = () => {};
@@ -334,6 +407,11 @@ export struct Segmented {
     if (this.segmentWidth <= 0) return;
     const from: SegmentFrame = { left: this.thumbLeft, right: this.thumbRight };
     const target = this.target();
+    if (this.appearance.effectStrength === 0) {
+      this.thumbLeft = target.left;
+      this.thumbRight = target.right;
+      return;
+    }
     if (Math.abs(from.left - target.left) + Math.abs(from.right - target.right) < 0.01) return;
     const generation = this.generation;
     const animator = this.getUIContext().createAnimator({
@@ -356,24 +434,31 @@ export struct Segmented {
     animator.play();
   }
 
+  private motionChanged(): void {
+    if (this.appearance.effectStrength === 0 && this.animator) { this.syncSelection(); }
+  }
+
   build() {
     Stack({ alignContent: Alignment.Start }) {
       if (this.segmentWidth > 0) {
-        Column().width(this.thumbRight - this.thumbLeft).height('100%').borderRadius(this.thumbRadius)
-          .backgroundColor($r('app.color.surface'))
+        Column().id(this.compIdPrefix + '-selection').width(this.thumbRight - this.thumbLeft).height('100%')
+          .border({ radius: this.trackRadius - SEGMENT_TRACK_INSET, width: this.accentThumb ? 1 : 0,
+            color: this.accentThumb ? this.appearance.accentOutline : Color.Transparent })
+          .backgroundColor(this.accentThumb ? this.appearance.accentContainer : $r('app.color.surface'))
           .shadow({ radius: this.thumbShadow ? 4 : 0, color: this.thumbShadow ? '#14000000' : '#00000000', offsetY: 1 })
           .translate({ x: this.thumbLeft }).hitTestBehavior(HitTestMode.None).accessibilityLevel('no')
       }
       Row({ space: this.gap }) {
-        ForEach(this.options, (label: string, index: number) => {
-          Text(label).fontFamily(this.appearance.fontFamily).id(this.optionIds[index] || this.compIdPrefix + '-' + index)
+        ForEach(this.options.map((_label: string, index: number): number => index), (index: number) => {
+          Text(this.options[index]).fontFamily(this.appearance.fontFamily).id(this.optionIds[index] || this.compIdPrefix + '-' + index)
             .fontSize(this.labelSize).layoutWeight(1).height('100%').textAlign(TextAlign.Center)
             .fontWeight(index === this.selected ? FontWeight.Medium : FontWeight.Normal)
-            .fontColor(index === this.selected ? $r('app.color.text_primary') : $r('app.color.text_secondary'))
-            .animation({ duration: Motion.fast, curve: Motion.standard })
-            .accessibilityText(label + (index === this.selected ? t("，已选中") : ''))
+            .fontColor(index === this.selected ?
+              this.accentThumb ? this.appearance.onAccentContainer : $r('app.color.text_primary') : $r('app.color.text_secondary'))
+            .animation({ duration: this.appearance.effectStrength > 0 ? Motion.fast : 0, curve: Motion.standard })
+            .accessibilityText(this.options[index]).accessibilitySelected(index === this.selected)
             .onClick(() => this.onSelect(index))
-        }, (label: string) => label)
+        }, (index: number) => String(index))
       }.width('100%').height('100%')
       .onAreaChange((_old: Area, next: Area) => {
         const width = next.width as number;
@@ -382,8 +467,9 @@ export struct Segmented {
           this.resetGeometry();
         }
       })
-    }.width('100%').height(this.controlHeight).padding(3).borderRadius(this.trackRadius)
-    .backgroundColor($r('app.color.surface_variant'))
+    }.width('100%').height(this.controlHeight).padding(SEGMENT_TRACK_INSET).borderRadius(this.trackRadius)
+    .backgroundColor(this.trackFill)
+    .border({ width: this.trackOutline === undefined ? 0 : 1, color: this.trackOutline, radius: this.trackRadius })
   }
 }
 
@@ -509,10 +595,15 @@ export struct IconBadge {
   @Prop tint?: ResourceColor;
   @Prop fill?: ResourceColor;
   diameter: number = 36;
+  animatedIcon?: AnimatedIconName;
 
   build() {
     Column() {
-      SymbolGlyph(this.icon).fontSize(Math.round(this.diameter * 0.55)).fontColor([this.tint || this.appearance.accent])
+      if (this.animatedIcon) {
+        AnimatedIcon({ iconName: this.animatedIcon, iconSize: Math.round(this.diameter * 0.55), tint: this.tint || this.appearance.accent })
+      } else {
+        SymbolGlyph(this.icon).fontSize(Math.round(this.diameter * 0.55)).fontColor([this.tint || this.appearance.accent]).accessibilityLevel('no')
+      }
     }.width(this.diameter).height(this.diameter).borderRadius(Math.round(this.diameter * 0.3))
     .justifyContent(FlexAlign.Center).backgroundColor(this.fill || this.appearance.accentContainer)
   }
