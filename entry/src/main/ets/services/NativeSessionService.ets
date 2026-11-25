@@ -10,6 +10,7 @@ import { ProviderBalanceSource } from './ProviderBalanceSource';
 import { LifeBoards } from './LifeBoards';
 import { LifePanelTools } from './LifePanelTools';
 import { MailTools } from './MailTools';
+import { ImaTools } from './ImaTools';
 import { installNativePanelAgent } from './NativePanelAgent';
 import { PreviewCapture } from './PreviewCapture';
 import { savePreviewRepair } from './PreviewRecovery';
@@ -159,6 +160,7 @@ export class NativeSessionResources implements SessionResources {
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());
+    groups.push(new ImaTools());
     groups.push(new PresentTools((path: string) => files.checkedPath(path)));
     const imageFiles = new NativeImageWorkspace(files, live?.imageAttachments || (() => attachments));
     groups.push(new ImageInspectionTools((path, maximum, cancellation) => imageFiles.readJobInput(path, maximum, cancellation),

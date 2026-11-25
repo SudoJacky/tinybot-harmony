@@ -86,6 +86,8 @@ EVENTS.workspace = ['mutation_failed', 'preview_failed', 'folder_support_failed'
 EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed', 'cleanup_protected', 'usage_save_failed', 'migration_committed'];
 EVENTS.mcp = ['request_failed', 'cancel_notice_failed', 'browser_launch_failed'];
 EVENTS.mail = ['transport_failed', 'cleanup_failed', 'account_saved', 'account_removed', 'query_started', 'query_complete', 'query_failed', 'command_failed', 'settings_failed'];
+EVENTS.ima = ['settings_failed', 'request_failed'];
+EVENTS['knowledge-base'] = ['load_failed', 'save_failed'];
 EVENTS.export = ['image_failed', 'preview_failed', 'cleanup_failed', 'share_failed', 'save_failed'];
 EVENTS.network = ['request_start', 'request_end', 'context_overflow', 'first_data', 'request_failed'];
 EVENTS['image-generation'] = ['request_complete', 'request_failed', 'label_failed'];
@@ -112,10 +114,11 @@ STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir
   'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'disableService', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
   'connect', 'login', 'examine', 'search', 'fetch', 'identify', 'capability',
   'discover', 'balance', 'credential_read', 'credential_write', 'credential_remove', 'save_config', 'response', 'streaming', 'connecting', 'attachment', 'log',
-  'PUT', 'MOVE', 'DELETE', 'GET', 'PROPFIND', 'MKCOL', 'local', 'remote', 'haptic_step', 'haptic_complete'];
+  'PUT', 'MOVE', 'DELETE', 'GET', 'PROPFIND', 'MKCOL', 'local', 'remote', 'haptic_step', 'haptic_complete',
+  'search_knowledge_base', 'get_knowledge_list', 'search_knowledge'];
 STRINGS.credentialScope = ['provider', 'search', 'mcp', 'backup'];
 STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled'];
-STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];
+STRINGS.service = ['mcp', 'search', 'web', 'bing-browser', 'ima'];
 STRINGS.reason = ['api_level', 'device_unsupported', 'construction_failed', 'capability_changed', 'supported',
   'user_control', 'idle_browser', 'user_handoff', 'task_acquired'];
 STRINGS.format = ['image', 'markdown', 'docx', 'xlsx', 'pptx', 'image/png', 'image/jpeg', 'image/webp'];

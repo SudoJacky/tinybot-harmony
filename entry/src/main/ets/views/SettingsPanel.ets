@@ -50,6 +50,7 @@ export struct SettingsPanel {
   onImageGeneration: () => void = () => {};
   onSearch: () => void = () => {};
   onMail: () => void = () => {};
+  onKnowledgeBases: () => void = () => {};
   onBackup: () => void = () => {};
   onAppearance: () => void = () => {};
   onLanguage: () => void = () => {};
@@ -262,6 +263,9 @@ export struct SettingsPanel {
               disabled: !this.canEdit(), onTap: this.onSearch })
             RowDivider()
             NavRow({ title: t('邮箱连接'), icon: $r('sys.symbol.doc_text'), subtitle: t('只读访问邮件，为助手和卡片提供数据'), compId: 'open-mail-settings', onTap: this.onMail })
+            RowDivider()
+            NavRow({ title: t('知识库'), icon: $r('sys.symbol.doc_text'), subtitle: t('为助手连接可检索的资料源'),
+              compId: 'open-knowledge-base-settings', onTap: this.onKnowledgeBases })
             RowDivider()
             SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.worldclock'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
               highlighted: this.searchTarget === 'browser-enabled',

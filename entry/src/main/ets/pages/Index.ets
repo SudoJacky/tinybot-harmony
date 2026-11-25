@@ -41,6 +41,10 @@ import { LifePanels } from '../services/LifePanels';
 import { PanelExpiryUpdates } from '../services/PanelExpiryUpdates';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
 import { MailSettingsPanel } from '../views/MailSettingsPanel';
+import { ImaSettingsPanel } from '../views/ImaSettingsPanel';
+import { KnowledgeBaseSettingsPanel } from '../views/KnowledgeBaseSettingsPanel';
+import { imaClient } from '../services/ImaClient';
+import { knowledgeBaseAccess } from '../services/KnowledgeBaseAccess';
 import { SearchProviderPanel } from '../views/SearchProviderPanel';
 import { SearchEditorDraft, SearchProviderRoute, searchProviderName } from '../model/SearchEditor';
 import { ToolApproval } from '../services/ToolApproval';
@@ -236,6 +240,9 @@ struct Index {
     this.account.initialize(context).then(() => this.account.refresh());
     const starting = !this.session;
     if (!this.session) {
+      try { knowledgeBaseAccess.initialize(context); }
+      catch (error) { Diagnostics.log('warn', 'knowledge-base', 'load_failed', {}, error as Error); }
+      imaClient.load().catch((error: Error) => { Diagnostics.log('warn', 'ima', 'settings_failed', {}, error); });
       if (this.desktop) { this.restoreDesktopLayout(context); }
       try { this.startupBackup = new StartupBackup(context); }
       catch (error) { Diagnostics.log('warn', 'backup', 'startup_capture_failed', undefined, error as Error); }
@@ -1602,6 +1609,7 @@ struct Index {
       onImageGeneration: () => this.openSettingPage('image-generation'),
       onSearch: () => this.openSettingPage('search-settings'),
       onMail: () => this.openSettingPage('mail-settings'),
+      onKnowledgeBases: () => this.openSettingPage('knowledge-base-settings'),
       onAppearance: () => this.openSettingPage('appearance'),
       onLanguage: () => this.openSettingPage('language'),
       onBackup: () => this.openSettingPage('backup'),
@@ -1698,6 +1706,17 @@ struct Index {
     } else if (name === 'mail-settings') {
       NavDestination() { MailSettingsPanel() }
         .title(t('邮箱连接'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+    } else if (name === 'knowledge-base-settings') {
+      NavDestination() {
+        KnowledgeBaseSettingsPanel({ onIma: (onReturn: () => void) => {
+          if (knowledgeBaseAccess.enabled) { this.paths.pushPath({ name: 'ima-settings', onPop: (_info: PopInfo) => onReturn() }); }
+        } })
+      }.title(t('知识库'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
+    } else if (name === 'ima-settings') {
+      NavDestination() { ImaSettingsPanel() }
+        .title(t('腾讯 ima 知识库'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
     } else if (name === 'search-settings') {
       NavDestination() {
         SearchSettingsPanel({ app: this.app, onEdit: (request: SearchProviderRoute, onReturn: (draft?: SearchEditorDraft) => void) => {

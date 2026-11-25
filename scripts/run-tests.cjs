@@ -17,6 +17,7 @@ const suites = {
     'test-background-generation.cjs',
     'test-bing-search.cjs',
     'test-search-settings.cjs',
+    'test-ima.cjs',
     'test-browser-annotation.cjs',
     'test-browser.cjs',
     'test-chat-disclosures.cjs',

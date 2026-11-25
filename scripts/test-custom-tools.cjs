@@ -53,8 +53,8 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 54); assert.equal(new Set(all).size, 54); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 44);
+  assert.equal(all.length, 57); assert.equal(new Set(all).size, 57); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 47);
   for (const name of ['list_mail_accounts', 'search_mail', 'read_mail']) assert.ok(all.includes(name));
   assert.ok(!all.includes('list_mini_apps')); assert.ok(!all.includes('publish_mini_app'));
   const retiredApps = seed(); retiredApps.productivity.options.miniAppsEnabled = true;
@@ -80,8 +80,8 @@ async function main() {
   assert.deepEqual(Array.from(parseAppData(JSON.stringify(legacyMixed)).threads[0].disabledTools).sort(),
     ['read_attachment', 'read_reference', 'view_image']);
   const covered = Array.from(TOOL_CAPABILITIES.flatMap(capability => capability.tools));
-  assert.equal(TOOL_CAPABILITIES.length, 14);
-  assert.equal(new Set(covered).size, 44); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
+  assert.equal(TOOL_CAPABILITIES.length, 15);
+  assert.equal(new Set(covered).size, 47); assert.deepEqual(covered.slice().sort(), optional.slice().sort());
   const obsolete = {agentMode:'custom', disabledTools:Array.from(MANAGED_TOOL_NAMES).concat(['generate_image', 'read_tool_result'])};
   validateToolSelection(obsolete);
   assert.deepEqual(Array.from(normalizeDisabledTools(obsolete.disabledTools)), []);
