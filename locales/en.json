@@ -2241,11 +2241,7 @@
   "公告暂未开放。": "Announcements are not available yet.",
   "公告加载失败，将在下次启动时重试。": "Could not load announcements. We will try again next time you start the app.",
   "无法保存公告已读记录，下次启动可能再次提示。": "Could not save the read status. This announcement may appear again next time you start the app.",
-  "模拟器调试隐私说明": "Emulator debug privacy notice",
-  "此入口仅用于 Debug 包的模拟器调试。同意仅在本次运行有效，不代表已完成华为系统隐私授权。": "This entry is only for emulator debugging with a Debug build. Consent lasts for this run only and does not count as Huawei system privacy consent.",
-  "进入后会初始化账号、会话和诊断等服务。使用在线功能时，对话、附件及必要信息可能发送给配置的服务商，请仅使用测试数据。": "Continuing initializes account, conversation and diagnostic services. Online features may send conversations, attachments and necessary information to configured providers. Use test data only.",
-  "同意并进入调试": "Agree and start debugging",
-  "请先确认模拟器调试隐私说明。": "Please accept the emulator debug privacy notice first.",
+  "当前模拟器调试会话不可用。": "The emulator debug session is unavailable.",
   "已在新对话中": "Already in a new chat",
   "请至少选择一条消息": "Select at least one message",
   "分享已取消": "Sharing cancelled",
@@ -3116,5 +3112,8 @@
   "1. 打开 ima 官方配置页": "1. Open the official ima setup page",
   "登录后生成 API Key，并复制 Client ID 和 API Key。": "Sign in, generate an API key, then copy the Client ID and API key.",
   "2. 返回这里，粘贴两项凭据。": "2. Return here and paste both credentials.",
-  "3. 点击「测试连接」，成功后点击「保存」。": "3. Test the connection, then save it."
+  "3. 点击「测试连接」，成功后点击「保存」。": "3. Test the connection, then save it.",
+  "启动时打开": "Open on launch",
+  "上次会话": "Last chat",
+  "新建空会话": "New chat"
 }

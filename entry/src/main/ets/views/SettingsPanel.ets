@@ -17,7 +17,7 @@ import { ProviderBalanceResult } from './ProviderBalanceResult';
 import { AssistantOptions, defaultAssistantOptions } from '../model/AssistantOptions';
 import { Btn, Font, Space, Styles, protocolName } from '../common/Theme';
 import { monochromeProviderLogo, providerLogo } from '../common/ProviderBrand';
-import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, SwitchRow } from '../common/Widgets';
+import { Banner, BottomBar, GroupCard, NavRow, RowDivider, SectionHeader, Segmented, SwitchRow } from '../common/Widgets';
 
 class SettingsRevealFrame extends FrameCallback {
   private reveal: () => void;
@@ -96,6 +96,7 @@ export struct SettingsPanel {
     else if (kind === 'readOnly') { this.assistantDraft.readOnly = value; }
     else if (kind === 'saveSummary') { this.assistantDraft.saveSummary = value; }
     else if (kind === 'autoCompact') { this.settings.autoCompact = value; }
+    else if (kind === 'newChatOnStartup') { this.settings.newChatOnStartup = value; }
     else if (kind === 'webEnabled') { this.settings.webEnabled = value; }
   }
 
@@ -105,6 +106,7 @@ export struct SettingsPanel {
     if (kind === 'readOnly') { return options.readOnly; }
     if (kind === 'saveSummary') { return options.saveSummary; }
     if (kind === 'autoCompact') { return this.app.config.autoCompact !== false; }
+    if (kind === 'newChatOnStartup') { return this.app.config.newChatOnStartup === true; }
     return this.app.extensions.webEnabled;
   }
 
@@ -297,6 +299,22 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('语言'), icon: $r('sys.symbol.translate'), value: languageName(this.language),
               compId: 'open-language', disabled: !this.canEdit(), onTap: this.onLanguage })
+            RowDivider()
+            Column({ space: Space.sm }) {
+              Row({ space: Space.md }) {
+                SymbolGlyph($r('sys.symbol.square_and_pencil')).fontSize(20).fontColor([$r('app.color.text_secondary')])
+                  .width(28).accessibilityLevel('no')
+                Text(t('启动时打开')).fontFamily(this.appearance.fontFamily).fontSize(Font.body).fontColor($r('app.color.text_primary'))
+              }.width('100%')
+              Segmented({ options: [t('上次会话'), t('新建空会话')], selected: this.settings.newChatOnStartup ? 1 : 0,
+                optionIds: ['startup-last-chat', 'startup-new-chat'], compIdPrefix: 'startup-chat',
+                controlHeight: 50, trackRadius: 25, gap: 2, thumbShadow: false,
+                onSelect: (index: number) => {
+                  const newChat = index === 1;
+                  if (newChat !== this.settings.newChatOnStartup) { this.saveToggle('newChatOnStartup', newChat); }
+                } }).enabled(this.canEdit())
+            }.id('new-chat-on-startup').width('100%').padding(Space.lg).opacity(this.canEdit() ? 1 : 0.4)
+              .backgroundColor(this.searchTarget === 'new-chat-on-startup' ? this.appearance.accentTint : Color.Transparent)
           }
         }
         }

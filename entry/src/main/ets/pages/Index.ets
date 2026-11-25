@@ -254,7 +254,7 @@ struct Index {
         if (event.kind === 'task-complete' && event.threadId) { this.taskCompleted(event.threadId); }
       });
     }
-    this.app.initialize(this.session).then(() => {
+    this.app.initialize(this.session, LaunchActions.peek() === 'continue-chat').then(() => {
       if (!this.privacy.allowed) { return; }
       const data = NativeData.forFilesDir(context.filesDir);
       this.recoveryNeeded = !this.app.ready && data?.needsRecovery === true;
@@ -610,8 +610,7 @@ struct Index {
     if (!this.privacy.allowed || this.startupBackupDialog || this.startupBackupRestoring) { return; }
     const action = LaunchActions.take();
     if (!action) { return; }
-    // The session restores the last active chat on cold start. Returning to it must
-    // not create a chat, flush/replace a draft, or interrupt a running answer.
+    // Continue-chat keeps the current conversation unless the intent specifies a thread.
     if (action === 'continue-chat') {
       const threadId = LaunchActions.takeThreadId();
       if (this.launching || this.receiving || this.onboardingActive) { return; }
@@ -1676,6 +1675,12 @@ struct Index {
       NavDestination() {
         WebDavBackupPanel({ app: this.app, onLogin: () => this.paths.pushPath({ name: 'account' }) })
       }.title(t('WebDAV'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
+        .onBackPressed(() => {
+          if (param !== 'project') { return false; }
+          // NavPathStack only calls onPop when a result is supplied.
+          this.paths.pop('');
+          return true;
+        })
     } else if (name === 'usage') {
       NavDestination() { UsagePanel({ app: this.app }) }.title(t('Token 用量'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') }).backgroundColor($r('app.color.page_background'))
     } else if (name === 'storage') {
@@ -1951,6 +1956,13 @@ struct Index {
           onLifePanels: () => { this.setDrawer(false); this.openLifePanels(); },
           searchRequest: this.historySearchRequest,
           onProjectSheetVisibility: (visible) => { this.historyProjectSheetOpen = visible; },
+          onConfigureWebDav: (onReturn: () => void) => {
+            this.setDrawer(false);
+            this.paths.pushPath({ name: 'webdav-backup', param: 'project', onPop: (_info: PopInfo) => {
+              if (!this.workbench().expanded) { this.setDrawer(true); }
+              onReturn();
+            } });
+          },
           onNewChat: (projectId?: string) => { this.createChat(projectId); },
           active: !this.onboardingActive && (this.workbench().expanded || this.drawerContentActive),
           onSelected: () => this.revealChat(), onFiles: () => { this.setDrawer(false); this.openFiles(); }, onSettings: () => {
@@ -1986,20 +1998,10 @@ struct Index {
           Text('Tinybot').fontSize(28).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
             .focusable(!this.privacy.simulatorDebug).defaultFocus(!this.privacy.simulatorDebug)
           if (this.privacy.simulatorDebug) {
-            Text(t('模拟器调试隐私说明')).id('debug-privacy-title')
-              .fontSize(20).fontWeight(FontWeight.Bold).fontColor($r('app.color.text_primary'))
-            Text(t('此入口仅用于 Debug 包的模拟器调试。同意仅在本次运行有效，不代表已完成华为系统隐私授权。'))
-              .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
-            Text(t('进入后会初始化账号、会话和诊断等服务。使用在线功能时，对话、附件及必要信息可能发送给配置的服务商，请仅使用测试数据。'))
-              .fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
             if (this.privacy.error) {
               Text(this.privacy.error).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+              Button(t('退出应用')).id('exit-debug-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
             }
-            Button(t('隐私政策')).id('debug-privacy-policy').attributeModifier(Btn.tonal)
-              .onClick(() => this.openSupport('privacy'))
-            Button(t('同意并进入调试')).id('accept-debug-privacy').attributeModifier(Btn.primary)
-              .onClick(() => this.privacy.acceptDebugConsent())
-            Button(t('退出应用')).id('exit-debug-privacy').attributeModifier(Btn.tonal).onClick(() => this.privacy.exit())
           } else if (this.privacy.checking) {
             Text(t('正在确认隐私授权…')).id('privacy-status').fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
           } else {

@@ -46,6 +46,8 @@ const ITEMS: SettingsSearchItem[] = [
   { id: 'open-appearance', section: 'appearance', title: '界面与外观', route: 'appearance',
     keywords: '主题 深色 浅色 字体 颜色 动效 theme dark mode font color animation' },
   { id: 'open-language', section: 'appearance', title: '语言', route: 'language', keywords: '中文 英文 language locale', requiresEditable: true },
+  { id: 'new-chat-on-startup', section: 'appearance', title: '启动时打开',
+    keywords: '冷启动 启动时新建空会话 上次会话 上次对话 恢复对话 startup last conversation new chat' },
   { id: 'open-usage', section: 'data', title: 'Token 用量', route: 'usage', keywords: '统计 账单 tokens usage' },
   { id: 'open-storage', section: 'data', title: '存储空间', route: 'storage', keywords: '缓存 清理 cache storage space', requiresEditable: true },
   { id: 'open-backup', section: 'data', title: '备份与恢复', route: 'backup', keywords: '导入 导出 云备份 WebDAV import export cloud', requiresEditable: true },

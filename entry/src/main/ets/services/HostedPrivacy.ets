@@ -8,14 +8,14 @@ import { Diagnostics } from '../model/Diagnostics';
 const QUERY_RETRY_DELAYS: number[] = [500, 1000, 2000, 4000];
 const STARTUP_PROMPT_DELAY_MS: number = 3000;
 
-// AppGallery owns production consent. Emulator debug consent is explicit and memory-only.
+// AppGallery owns hosted consent. Only Debug builds on an emulator get local access.
 @Observed
 export class HostedPrivacy {
   allowed: boolean = false;
   busy: boolean = false;
   checking: boolean = false;
   error: string = '';
-  private debugConsent: boolean = false;
+  private debugAccess: boolean = false;
   private context?: common.UIAbilityContext;
   private closing: boolean = false;
   private pageVisible: boolean = false;
@@ -37,18 +37,12 @@ export class HostedPrivacy {
     return DEBUG && (BUILD_MODE_NAME as string) === 'debug' && deviceInfo.productModel === 'emulator';
   }
 
-  acceptDebugConsent(): void {
-    if (!this.simulatorDebug || !this.context || this.closing || !this.pageVisible) { return; }
-    this.debugConsent = true;
-    this.refresh();
-  }
-
   async initialize(context: common.UIAbilityContext, onChange: (allowed: boolean) => void): Promise<void> {
     this.cancelQuery();
     this.cancelPrompt();
     this.resetSubscription();
     this.context = context; this.onChange = onChange;
-    this.closing = false; this.busy = false; this.error = ''; this.debugConsent = false;
+    this.closing = false; this.busy = false; this.error = ''; this.debugAccess = this.simulatorDebug;
     this.pageVisible = false; this.pageShown = false; this.subscribed = false; this.initializedAt = Date.now();
     this.gateFocused = false; this.requestedAtStartup = false; this.currentPolicy = undefined;
     this.result = undefined;
@@ -123,8 +117,7 @@ export class HostedPrivacy {
     // After the first page show, background business and withdrawal events still recheck consent.
     if (!this.context || this.closing || !this.pageShown || this.checking || this.busy) { return; }
     if (this.simulatorDebug) {
-      this.error = '';
-      this.publish(this.debugConsent);
+      this.publish(this.debugAccess);
       return;
     }
     if (!this.subscribed && this.pageVisible) { this.subscribe(source); }
@@ -232,7 +225,7 @@ export class HostedPrivacy {
     // Recheck on access so a new policy or withdrawal can block business.
     if (this.allowed) { this.refresh(); }
     if (!this.allowed) {
-      throw new Error(this.error || (this.simulatorDebug ? t('请先确认模拟器调试隐私说明。') : t('请先在系统弹窗中同意隐私政策。')));
+      throw new Error(this.error || (this.simulatorDebug ? t('当前模拟器调试会话不可用。') : t('请先在系统弹窗中同意隐私政策。')));
     }
   }
 
@@ -301,8 +294,8 @@ export class HostedPrivacy {
 
   revokeConsent(): void {
     if (this.simulatorDebug) {
-      this.debugConsent = false;
-      this.refresh();
+      this.debugAccess = false;
+      this.publish(false);
       this.exit();
       return;
     }
@@ -351,7 +344,7 @@ export class HostedPrivacy {
     this.onPageHide();
     this.pageShown = false;
     this.resetSubscription();
-    this.debugConsent = false;
+    this.debugAccess = false;
     this.context = undefined; this.onChange = () => {};
     this.publish(false);
   }

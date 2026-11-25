@@ -34,6 +34,8 @@ export class LaunchActions {
     const action = LaunchActions.pending; LaunchActions.pending = undefined; return action;
   }
 
+  static peek(): LaunchAction | undefined { return LaunchActions.pending; }
+
   static isForeground(): boolean { return LaunchActions.foreground; }
 
   static takeThreadId(): string | undefined {

@@ -261,7 +261,7 @@ export class SessionService {
     return () => { this.listeners.delete(listener); };
   }
 
-  async initialize(): Promise<void> {
+  async initialize(continueChat: boolean = false): Promise<void> {
     if (this.application.ready || this.application.phase !== 'idle') { return; }
     this.application.phase = 'loading'; this.application.error = ''; this.publish('state');
     try {
@@ -289,6 +289,10 @@ export class SessionService {
       this.resources.configureProviders(this.providerProfiles);
       let active = data.threads.find((thread) => thread.id === data.activeThreadId && !thread.archived && thread.sideChatContext === undefined) ||
         data.threads.find((thread) => !thread.archived && thread.sideChatContext === undefined);
+      if (!continueChat && data.config.newChatOnStartup === true && active &&
+        (active.projectId !== undefined || active.panelContext || active.teams?.length || !this.isUntouchedThread(active))) {
+        active = undefined;
+      }
       const created = !active;
       if (!active) { active = this.freshThread(); await this.resources.ensureWorkspace(active.id); data.threads.unshift(active); }
       data.activeThreadId = active.id;
@@ -781,6 +785,7 @@ export class SessionService {
       else if (kind === 'readOnly') { options.readOnly = value; }
       else if (kind === 'saveSummary') { options.saveSummary = value; }
       else if (kind === 'autoCompact') { preferences.config.autoCompact = value; }
+      else if (kind === 'newChatOnStartup') { preferences.config.newChatOnStartup = value; }
       else if (kind === 'webEnabled') { preferences.extensions.webEnabled = value; }
       else { throw new Error('Invalid settings toggle.'); }
       preferences.productivity.options = options;

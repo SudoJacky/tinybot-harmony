@@ -40,10 +40,12 @@ interface ThreadSearchCache {
 export class SettingsViewModel {
   userDocument: string = '';
   autoCompact: boolean = true;
+  newChatOnStartup: boolean = false;
   webEnabled: boolean = true;
   error: string = '';
   reset(config: ModelConfig, webEnabled: boolean): void {
     this.userDocument = config.userDocument || ''; this.autoCompact = contextSettings(config).autoCompact;
+    this.newChatOnStartup = config.newChatOnStartup === true;
     this.webEnabled = webEnabled; this.error = '';
   }
 }
@@ -114,10 +116,10 @@ export class ChatViewModel {
   private draftTimer: number = -1;
   private outputs: Map<string, () => void> = new Map<string, () => void>();
 
-  async initialize(session: SessionService): Promise<void> {
+  async initialize(session: SessionService, continueChat: boolean = false): Promise<void> {
     if (!this.session) { this.session = session; session.subscribe((event: SessionEvent) => this.project(event)); }
     if (this.session !== session) { throw new Error(t("当前界面已经绑定会话服务。")); }
-    await session.initialize();
+    await session.initialize(continueChat);
   }
 
   private project(event: SessionEvent): void {

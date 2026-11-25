@@ -7,6 +7,7 @@ export function cloudConfiguration(source: AppData): AppData {
   const config: ModelConfig = { configured: model.configured, providerId: model.providerId, baseUrl: model.baseUrl,
     model: model.model, systemPrompt: model.systemPrompt, credentialAlias: model.credentialAlias, userDocument: '',
     contextWindow: model.contextWindow, autoCompact: model.autoCompact, reasoning: model.reasoning,
+    newChatOnStartup: model.newChatOnStartup,
     images: model.images, requestUsage: model.requestUsage };
   return {
     version: 2, activeThreadId: '', threads: [], config: config,

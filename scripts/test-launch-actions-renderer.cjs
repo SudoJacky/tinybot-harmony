@@ -180,8 +180,10 @@ function card(wide) {
   const formConfig = JSON.parse(fs.readFileSync(path.join(root, 'entry/src/main/resources/base/profile/form_config.json'), 'utf8'));
   actualLaunch.setForeground(false);
   actualLaunch.receive({ parameters: { tinybotAction: 'continue-chat', tinybotThreadId: 'notification-chat' } });
+  assert.equal(actualLaunch.peek(), 'continue-chat', 'The pending intent can guide cold initialization before foreground delivery');
   assert.equal(actualLaunch.take(), undefined);
   actualLaunch.setForeground(true); assert.equal(actualLaunch.take(), 'continue-chat');
+  assert.equal(actualLaunch.peek(), undefined);
   assert.equal(actualLaunch.takeThreadId(), 'notification-chat'); assert.equal(actualLaunch.takeThreadId(), undefined);
   actualLaunch.receive({ parameters: { tinybotAction: 'continue-chat', tinybotThreadId: 'stale' } });
   actualLaunch.receive({ parameters: { tinybotAction: 'continue-chat' } });
