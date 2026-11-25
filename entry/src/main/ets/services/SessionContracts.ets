@@ -63,7 +63,7 @@ export interface SessionState {
   acceptingSteering: boolean;
 }
 
-export type SettingsToggle = 'autoMemory' | 'readOnly' | 'saveSummary' | 'autoCompact' | 'webEnabled';
+export type SettingsToggle = 'autoMemory' | 'readOnly' | 'saveSummary' | 'autoCompact' | 'webEnabled' | 'newChatOnStartup';
 
 export interface SessionPreferences {
   config: ModelConfig;

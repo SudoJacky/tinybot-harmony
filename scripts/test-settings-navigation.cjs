@@ -53,6 +53,11 @@ function form(app, tab, entryId = '') {
   assert.equal(findSettings('dark mode', searchProfiles, false)[0].route, 'appearance');
   assert.equal(findSettings('work  KIMI', searchProfiles, false)[0].param, 'my-kimi');
   assert.equal(findSettings('浏览器', searchProfiles, false)[0].id, 'browser-enabled');
+  for (const query of ['冷启动', '上次会话', 'last conversation']) {
+    const result = findSettings(query, searchProfiles, false)[0];
+    assert.equal(result.id, 'new-chat-on-startup');
+    assert.equal(result.section, 'appearance');
+  }
   for (const query of ['知识库', 'knowledge base', 'Tencent IMA']) {
     assert.equal(findSettings(query, searchProfiles, false)[0].route, 'knowledge-base-settings');
   }

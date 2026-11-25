@@ -79,7 +79,7 @@ vm.runInNewContext(ts.transpileModule(menuSource, { compilerOptions: {
 } }).outputText, globals);
 globals.materialMenuContent = globals.exports.materialMenuContent;
 const names = ['filtered','threadProject','sections','section','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
-  'updateQuery','setScope',
+  'updateQuery','setScope','cloudPickerDisabled','loadWebDavConnections','openCloudPicker','projectSheetDisappeared',
   'locked','endSelection','selectThread','allSelected','selectAll','archiveSelected','confirmDeleteSelected'];
 const menuGeometry = tree.statements.filter(node => ts.isVariableStatement(node) &&
   node.declarationList.declarations.some(decl => ['THREAD_ROW_HEIGHT', 'ROW_MENU_SIZE', 'ROW_MENU_RIGHT_INSET'].includes(decl.name.getText(tree))));
@@ -109,6 +109,7 @@ function load(file) {
 }
 const { Fixture, seed } = load(path.join(root, 'entry/src/test/SessionService.test'));
 const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/ChatViewModel'));
+globals.MAX_PROJECT_SHARED_FOLDERS = load(path.join(root, 'entry/src/main/ets/model/SharedFolders')).MAX_PROJECT_SHARED_FOLDERS;
 (async () => {
   const data = seed();
   data.projects = [{ id: 'project', name: 'Original project', instructions: '', workspaceId: 'project-workspace', createdAt: 1, updatedAt: 1 }];
@@ -169,6 +170,40 @@ const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/Cha
   assert.equal(sidebar.query, 'Renamed chat', 'Editing a project must preserve filters');
   assert.equal(sidebar.archived, true);
   assert.equal(app.error, '');
+  let returnFromWebDav, openedConnection;
+  const draft = Object.assign(new globals.exports.Sidebar(), {
+    app: { canNavigate: true }, mounted: true, projectEditing: true, projectConnectionLoad: 0,
+    projectName: 'Unsaved name', projectInstructions: 'Unsaved instructions', projectFolders: [],
+    onProjectSheetVisibility: () => {},
+    onConfigureWebDav: onReturn => { returnFromWebDav = onReturn; },
+    openCloudConnection: connection => { openedConnection = connection; }
+  });
+  globals.webDavSettings = async () => { throw Error('Unable to read connections'); };
+  const pending = draft.loadWebDavConnections();
+  assert.equal(draft.cloudPickerDisabled(), true);
+  await pending;
+  await draft.openCloudPicker();
+  assert.equal(draft.projectEditing, true, 'A read error stays in the editor');
+  assert.equal(draft.projectFolderError, 'Unable to read connections');
+  globals.webDavSettings = async () => [];
+  await draft.openCloudPicker();
+  assert.equal(draft.projectEditing, false);
+  assert.equal(returnFromWebDav, undefined, 'Wait until the sheet has closed before pushing settings');
+  draft.projectSheetDisappeared();
+  const savedWebDav = { id: 'dav-a' };
+  globals.webDavSettings = async () => [savedWebDav];
+  returnFromWebDav();
+  await new Promise(setImmediate);
+  assert.equal(draft.projectEditing, true);
+  assert.equal(draft.projectName, 'Unsaved name');
+  assert.equal(draft.projectInstructions, 'Unsaved instructions');
+  await draft.openCloudPicker();
+  assert.equal(openedConnection, savedWebDav, 'A newly saved connection goes directly to its directory');
+  globals.webDavSettings = async () => [savedWebDav, { id: 'dav-b' }];
+  await draft.loadWebDavConnections();
+  await draft.openCloudPicker();
+  assert.equal(draft.choosingCloudConnection, true, 'Multiple connections still open the chooser');
+  console.log('PASS project WebDAV setup routing, retained draft, connection reload and chooser');
   const widgetEmitted = debugArtifact('common/Widgets');
   const widgetTree = ts.createSourceFile(widgetEmitted, fs.readFileSync(widgetEmitted, 'utf8'), ts.ScriptTarget.Latest, true);
   const icon = widgetTree.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'IconButton');

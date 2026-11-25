@@ -392,21 +392,25 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
     { name: 'appgallery_privacy_link_privacy_statement', value: 'https://example.com/debug-policy' }
   ] } };
   const debugService = new HostedPrivacy();
-  debugService.acceptDebugConsent(); assert.equal(debugService.allowed, false, 'Consent needs an active lifecycle');
   await debugService.initialize(debugContext, () => {});
+  assert.equal(debugService.allowed, false, 'Business still waits for the first page show');
+  assert.throws(() => debugService.requireConsent(), /模拟器调试/);
   debugService.onPageShow();
   assert.equal(debugService.simulatorDebug, true); assert.equal(debugService.error, '');
-  debugService.refresh(); await debugService.requestConsent();
-  assert.equal(debugService.allowed, false, 'Refresh/retry never auto-accepts debug consent');
-  assert.throws(() => debugService.requireConsent(), /模拟器调试/);
+  assert.equal(debugService.allowed, true, 'Emulator Debug automatically opens at the first page show');
+  debugService.requireConsent(); await debugService.requestConsent();
   await debugService.openPolicy(debugContext); assert.equal(opened.at(-1).uri, 'https://example.com/debug-policy');
-  debugService.acceptDebugConsent(); debugService.requireConsent(); assert.equal(debugService.allowed, true);
-  debugService.refresh(); assert.equal(debugService.allowed, true, 'Foreground keeps this run consent');
+  debugService.onPageHide(); debugService.onPageShow();
+  assert.equal(debugService.allowed, true, 'Foreground keeps local debug access');
+  exitFailure = { code: 1006700002 };
   debugService.revokeConsent(); assert.equal(debugService.allowed, false);
-  debugService.acceptDebugConsent(); assert.equal(debugService.allowed, false, 'No consent while exiting');
+  await tick();
+  debugService.onPageHide(); debugService.onPageShow();
+  assert.match(debugService.error, /1006700002/, 'Return after a failed exit keeps the error available');
+  assert.equal(debugService.allowed, false, 'A failed exit cannot reopen a closed debug session');
+  exitFailure = undefined; await debugService.exit();
   debugService.dispose(); await initializeVisible(debugService, debugContext, () => {});
-  assert.equal(debugService.allowed, false, 'New launch requires a fresh explicit choice');
-  await debugService.exit(); debugService.acceptDebugConsent(); assert.equal(debugService.allowed, false);
+  assert.equal(debugService.allowed, true, 'A new Debug emulator launch opens automatically');
   debugService.dispose();
   assert.deepEqual([privacyReads, requests, revocations, subscriptions], counts, 'No AppGallery interaction in emulator debug flow');
 
@@ -414,16 +418,30 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   const debugAbility = new EntryAbility(); debugAbility.context = debugContext;
   debugAbility.onCreate({ uri: 'debug-initial' }, {}); debugAbility.onWindowStageCreate(stage);
   await tick(); debugAbility.onForeground(); debugAbility.onNewWant({ uri: 'debug-shared' }, {});
+  assert.deepEqual([initialized, engines, wants.length], beforeDebugServices, 'Business and pending intents wait for the first page');
   hostedPrivacy.onPageShow();
-  assert.deepEqual([initialized, engines, wants.length], beforeDebugServices, 'Business and pending intents wait for explicit consent');
-  hostedPrivacy.acceptDebugConsent(); await tick();
+  await tick();
   assert.deepEqual([initialized, engines, wants.length], beforeDebugServices.map((n, i) => n + (i === 2 ? 2 : i === 0 ? 1 : 0)));
-  hostedPrivacy.acceptDebugConsent(); debugAbility.onForeground();
+  debugAbility.onForeground();
   assert.equal(engines, beforeDebugServices[1], 'Native startup never preloads ArkWeb');
   hostedPrivacy.revokeConsent(); assert.equal(hostedPrivacy.allowed, false);
   const afterRevokeWants = wants.length; debugAbility.onNewWant({ uri: 'blocked-debug' }, {});
   assert.equal(wants.length, afterRevokeWants); debugAbility.onDestroy();
   assert.deepEqual([privacyReads, requests, revocations, subscriptions], counts);
-  console.log('PASS emulator explicit consent, policy viewing, foreground, rejection, withdrawal, cold restart and actual ability gating');
+  console.log('PASS emulator Debug auto-entry, first-page lifecycle, policy viewing, exit and cold restart');
+
+  failure = undefined; records = refused();
+  for (const [debug, mode, model] of [[false, 'release', 'emulator'], [false, 'debug', 'emulator'],
+    [true, 'release', 'emulator'], [true, 'debug', 'Mate 70 Pro+']]) {
+    buildProfile.DEBUG = debug; buildProfile.BUILD_MODE_NAME = mode; deviceInfo.productModel = model;
+    const reads = privacyReads;
+    const gated = new HostedPrivacy();
+    await initializeVisible(gated, context, () => {});
+    assert.equal(gated.simulatorDebug, false);
+    assert.equal(gated.allowed, false, 'Only the actual Debug emulator can bypass the hosted gate');
+    assert.ok(privacyReads > reads, 'Other environments still query hosted consent');
+    gated.dispose();
+  }
+  console.log('PASS release and physical-device builds keep the hosted consent gate');
 
 })().catch(error => { console.error(error); process.exitCode = 1; });

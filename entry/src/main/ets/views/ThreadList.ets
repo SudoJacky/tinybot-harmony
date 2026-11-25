@@ -284,6 +284,7 @@ export struct ThreadList {
   @ObjectLink app: ChatViewModel;
   onSelected: () => void = () => {};
   onSettings: () => void = () => {};
+  onConfigureWebDav: (onReturn: () => void) => void = () => {};
   onLifePanels: () => void = () => {};
   onFiles: () => void = () => {};
   onProjectSheetVisibility: (visible: boolean) => void = () => {};
@@ -302,6 +303,7 @@ export struct ThreadList {
   @State private projectFolders: SharedFolder[] = [];
   @State private projectFolderError: string = '';
   @State private webDavConnections: WebDavSettings[] = [];
+  @State private webDavConnectionState: 'loading' | 'ready' | 'failed' = 'loading';
   @State private choosingCloudConnection: boolean = false;
   @State private cloudPath: WebDavDirectoryEntry[] = [];
   @State private cloudEntries: WebDavDirectoryEntry[] = [];
@@ -310,6 +312,7 @@ export struct ThreadList {
   private cloudConnectionId: string = '';
   private cloudRequest?: Cancellation;
   private projectConnectionLoad: number = 0;
+  private configureWebDavOnDismiss: boolean = false;
 
   aboutToAppear(): void {
     this.mounted = true;
@@ -463,18 +466,54 @@ export struct ThreadList {
     this.closeCloudPicker();
     this.webDavConnections = [];
     this.projectEditing = true;
-    const load = ++this.projectConnectionLoad;
-    webDavSettings().then((settings) => {
-      if (this.projectEditing && this.projectConnectionLoad === load) { this.webDavConnections = settings; }
-    }).catch((error: Error) => {
-      if (this.projectEditing && this.projectConnectionLoad === load) { this.projectFolderError = error.message; }
-    });
+    this.loadWebDavConnections();
   }
 
-  private openCloudPicker(): void {
-    if (this.locked() || this.cloudLoading) { return; }
-    if (this.webDavConnections.length === 1) { this.openCloudConnection(this.webDavConnections[0]); }
+  private async loadWebDavConnections(): Promise<boolean> {
+    const load = ++this.projectConnectionLoad;
+    this.webDavConnectionState = 'loading';
+    try {
+      const settings = await webDavSettings();
+      if (!this.projectEditing || this.projectConnectionLoad !== load) { return false; }
+      this.webDavConnections = settings;
+      this.webDavConnectionState = 'ready';
+      return true;
+    } catch (error) {
+      if (this.projectEditing && this.projectConnectionLoad === load) {
+        this.webDavConnectionState = 'failed';
+        this.projectFolderError = (error as Error).message;
+      }
+      return false;
+    }
+  }
+
+  private cloudPickerDisabled(): boolean {
+    return this.locked() || this.cloudLoading || this.webDavConnectionState === 'loading' ||
+      this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS;
+  }
+
+  private async openCloudPicker(): Promise<void> {
+    if (this.cloudPickerDisabled()) { return; }
+    this.projectFolderError = '';
+    if (this.webDavConnectionState === 'failed' && !await this.loadWebDavConnections()) { return; }
+    if (this.locked()) { return; }
+    if (this.webDavConnections.length === 0) {
+      this.configureWebDavOnDismiss = true;
+      this.projectEditing = false;
+    } else if (this.webDavConnections.length === 1) { this.openCloudConnection(this.webDavConnections[0]); }
     else { this.choosingCloudConnection = true; }
+  }
+
+  private projectSheetDisappeared(): void {
+    this.onProjectSheetVisibility(false);
+    if (!this.configureWebDavOnDismiss) { return; }
+    this.configureWebDavOnDismiss = false;
+    const load = this.projectConnectionLoad;
+    this.onConfigureWebDav(() => {
+      if (!this.mounted || this.projectEditing || this.projectConnectionLoad !== load) { return; }
+      this.projectEditing = true;
+      this.loadWebDavConnections();
+    });
   }
 
   private async openCloudConnection(connection: WebDavSettings): Promise<void> {
@@ -722,13 +761,11 @@ export struct ThreadList {
                 }, (folder: SharedFolder) => folder.id)
                 NavRow({ title: t('添加本地文件夹'), icon: $r('sys.symbol.folder_badge_plus'), compId: 'project-add-folder',
                   disabled: this.locked() || this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS, onTap: () => this.addProjectFolders() })
-                if (this.webDavConnections.length > 0) {
-                  RowDivider()
-                  NavRow({ title: this.cloudLoading ? t('正在读取云端目录…') : t('添加 WebDAV'),
-                    icon: $r('sys.symbol.cloud'), compId: 'project-add-cloud-folder',
-                    disabled: this.app.sharedBusy || this.cloudLoading || this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS,
-                    onTap: () => this.openCloudPicker() })
-                }
+                RowDivider()
+                NavRow({ title: this.cloudLoading ? t('正在读取云端目录…') : t('添加 WebDAV'),
+                  subtitle: this.webDavConnectionState === 'ready' && this.webDavConnections.length === 0 ? t('未配置 WebDAV') : '',
+                  icon: $r('sys.symbol.cloud'), compId: 'project-add-cloud-folder',
+                  disabled: this.cloudPickerDisabled(), onTap: () => this.openCloudPicker() })
               }
             }
             if (this.projectFolders.length >= MAX_PROJECT_SHARED_FOLDERS) {
@@ -1051,6 +1088,6 @@ export struct ThreadList {
       title: this.cloudPath.length > 0 ? t('选择云端文件夹') : this.choosingCloudConnection ? t('选择 WebDAV 连接') :
         this.projectId ? t('编辑项目') : t('新建项目') },
       detents: [SheetSize.LARGE], dragBar: true, keyboardAvoidMode: SheetKeyboardAvoidMode.RESIZE_ONLY,
-      onWillAppear: () => this.onProjectSheetVisibility(true), onDisappear: () => this.onProjectSheetVisibility(false) })
+      onWillAppear: () => this.onProjectSheetVisibility(true), onDisappear: () => this.projectSheetDisappeared() })
   }
 }

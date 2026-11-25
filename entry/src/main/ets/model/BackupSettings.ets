@@ -8,6 +8,7 @@ export function mergeBackupConfig(local: ModelConfig, incoming: ModelConfig): Mo
   const base = defaultConfig(), merged = JSON.parse(JSON.stringify(local)) as ModelConfig;
   if (local.contextWindow === undefined) { merged.contextWindow = incoming.contextWindow; }
   if (local.autoCompact === undefined || local.autoCompact === base.autoCompact) { merged.autoCompact = incoming.autoCompact ?? base.autoCompact; }
+  if (local.newChatOnStartup === undefined) { merged.newChatOnStartup = incoming.newChatOnStartup; }
   if (local.reasoning === undefined) { merged.reasoning = incoming.reasoning; }
   if (local.images === undefined) { merged.images = incoming.images; }
   if (local.requestUsage === undefined) { merged.requestUsage = incoming.requestUsage; }

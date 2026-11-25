@@ -19,7 +19,7 @@ devecocli build
 同一个 HAP 同时面向 HarmonyOS 6（API 20）与 HarmonyOS 7（API 26）。行为脚本用 `deviceInfo.sdkApiVersion` 模拟两条分支：26 走原有 http 与材质实现，20 走 rcp 传输与普通界面，因此不需要两台设备也能覆盖分支逻辑；真机/模拟器仍要跑一遍交互：
 
 1. 列出设备，确认串口与系统版本：`devecocli device list`（API 20 模拟器名为 `Mate 90 Pro_OS6`）。
-2. `devecocli run --device <serial>`：首次启动应到隐私说明，同意后进入引导与主页，没有任何 JS 崩溃。
+2. `devecocli run --device <serial>`：模拟器 Debug 包应自动进入引导或主页。真机按系统隐私授权流程进入。两种环境都需检查启动时的 JS 崩溃日志。
 3. 依次打开：主页菜单与公告 Sheet、设置各页、外观（“光感效果”应显示“此系统不支持”）、画板（模拟器无手写能力时显示真实不支持状态）。
 4. 冷启动、返回、前后台切换各一次，再查崩溃日志：`devecocli log --crash --bundle-name com.sudojacky.tinybot`。
 

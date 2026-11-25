@@ -34,6 +34,7 @@ export interface ModelConfig {
   credentialAlias: string;
   contextWindow?: number;
   autoCompact?: boolean;
+  newChatOnStartup?: boolean;
 }
 
 export interface MessageData {
@@ -230,7 +231,8 @@ export function normalizeAppData(decoded: AppData): AppData {
   if (!data || ![1, 2].includes(data.version) || !data.config || !Array.isArray(data.threads) ||
     typeof data.activeThreadId !== 'string' || typeof data.config.configured !== 'boolean' || typeof data.config.baseUrl !== 'string' ||
     typeof data.config.model !== 'string' || typeof data.config.systemPrompt !== 'string' ||
-    typeof data.config.credentialAlias !== 'string') {
+    typeof data.config.credentialAlias !== 'string' ||
+    (data.config.newChatOnStartup !== undefined && typeof data.config.newChatOnStartup !== 'boolean')) {
     throw new Error(t("本地数据格式不受支持，原文件已保留。"));
   }
   data.nearbyConflicts = undefined;
