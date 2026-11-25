@@ -40,7 +40,7 @@ function addCategory(report: StorageReport, id: StorageCategoryId, bytes: number
   for (const item of report.categories) {
     if (item.id === id) { item.bytes = bytes; item.files = files; }
   }
-  report.totalBytes += bytes;
+  report.categorizedBytes += bytes;
 }
 
 function fileEntry(file: DiskFile, category: StorageCategoryId, label: string, detail: string,
@@ -286,7 +286,9 @@ export class StorageUsage {
 
     try {
       const stats = await storageStatistics.getCurrentBundleStats();
-      report.appBytes = stats.appSize; report.dataBytes = stats.dataSize; report.cacheBytes = stats.cacheSize;
+      // System dataSize already includes cacheSize.
+      report.bundle = { totalBytes: stats.appSize + stats.dataSize, appBytes: stats.appSize,
+        dataBytes: stats.dataSize, cacheBytes: stats.cacheSize };
     } catch (error) { Diagnostics.log('warn', 'storage', 'metric_failed', { operation: 'bundle_stats' }, error as Error); }
     try { report.freeBytes = await storageStatistics.getFreeSize(); }
     catch (error) { Diagnostics.log('warn', 'storage', 'metric_failed', { operation: 'free_size' }, error as Error); }

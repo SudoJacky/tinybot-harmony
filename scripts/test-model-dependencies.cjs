@@ -3,10 +3,11 @@ const fs = require('node:fs'), path = require('node:path');
 const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFiles, 'Huawei/DevEco Studio');
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const root = path.resolve(__dirname, '../entry/src/main/ets');
+const moduleExtensions = ['.ets', '.js'];
 function filesIn(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const file = path.join(directory, entry.name);
-    return entry.isDirectory() ? filesIn(file) : entry.name.endsWith('.ets') ? [file] : [];
+    return entry.isDirectory() ? filesIn(file) : moduleExtensions.includes(path.extname(file)) ? [file] : [];
   });
 }
 const files = filesIn(root), graph = new Map(files.map(file => [file, []]));
@@ -20,8 +21,11 @@ for (const file of files) {
       node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
       const id = node.arguments[0].text;
       if (id.startsWith('.')) {
-        const dependency = path.resolve(path.dirname(file), id.endsWith('.ets') ? id : id + '.ets');
-        if (!graph.has(dependency)) throw Error('Unresolved local dependency: ' + file + ' -> ' + id);
+        const target = path.resolve(path.dirname(file), id);
+        const dependency = moduleExtensions.includes(path.extname(target))
+          ? (graph.has(target) ? target : undefined)
+          : moduleExtensions.map(extension => target + extension).find(candidate => graph.has(candidate));
+        if (!dependency) throw Error('Unresolved local dependency: ' + file + ' -> ' + id);
         graph.get(file).push(dependency);
       }
     }
@@ -41,4 +45,4 @@ function visit(file) {
   stack.pop(); active.delete(file); complete.add(file);
 }
 for (const file of files) visit(file);
-console.log('PASS ' + files.length + ' ArkTS modules have no runtime dependency cycles; type-only references are excluded');
+console.log('PASS ' + files.length + ' ArkTS and JavaScript modules have no runtime dependency cycles; type-only references are excluded');

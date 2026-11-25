@@ -78,7 +78,7 @@ vm.runInNewContext(ts.transpileModule(menuSource, { compilerOptions: {
   target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS
 } }).outputText, globals);
 globals.materialMenuContent = globals.exports.materialMenuContent;
-const names = ['filtered','threadProject','sections','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
+const names = ['filtered','threadProject','sections','section','sectionThreads','sectionTitle','groupOpen','visibleCount','onActivePath','lastBranch','loadMore','toggleGroup','sectionHeader','projectActions',
   'updateQuery','setScope',
   'locked','endSelection','selectThread','allSelected','selectAll','archiveSelected','confirmDeleteSelected'];
 const menuGeometry = tree.statements.filter(node => ts.isVariableStatement(node) &&

@@ -56,7 +56,7 @@ EVENTS.privacy = ['request_started', 'request_completed', 'query_completed', 'qu
   'subscription_ready', 'subscription_cleanup_failed'];
 EVENTS.feedback = ['attachment_failed', 'log_failed', 'initialize_failed', 'save_failed', 'credential_failed', 'request_failed', 'submit_failed', 'list_failed',
   'detail_failed', 'upload_failed', 'cleanup_failed', 'reconcile_failed', 'delete_failed'];
-EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'replace_failed', 'retire_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
+EVENTS.backup = ['started', 'restored', 'restore_prepared', 'key_decrypt_failed', 'cleanup_failed', 'cache_release_failed', 'replace_failed', 'retire_failed', 'rollback_failed', 'archive_written', 'archive_write_failed', 'archive_verified',
   'restore_completed', 'restore_failed', 'local_export_failed', 'local_import_failed', 'startup_capture_failed', 'startup_marker_failed', 'startup_lookup_failed',
   'cloud_retry_finished', 'cloud_failed', 'cloud_retry', 'cloud_sync_progress', 'cloud_sync_finished', 'cloud_list_failed', 'cloud_settings_failed', 'auto_failed', 'auto_settings_failed', 'auto_task_failed', 'auto_expired', 'auto_release_failed',
   'webdav_failed', 'webdav_cleanup_failed', 'webdav_uploaded', 'webdav_settings_failed'];
@@ -68,6 +68,7 @@ EVENTS.speech = ['preparing', 'listening', 'vad', 'complete', 'finishing', 'reco
 EVENTS.voice = ['focus_requested', 'released', 'draft_failed'];
 EVENTS.composer = ['sheet_action_queued', 'sheet_action_dispatched', 'sheet_action_cancelled'];
 EVENTS.focus = ['search_requested', 'provider_requested', 'onboarding_requested'];
+EVENTS.onboarding = ['haptic_failed'];
 EVENTS.navigation = ['tools_opened', 'tools_repeated', 'settings_opened', 'settings_repeated',
   'new_chat_blocked', 'new_chat_failed', 'new_chat_revealed', 'keyboard_shortcuts_open_failed',
   'desktop_command_failed', 'desktop_layout_load_failed', 'desktop_layout_save_failed', 'transition_screen_failed',
@@ -111,7 +112,7 @@ STRINGS.operation = ['access', 'read', 'list', 'stat', 'parse', 'unlink', 'rmdir
   'getAppPrivacyMgmtInfo', 'getAppPrivacyResult', 'requestAppPrivacyConsent', 'disableService', 'subscribe', 'unsubscribe', 'cloud_directory', 'cloud_sync',
   'connect', 'login', 'examine', 'search', 'fetch', 'identify', 'capability',
   'discover', 'balance', 'credential_read', 'credential_write', 'credential_remove', 'save_config', 'response', 'streaming', 'connecting', 'attachment', 'log',
-  'PUT', 'MOVE', 'DELETE', 'GET', 'PROPFIND', 'MKCOL', 'local', 'remote'];
+  'PUT', 'MOVE', 'DELETE', 'GET', 'PROPFIND', 'MKCOL', 'local', 'remote', 'haptic_step', 'haptic_complete'];
 STRINGS.credentialScope = ['provider', 'search', 'mcp', 'backup'];
 STRINGS.rpcMethod = ['initialize', 'tools/list', 'tools/call', 'notifications/initialized', 'notifications/cancelled'];
 STRINGS.service = ['mcp', 'search', 'web', 'bing-browser'];

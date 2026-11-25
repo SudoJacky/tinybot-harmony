@@ -79,8 +79,11 @@ const fake = {
   }
 };
 const stats = {
-  getCurrentBundleStats: async () => ({ appSize: 300, dataSize: 1000, cacheSize: 560 }),
-  getFreeSize: async () => { if (failMetric) throw Object.assign(Error('PRIVATE_METRIC_PATH'), { code: 201 }); return 8000; },
+  getCurrentBundleStats: async () => {
+    if (failMetric === 'bundle') throw Object.assign(Error('PRIVATE_METRIC_PATH'), { code: 201 });
+    return { appSize: 300, dataSize: 2000, cacheSize: 560 };
+  },
+  getFreeSize: async () => { if (failMetric === 'free') throw Object.assign(Error('PRIVATE_METRIC_PATH'), { code: 201 }); return 8000; },
   getTotalSize: async () => 10000
 };
 const { StorageUsage } = load(path.join(sourceRoot, 'services/StorageUsage'));
@@ -102,6 +105,10 @@ const data = {
   }]
 };
 (async () => {
+  assert.equal(plan.storageSize(33_130_000), '33.13 MB');
+  assert.equal(plan.storageSize(239_720_000), '240 MB');
+  assert.equal(plan.storageSize(9_500_000), '9.5 MB');
+  assert.equal(plan.storageSize(0), '0 B');
   assert.deepEqual(plan.orphanAttachmentPaths(['a.jpg', 'b.jpg'], ['a.jpg']), ['b.jpg']);
   assert.deepEqual(plan.orphanWorkspaceIds(['thread-1', 'project-1', 'orphan'], ['thread-1'], ['project-1']), ['orphan']);
   assert.equal(plan.isStaleTemporary('.tinybot-x.tmp', now - 2 * 60 * 60 * 1000, now), true);
@@ -112,7 +119,11 @@ const data = {
 
   const context = { filesDir: '/files', cacheDir: '/cache', getApplicationContext: () => ({ filesDir: '/app' }) };
   const report = await StorageUsage.scan(context, data);
-  assert.equal(report.totalBytes, 100 + 340 + 90 + 82 + 15 + 32 + 560 + 5);
+  assert.equal(report.categorizedBytes, 100 + 340 + 90 + 82 + 15 + 32 + 560 + 5);
+  assert.equal(report.bundle.totalBytes, 2300, 'system data includes cache, so total adds only installation and data');
+  assert.equal(report.bundle.appBytes, 300);
+  assert.equal(report.bundle.dataBytes, 2000);
+  assert.equal(report.bundle.cacheBytes, 560);
   assert.equal(report.categories.find(item => item.id === 'workspace').bytes, 340);
   assert.equal(report.categories.find(item => item.id === 'backups').bytes, 90);
   assert.equal(report.categories.find(item => item.id === 'attachments').bytes, 82);
@@ -149,6 +160,13 @@ const data = {
   failMetric = 'free'; await StorageUsage.scan(context, data); failMetric = '';
   const metricFailure = diagnosticLogs.findLast(data => data.event === 'metric_failed');
   assert.equal(metricFailure.fields.operation, 'free_size'); assert.equal(metricFailure.fields.errorCode, 201);
+  failMetric = 'bundle';
+  const withoutBundle = await StorageUsage.scan(context, data);
+  failMetric = '';
+  assert.equal(withoutBundle.bundle, undefined, 'an unavailable system total must stay unavailable');
+  assert.equal(withoutBundle.categorizedBytes, report.categorizedBytes);
+  assert.equal(withoutBundle.safeBytes, report.safeBytes);
+  assert.equal(diagnosticLogs.findLast(data => data.event === 'metric_failed').fields.operation, 'bundle_stats');
 
   const result = await StorageUsage.cleanSafe(context, data);
   assert.equal(result.freedBytes, 750); assert.equal(result.removed, 4); assert.equal(result.failed, 0);
