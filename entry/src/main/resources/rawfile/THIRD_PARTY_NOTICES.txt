@@ -127,3 +127,13 @@ Apache ECharts 6.0.0 / bundled dependencies
 License and notices: licenses/echarts.txt
 Inter Latin variable font (Fontsource 5.2.8)
 License: SIL Open Font License 1.1. License text: licenses/inter.txt
+
+Tinybot Editorial Latin (derived from Cormorant Garamond SemiBold Italic)
+Source: https://github.com/CatharsisFonts/Cormorant/tree/016784836d2ad47bc4c62b7f504a0a5875d85aeb
+Modified with fontTools by subsetting to Latin letters, combining marks and punctuation, and renaming the font family.
+License: SIL Open Font License 1.1. License text: licenses/cormorant.txt
+
+Tinybot Editorial Han (derived from LXGW WenKai Lite Medium 1.530)
+Source: https://github.com/lxgw/LxgwWenKai-Lite/releases/tag/v1.530
+Modified with fontTools by subsetting to GB2312 level 1, Big5 level 1, CJK punctuation and fullwidth forms, and renaming the font family.
+License: SIL Open Font License 1.1. License text: licenses/wenkai-lite.txt

@@ -54,6 +54,14 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
     copyright: 'The Inter Project Authors', resource: 'licenses/inter.txt'
   },
   {
+    id: 'cormorant', name: 'Cormorant Garamond · Editorial Latin subset', license: 'SIL Open Font License 1.1',
+    copyright: 'Copyright 2015 the Cormorant Project Authors', resource: 'licenses/cormorant.txt'
+  },
+  {
+    id: 'wenkai-lite', name: 'LXGW WenKai Lite · Editorial Han subset', license: 'SIL Open Font License 1.1',
+    copyright: 'Copyright 2021-2026 LXGW\nCopyright 2020 The Klee Project Authors', resource: 'licenses/wenkai-lite.txt'
+  },
+  {
     id: 'sensitive-lexicon', name: 'Sensitive-lexicon', license: 'MIT (upstream repository)',
     copyright: 'Copyright (c) 2024~2099 Konsheng', resource: 'moderation/SENSITIVE-LEXICON-LICENSE.txt'
   },
