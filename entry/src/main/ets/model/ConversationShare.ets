@@ -54,11 +54,11 @@ export function selectedConversation(thread: ThreadData, ids: string[]): ThreadD
 
 export function conversationMarkdown(thread: ThreadData): string {
   return '# ' + thread.title + '\n\n' + sharingMessages(thread.messages).map((message) =>
-    '## ' + (message.role === 'user' ? t('用户') : 'Tinybot') + '\n\n' + markdownPreviewText(message) +
+    '## ' + (message.role === 'user' ? t('用户') : 'Tinybot') + '\n\n' + shareMessageText(message) +
     (message.attachments?.length ? t('\n\n附件：') + message.attachments.map((file) => file.name).join('、') : '')
   ).join('\n\n') + '\n\n---\n\nTinybot · ' + t('含 AI 生成内容') + '\n\n' + t('AI生成内容可能有误，请仔细鉴别。') + '\n';
 }
-function markdownPreviewText(message: MessageData): string {
+export function shareMessageText(message: MessageData): string {
   if (message.role !== 'assistant') { return message.content; }
   const targets = previewReferenceTargets(message.steps || []);
   return previewReferenceParts(message.content).map((part) => part.kind === 'text' ? part.content :

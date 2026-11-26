@@ -6,6 +6,7 @@ const studio = process.env.DEVECO_STUDIO_HOME || path.join(process.env.ProgramFi
 const ts = require(path.join(studio, 'sdk/default/openharmony/ets/build-tools/ets-loader/node_modules/typescript'));
 const files = new Map(), writes = [], removed = [], released = [], draws = [], captureOrder = [];
 const exportLogs = [];
+const encoded = [], decoded = [];
 let destination = 'saved', captureFailure = false, uuid = 0, packFailure = false;
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ioAAAAASUVORK5CYII=', 'base64');
 const buffer = value => { const b = Buffer.from(value); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
@@ -16,11 +17,16 @@ const io = {
 const image = {
   PixelMapFormat: {}, AlphaType: {},
   createImagePacker: () => ({ packToData: async pixel => {
+    encoded.push(pixel.final ? 'result' : 'capture');
     if (pixel.final && packFailure) throw Error('encoder failed');
     return buffer(png);
   }, release: async () => released.push('packer') }),
   createPixelMapSync: options => ({ final: true, options, release: async () => released.push('result') }),
-  createImageSource: fd => ({ createPixelMap: async () => ({ fd, release: async () => released.push(fd) }),
+  createImageSource: fd => ({ getImageInfo: async () => ({ size: { width: 400, height: 800 } }),
+    createPixelMap: async () => {
+      decoded.push(fd);
+      return { fd, release: async () => released.push(fd) };
+    },
     release: async () => released.push('source') })
 };
 const native = {
@@ -40,7 +46,8 @@ function load(name) {
   if (name === 'model/I18n') return { t: (s, values = []) => s.replace(/\{(\d+)\}/g, (_, n) => values[+n]) };
   if (name === 'services/Attachments') return {
     readBounded: async fd => buffer(files.get(fd)),
-    writeBytes: async (name, bytes) => { writes.push(name); files.set(name, Buffer.from(bytes)); }, Attachments: {}
+    writeBytes: async (name, bytes) => { writes.push(name); files.set(name, Buffer.from(bytes)); },
+    Attachments: { path: item => item.path }
   };
   const exports = {}; cache.set(name, exports);
   const source = fs.readFileSync(path.join(root, 'entry/src/main/ets', name + '.ets'), 'utf8');
@@ -154,7 +161,7 @@ function crc32(bytes) {
   assert.equal(sharingMessages([{ ...processMessage, steps: [{ content: 'invalid UI', uiValidation: 'failed', tools: [] }] }]).length, 0);
   assert.equal(sharingMessages([{ id: 'legacy', role: 'assistant', content: 'Legacy body' }])[0].content, 'Legacy body');
   assert.equal(sections.filter(s => s.kind === 'text' && !s.user).map(s => s.text).join(''), long);
-  assert.ok(sections.at(-1).text.includes('AI生成内容可能有误，请仔细鉴别。'));
+  assert.equal(sections.at(-1).text, 'AI生成内容可能有误，请仔细鉴别。');
   assert.equal(sections.filter(s => s.kind === 'role').length, 3);
   const branded = conversationSections(thread, [{ id: 'provider', name: 'Provider name', presetId: 'deepseek' }]);
   const assistant = branded.find(s => s.kind === 'role' && !s.user);
@@ -181,21 +188,49 @@ function crc32(bytes) {
   receipt.status = 'error'; assert.equal(aiAssistedFile(data, 't', 'page.html'), false); receipt.status = 'complete';
 
   const { conversationImage } = load('services/ConversationImageExport');
+  const capturePixel = (height = 40) => ({
+    getImageInfo: async () => ({ size: { width: 720, height } }),
+    getPixelBytesNumber: () => 720 * height * 4,
+    release: async () => released.push('capture')
+  });
   const capture = async section => {
     captureOrder.push(section.text);
     if (captureFailure && section.kind === 'footer') throw Error('snapshot failed');
-    return { getImageInfo: async () => ({ size: { width: 720, height: 40 } }), release: async () => released.push('capture') };
+    return capturePixel();
   };
+  const writesBeforeImage = writes.length;
   const output = await conversationImage(context, sections, capture);
   assert.equal(captureOrder.length, sections.length); assert.equal(captureOrder.at(-1), sections.at(-1).text);
   assert.equal(draws.length, sections.length); assert.equal(draws.at(-1).bottom, sections.length * 40);
-  assert.ok(chunks(files.get(output)).some(c => c.type === 'iTXt'));
+  assert.equal(output.width, 720); assert.equal(output.height, sections.length * 40);
+  assert.deepEqual(encoded, ['result']);
+  assert.deepEqual(decoded, []);
+  assert.deepEqual(writes.slice(writesBeforeImage), [output.path]);
+  assert.equal(released.filter(entry => entry === 'capture').length, sections.length);
+  assert.ok(chunks(files.get(output.path)).some(c => c.type === 'iTXt'));
   assert.equal([...files.keys()].filter(name => name.startsWith('cache/')).length, 1, 'only final PNG remains');
-  files.delete(output); captureFailure = true;
+  files.delete(output.path);
+
+  const imageSection = { kind: 'attachment-image', user: true, text: 'portrait.jpg', attachment: { path: 'portrait.jpg' } };
+  const longExportStart = draws.length;
+  const longExport = await conversationImage(context, [sections[0], imageSection, sections.at(-1)], async section => {
+    if (section.kind === 'attachment-image') assert.equal(section.imageRatio, 2);
+    return capturePixel(3000);
+  });
+  assert.equal(longExport.height, 9000);
+  assert.deepEqual(encoded.slice(1), ['capture', 'capture', 'result']);
+  assert.equal(decoded.length, 2, 'only sections beyond the memory budget need decoding');
+  assert.deepEqual(draws.slice(longExportStart).map(rect => rect.top), [0, 3000, 6000]);
+  assert.ok(decoded.every(path => !files.has(path)));
+  files.delete(longExport.path);
+
+  captureFailure = true;
+  const releasesBeforeFailure = released.length;
   await assert.rejects(conversationImage(context, sections, capture), /snapshot failed/);
   assert.equal(exportLogs.at(-1)[1], 'export'); assert.equal(exportLogs.at(-1)[2], 'image_failed');
   assert.equal(exportLogs.at(-1)[3].phase, 'capture');
   assert.equal(exportLogs.at(-1)[3].chunk, sections.length - 1);
+  assert.equal(released.slice(releasesBeforeFailure).filter(entry => entry === 'capture').length, sections.length - 1);
   assert.equal([...files.keys()].filter(name => name.startsWith('cache/')).length, 0);
   captureFailure = false; packFailure = true;
   await assert.rejects(conversationImage(context, sections, capture), /encoder failed/);
