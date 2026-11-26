@@ -29,8 +29,10 @@ The tool also accepts Python source. It reports the program's exit code and sepa
 
 On phones, a thread in the app hosts a single VM configured with 192 MiB of guest RAM. QMP pauses and resets the machine after completion, timeout or cancellation. The next job boots the kernel again. The paused engine stays in the app process until it exits, and a native engine crash can affect that process. Tablets and 2-in-1 devices start a native child process for each job. The parent closes the control channel to cancel the child. Both modes bound guest execution at 120 seconds.
 
-Build the project's `default` and `ohosTest` HAPs and install both on the chosen test device. The device suite exercises a Python exception, a binary SQLite round trip, cancellation of a job with a background process, and execution of a subsequent job. Replace `BUNDLE` with the installed bundle name and `DEVICE` with its HDC identifier.
+For on-device tests, configure a separate test bundle name, use a signing profile for that name, and install the `default` and `ohosTest` HAPs with test data. Removing a test module from an installation that holds real conversations can invalidate the application's HUKS keys and leave its encrypted database unreadable. Use only the signed `default` HAP for an in-place upgrade of a user's installation and verify that an existing conversation opens afterwards. See the [device test and release checklist](../../docs/dev/release.md).
+
+The device suite exercises a Python exception, a binary SQLite round trip, cancellation of a job with a background process, and execution of a subsequent job. Replace `TEST_BUNDLE` with the separate test bundle name and `DEVICE` with its HDC identifier.
 
 ```sh
-hdc -t DEVICE shell aa test -b BUNDLE -m entry_test -s unittest OpenHarmonyTestRunner -s timeout 240000 -w 240
+hdc -t DEVICE shell aa test -b TEST_BUNDLE -m entry_test -s unittest OpenHarmonyTestRunner -s timeout 240000 -w 240
 ```
