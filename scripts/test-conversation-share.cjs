@@ -37,11 +37,11 @@ const globals = { exports: {}, console, t, Diagnostics, $r: () => ({ id: 1 }), h
   } },
   util: { generateRandomUUID: () => 'test', TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } },
   writeBytes: async (p, bytes) => files.set(p, Buffer.from(bytes)),
-  image: { createImageSource: () => ({ getImageInfo: async () => ({ size: { width: 720, height: 1440 } }), release: async () => {} }) },
   conversationImage: async (_ctx, sections) => {
     imageCalls++;
     if (deferImage) await new Promise(resolve => { resolveImage = resolve; });
-    files.set('preview.png', sections.map(s => s.text).join('\n')); return 'preview.png';
+    files.set('preview.png', sections.map(s => s.text).join('\n'));
+    return { path: 'preview.png', width: 720, height: 1440 };
   },
   exportFile: async (_ctx, p, name) => { if (failOutput) throw Object.assign(Error('disk full'), { code: 28 }); outputs.push({ kind: 'save', name, value: files.get(p) }); },
   shareFile: async (_ctx, p, name) => { outputs.push({ kind: 'share', name, value: files.get(p) }); }

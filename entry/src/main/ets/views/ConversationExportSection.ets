@@ -5,6 +5,12 @@ import { Attachments } from '../services/Attachments';
 import { DataViewCard } from './DataViewCard';
 import { providerLogo, monochromeProviderLogo } from '../common/ProviderBrand';
 
+export const CONVERSATION_EXPORT_WIDTH = 360;
+const PAGE_PADDING = 16;
+const CONTENT_WIDTH = CONVERSATION_EXPORT_WIDTH - 2 * PAGE_PADDING;
+const BUBBLE_WIDTH = CONTENT_WIDTH * 0.88;
+const BUBBLE_PADDING = 14;
+
 // A synchronous, fully expanded export view: no lazy rows, scroll containers,
 // deferred Markdown batches, controls, or offscreen visibility placeholders.
 @Component
@@ -14,6 +20,10 @@ export struct ConversationExportSection {
   private textSize(): number {
     return this.section.kind === 'title' ? 24 : this.section.kind === 'heading' ? 21 - Math.min(4, this.section.block?.level || 1) :
       this.section.kind === 'role' || this.section.kind === 'footer' || this.section.kind === 'attachment' ? 13 : 16;
+  }
+  private attachmentHeight(): number {
+    const width = this.section.user ? BUBBLE_WIDTH - 2 * BUBBLE_PADDING : CONTENT_WIDTH;
+    return Math.min(1800, Math.max(1, width * this.section.imageRatio!));
   }
   @Builder
   prose(value: string) {
@@ -25,7 +35,7 @@ export struct ConversationExportSection {
           .decoration({ type: span.kind === 'strike' ? TextDecorationType.LineThrough : TextDecorationType.None })
       })
     }.fontFamily(this.appearance.fontFamily).fontSize(this.textSize()).lineHeight(this.textSize() * 1.65)
-      .fontColor($r('app.color.text_primary')).width('100%').wordBreak(WordBreak.BREAK_ALL)
+      .fontColor($r('app.color.text_primary')).width('100%').wordBreak(WordBreak.BREAK_WORD)
   }
   @Builder
   body() {
@@ -34,10 +44,11 @@ export struct ConversationExportSection {
         DataViewCard({ content: this.section.text, snapshotMode: true })
       } else if (this.section.kind === 'attachment-image') {
         Image('file://' + Attachments.path(this.section.attachment!)).syncLoad(true).width('100%')
-          .height(this.section.imageRatio ? Math.min(1800, Math.max(160, 328 * this.section.imageRatio)) : 240).objectFit(ImageFit.Contain)
+          .height(this.attachmentHeight()).objectFit(ImageFit.Contain).interpolation(ImageInterpolation.High)
         Text(this.section.text).fontSize(12).fontColor($r('app.color.text_secondary')).width('100%')
       } else if (this.section.kind === 'image') {
-        Image(this.section.block!.rows[0][1]).syncLoad(true).width('100%').height(240).objectFit(ImageFit.Contain)
+        Image(this.section.block!.rows[0][1]).syncLoad(true).width('100%').height(240)
+          .objectFit(ImageFit.Contain).interpolation(ImageInterpolation.High)
       } else if (this.section.kind === 'rule') {
         Divider().color($r('app.color.divider')).margin({ top: 5, bottom: 5 })
       } else if (this.section.kind === 'code') {
@@ -92,13 +103,13 @@ export struct ConversationExportSection {
     Column() {
       if (this.section.user) {
         Row() {
-          Column() { this.body() }.width('88%').padding({ left: 14, right: 14, top: 3, bottom: 3 })
+          Column() { this.body() }.width(BUBBLE_WIDTH).padding({ left: BUBBLE_PADDING, right: BUBBLE_PADDING, top: 3, bottom: 3 })
             .backgroundColor(this.appearance.userBubble)
             .borderRadius({ topLeft: this.section.bubbleStart ? 18 : 0, topRight: this.section.bubbleStart ? 18 : 0,
               bottomLeft: this.section.bubbleEnd ? 18 : 0, bottomRight: this.section.bubbleEnd ? 5 : 0 })
         }.width('100%').justifyContent(FlexAlign.End)
       } else { this.body() }
-    }.width(360).padding({ left: 16, right: 16,
+    }.width(CONVERSATION_EXPORT_WIDTH).padding({ left: PAGE_PADDING, right: PAGE_PADDING,
       top: this.section.bubbleStart ? 16 : this.section.user ? 0 : 4,
       bottom: this.section.bubbleEnd ? 16 : this.section.user ? 0 : 4 })
       .backgroundColor($r('app.color.page_background'))
