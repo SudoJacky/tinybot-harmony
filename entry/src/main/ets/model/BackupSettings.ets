@@ -1,6 +1,6 @@
 import { AppData, ModelConfig, defaultConfig } from './Conversation';
 import { AssistantOptions, defaultAssistantOptions } from './AssistantOptions';
-import { builtinSkillInfo } from './BuiltinSkills';
+import { builtinSkillInfo, isRetiredBuiltinSkill } from './BuiltinSkills';
 import { defaultExtensions } from './Skills';
 
 // An existing non-default setting wins; factory defaults can be filled on a new installation.
@@ -36,7 +36,9 @@ export function mergeBackupSkills(local: AppData, restored: AppData): void {
   const defaults = defaultExtensions(), incoming = restored.extensions;
   if (incoming && local.extensions.webEnabled === defaults.webEnabled) { local.extensions.webEnabled = incoming.webEnabled; }
   if (incoming && (!local.extensions.browserPolicy || local.extensions.browserPolicy === defaults.browserPolicy)) { local.extensions.browserPolicy = incoming.browserPolicy; }
-  for (const skill of restored.extensions?.skills || []) {
+  const seeded = incoming?.seededBuiltinSkills || [];
+  for (const skill of incoming?.skills || []) {
+    if (isRetiredBuiltinSkill(skill, seeded)) { continue; }
     const index = local.extensions.skills.findIndex((item) => item.name === skill.name);
     if (index < 0) { local.extensions.skills.push(skill); }
     else {
@@ -44,5 +46,5 @@ export function mergeBackupSkills(local: AppData, restored: AppData): void {
       if (existing.enabled && builtinSkillInfo(existing)) { local.extensions.skills[index] = skill; }
     }
   }
-  local.extensions.seededBuiltinSkills = Array.from(new Set((local.extensions.seededBuiltinSkills || []).concat(restored.extensions?.seededBuiltinSkills || [])));
+  local.extensions.seededBuiltinSkills = Array.from(new Set((local.extensions.seededBuiltinSkills || []).concat(seeded)));
 }
