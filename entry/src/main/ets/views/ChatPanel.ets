@@ -77,6 +77,8 @@ interface PendingComposerAction { owner: number; threadId: string; run: () => vo
 interface HistoryPageAnchor { threadId: string; messageId: string; y: number; }
 
 const PHONE_COMPOSER_ACTION_SIZE: number = 44;
+const PHONE_COMPOSER_EDITOR_MIN_HEIGHT: number = 52;
+const COMPACT_COMPOSER_EDITOR_INSET: number = 6;
 const COMPOSER_FOOTER_CONTROL_HEIGHT: number = 36;
 const ATTACHMENT_FOLDER_WIDTH: number = 104;
 const ATTACHMENT_FOLDER_HEIGHT: number = 66;
@@ -1981,8 +1983,9 @@ export struct ChatPanel {
         .onDrop((event: DragEvent) => this.composerDrop(event))
         .placeholderColor($r('app.color.text_tertiary')).backgroundColor(Color.Transparent)
         .width('100%')
-        .constraintSize({ minHeight: this.workbench && !this.voiceMode ? (this.desktop ? 64 : 88) : this.workbench ? 44 : 52,
-          maxHeight: this.composerExpanded() ? 160 : this.workbench ? 44 : 52 }).maxLength(24000)
+        .constraintSize({ minHeight: this.workbench && !this.voiceMode ? (this.desktop ? 64 : 88) :
+          this.workbench ? 44 : PHONE_COMPOSER_EDITOR_MIN_HEIGHT,
+          maxHeight: this.composerExpanded() ? 160 : this.workbench ? 44 : PHONE_COMPOSER_EDITOR_MIN_HEIGHT }).maxLength(24000)
         .padding({ left: this.composerExpanded() ? 6 : this.workbench ? 46 : 54, right: this.composerExpanded() ? 6 : this.workbench ? 42 : 50,
           top: 10, bottom: this.composerExpanded() ? 4 : 10 }).borderRadius(0)
         .align(this.composerExpanded() ? Alignment.TopStart : Alignment.Start)
@@ -2012,6 +2015,11 @@ export struct ChatPanel {
     if (this.speechActive()) { return this.workbench ? 48 : 56; }
     if (this.composerExpanded()) { return this.workbench ? 44 : 52; }
     return this.workbench ? 46 : 54;
+  }
+
+  private composerToolbarBottomInset(): number {
+    return this.composerExpanded() ? Space.sm :
+      COMPACT_COMPOSER_EDITOR_INSET + (PHONE_COMPOSER_EDITOR_MIN_HEIGHT - PHONE_COMPOSER_ACTION_SIZE) / 2;
   }
 
   private composerBorderWidth(): number {
@@ -2062,13 +2070,13 @@ export struct ChatPanel {
           ForEach([this.thread.id], (threadId: string) => {
             this.composerEditor(threadId)
           }, (threadId: string) => threadId)
-        }.width('100%').padding({ bottom: this.composerExpanded() ? this.workbench ? 48 : 56 : 6 })
+        }.width('100%').padding({ bottom: this.composerExpanded() ? this.workbench ? 48 : 56 : COMPACT_COMPOSER_EDITOR_INSET })
           .animation({ duration: Motion.medium, curve: Motion.standard })
         if (this.voiceMode) {
           this.voiceControls()
         }
       }.width('100%')
-    }.width('100%').padding({ left: 8, right: 8, top: this.composerExpanded() ? 4 : 6 })
+    }.width('100%').padding({ left: 8, right: 8, top: this.composerExpanded() ? 4 : COMPACT_COMPOSER_EDITOR_INSET })
       .animation({ duration: Motion.medium, curve: Motion.standard })
       if (!this.voiceMode) {
       Row() {
@@ -2155,8 +2163,8 @@ export struct ChatPanel {
         }
       }.width('100%').height(this.composerToolbarHeight())
         .padding({ left: Space.sm, right: Space.sm,
-          top: this.workbench ? 0 : this.composerToolbarHeight() - PHONE_COMPOSER_ACTION_SIZE - Space.sm,
-          bottom: this.workbench && !this.composerExpanded() ? 10 : Space.sm })
+          top: this.workbench ? 0 : this.composerToolbarHeight() - PHONE_COMPOSER_ACTION_SIZE - this.composerToolbarBottomInset(),
+          bottom: this.composerToolbarBottomInset() })
         .animation({ duration: Motion.medium, curve: Motion.standard })
         .hitTestBehavior(this.composerExpanded() ? HitTestMode.Default : HitTestMode.Transparent)
       }

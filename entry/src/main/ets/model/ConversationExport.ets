@@ -20,8 +20,10 @@ export interface ConversationSection {
   bubbleStart?: boolean;
   bubbleEnd?: boolean;
   imageRatio?: number;
+  lead?: boolean;
 }
 const SECTION_CHARS = 2400;
+const MAX_LEAD_CHARS = 96;
 function addText(sections: ConversationSection[], content: string, user: boolean): void {
   for (const block of markdownBlocks(content)) {
     if (block.kind === 'table') {
@@ -125,6 +127,17 @@ export function conversationSections(thread: ThreadData, profiles: ProviderProfi
   const latest = latestPreviewIds(thread.messages.map((message): PreviewMessage => ({ id: message.id, steps: message.steps || [] })));
   for (const message of thread.messages) { addMessage(result, message, profiles, latest); }
   result.push({ kind: 'footer', text: t('AI生成内容可能有误，请仔细鉴别。'), user: false });
+  // Emphasize the first short line of assistant prose without changing its text or position.
+  const firstAnswer = result.findIndex(section => section.kind === 'role' && !section.user);
+  if (firstAnswer >= 0) {
+    for (let index = firstAnswer + 1; index < result.length && result[index].kind !== 'role'; index++) {
+      const section = result[index];
+      if (section.kind === 'text') {
+        if (section.text.length <= MAX_LEAD_CHARS) { section.lead = true; }
+        break;
+      }
+    }
+  }
   result.forEach((section: ConversationSection, index: number) => {
     if (section.user) {
       section.bubbleStart = section.kind === 'role';
