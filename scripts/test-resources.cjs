@@ -37,6 +37,7 @@ const { modelConfig } = from('model/ProviderProfiles');
 const { parseSkill, skillCatalog, validateExtensions } = from('model/Skills');
 const { seedBuiltinSkills, builtinSkillInfo } = from('model/BuiltinSkills');
 const { BUILTIN_SKILL_DOCUMENTS } = from('model/BuiltinSkillCatalog');
+const { mergeBackupSkills } = from('model/BackupSettings');
 const { parseMcpRequest, parseSkillRequest, saveSkillCandidate } = from('model/ResourceManagement');
 const { Cancellation } = from('services/Cancellation');
 const { ToolApproval } = from('services/ToolApproval');
@@ -95,22 +96,49 @@ async function main() {
     assert.equal(read.content, entry.document); assert.equal(read.kind, 'skill_instructions');
   }
   assert.ok(skillCatalog(builtins.session.snapshot().extensions.skills).includes(bundledNames[0]));
-  builtins.session.setDraft('/skill:notes-to-actions 整理这些想法'); await builtins.session.send();
+  assert.ok(!bundledNames.some(name => ['document-brief', 'web-research', 'notes-to-actions', 'data-analysis'].includes(name)));
+  const guideIndex = JSON.parse(await invoke(builtinTools, 'read_skill', { name: 'modern-web-guidance', path: 'references/index.md' }));
+  assert.match(guideIndex.content, /ui-behaviors\/animate-to-from-top-layer/);
+  builtins.session.setDraft('/skill:modern-web-guidance 改进对话框动画'); await builtins.session.send();
   assert.ok(builtins.requests.some(request => request.messages.some(message => message.role === 'user' &&
-    message.content.includes('<skill name="notes-to-actions">') && message.content.includes('整理这些想法'))));
-  assert.equal(await builtins.session.changeSkill('web-research'), true);
-  assert.equal(await builtins.session.changeSkill('data-analysis', true), true);
-  assert.equal(await builtins.session.saveSkill('document-brief', document('my-brief', 'My edited instructions'), []), true);
+    message.content.includes('<skill name="modern-web-guidance">') && message.content.includes('改进对话框动画'))));
+  assert.equal(await builtins.session.changeSkill('modern-web-guidance'), true);
+  assert.equal(await builtins.session.changeSkill('sketch-to-prototype', true), true);
+  assert.equal(await builtins.session.saveSkill('image-generation', document('my-image', 'My edited instructions'), []), true);
   const restoredBuiltins = await fixture(await builtins.repo.load());
   const restored = restoredBuiltins.session.snapshot().extensions.skills;
-  assert.equal(restored.find(item => item.name === 'web-research').enabled, false);
-  assert.ok(!restored.some(item => ['data-analysis', 'document-brief'].includes(item.name)));
-  assert.equal(restored.find(item => item.name === 'my-brief').document, document('my-brief', 'My edited instructions'));
-  await assert.rejects(() => invoke(new SkillTools(restored), 'read_skill', { name: 'web-research' }));
+  assert.equal(restored.find(item => item.name === 'modern-web-guidance').enabled, false);
+  assert.ok(!restored.some(item => ['sketch-to-prototype', 'image-generation'].includes(item.name)));
+  assert.equal(restored.find(item => item.name === 'my-image').document, document('my-image', 'My edited instructions'));
+  await assert.rejects(() => invoke(new SkillTools(restored), 'read_skill', { name: 'modern-web-guidance' }));
   console.log('PASS bundled Skills install durably, enter the catalog/read path and explicit turns, and respect edit/rename/disable/delete after restart');
 
+  const retiredNotes = parseSkill(fs.readFileSync(path.join(__dirname, 'fixtures/retired-notes-to-actions.md'), 'utf8')
+    .replace(/\r\n/g, '\n'));
+  const upgrade = seed();
+  upgrade.extensions = { webEnabled: true, skills: [retiredNotes], seededBuiltinSkills: [retiredNotes.name, ...bundledNames] };
+  const removed = await fixture(upgrade);
+  assert.equal((await removed.repo.load()).extensions.skills.length, 0, 'Removal is persisted even on an already-seeded install');
+  const fresh = await builtins.repo.load();
+  mergeBackupSkills(fresh, upgrade);
+  assert.ok(!fresh.extensions.skills.some(item => item.name === retiredNotes.name), 'Backup and device merges skip retired defaults');
+  for (const personal of [
+    parseSkill(retiredNotes.document.replace('随口说', '口述过')),
+    { ...retiredNotes, files: [{ path: 'personal.md', content: 'My reference' }] },
+    { ...retiredNotes, source: { url: 'https://example.com/SKILL.md', installedAt: 1, modified: false } }
+  ]) {
+    const personalData = seed();
+    personalData.extensions = { ...upgrade.extensions, skills: [personal] };
+    const preserved = await fixture(personalData);
+    assert.deepEqual(Array.from((await preserved.repo.load()).extensions.skills, item => JSON.stringify(item)), [JSON.stringify(personal)]);
+    const target = await builtins.repo.load();
+    mergeBackupSkills(target, personalData);
+    assert.equal(target.extensions.skills.find(item => item.name === personal.name), personal);
+  }
+  console.log('PASS startup and backup merge remove an obsolete shipped copy and retain personalized copies');
+
   const widgetNames = ['widget', 'widget-design', 'canvas'];
-  const oldEntries = BUILTIN_SKILL_DOCUMENTS.filter(entry => !widgetNames.includes(entry.name));
+  const oldEntries = BUILTIN_SKILL_DOCUMENTS.filter(entry => !widgetNames.includes(entry.name) && entry.name !== 'modern-web-guidance');
   const upgradeData = seed();
   upgradeData.extensions = { webEnabled: true, skills: oldEntries.map(entry => ({ ...parseSkill(entry.document), files: entry.files })),
     seededBuiltinSkills: oldEntries.map(entry => entry.name) };
@@ -118,6 +146,7 @@ async function main() {
   const upgraded = await fixture(upgradeData), installed = upgraded.session.snapshot().extensions.skills;
   assert.equal(installed.length, BUILTIN_SKILL_DOCUMENTS.length);
   assert.equal(installed[0].enabled, false, 'Installing new Skills preserves existing preferences');
+  assert.equal(installed.find(item => item.name === 'modern-web-guidance').enabled, true);
   const widgetTools = new SkillTools(installed), discovery = skillCatalog(installed);
   for (const name of widgetNames) {
     const skill = installed.find(item => item.name === name);
@@ -155,10 +184,10 @@ async function main() {
   assert.equal(wallet.content,from('model/BalancePanelTemplate').BALANCE_PANEL_HTML,'Runtime wallet and Skill reference share one source');
   console.log('PASS upgrade installs authoring Skills, preserves preferences and progressively reads all linked references, templates and catalog routes');
 
-  const collision = parseSkill(document('web-research', 'User instructions')); collision.enabled = false;
+  const collision = parseSkill(document('modern-web-guidance', 'User instructions')); collision.enabled = false;
   const legacy = { webEnabled: false, browserPolicy: 'disabled', skills: [collision] };
   assert.equal(seedBuiltinSkills(legacy), true); validateExtensions(legacy);
-  assert.equal(legacy.skills.find(item => item.name === 'web-research'), collision);
+  assert.equal(legacy.skills.find(item => item.name === 'modern-web-guidance'), collision);
   assert.equal(collision.enabled, false); assert.equal(builtinSkillInfo(collision), undefined);
   assert.equal(legacy.webEnabled, false); assert.equal(legacy.browserPolicy, 'disabled');
   assert.equal(seedBuiltinSkills(legacy), false);

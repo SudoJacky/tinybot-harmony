@@ -21,21 +21,21 @@ for (const text of ['$20', 'US$20', 'cost$20', '$20.50', 'abc$notes', '\\$notes'
 assert.deepEqual(plain(skillQuery('$')), { start: 0, end: 1, text: '' });
 assert.equal(skillQuery('整理\n$随手').text, '随手');
 assert.equal(skillQuery('$', 99), undefined);
-const mid = '帮我 $notes-to-actions 整理这段记录', query = skillQuery(mid, '帮我 $notes'.length);
-assert.equal(mid.slice(query.start, query.end), '$notes-to-actions');
-const selected = skillDraft(mid, 'notes-to-actions', query);
-assert.equal(selected.text, '/skill:notes-to-actions 帮我 整理这段记录');
-assert.equal(selected.text.slice(selected.caret), '整理这段记录');
-assert.equal(skillDraft('$data', 'data-analysis', skillQuery('$data')).text, '/skill:data-analysis ');
-const replace = '/skill:web-research 原有内容 $随手 保留后文';
-assert.equal(skillDraft(replace, 'notes-to-actions', skillQuery(replace, replace.indexOf(' 保留后文'))).text,
-  '/skill:notes-to-actions 原有内容 保留后文');
-assert.equal(skillDraft('/skill:web-research 原有内容', 'data-analysis').text, '/skill:data-analysis 原有内容');
+const mid = '帮我 $modern-web-guidance 改进这个网页', query = skillQuery(mid, '帮我 $modern'.length);
+assert.equal(mid.slice(query.start, query.end), '$modern-web-guidance');
+const selected = skillDraft(mid, 'modern-web-guidance', query);
+assert.equal(selected.text, '/skill:modern-web-guidance 帮我 改进这个网页');
+assert.equal(selected.text.slice(selected.caret), '改进这个网页');
+assert.equal(skillDraft('$modern', 'modern-web-guidance', skillQuery('$modern')).text, '/skill:modern-web-guidance ');
+const replace = '/skill:widget 原有内容 $随手 保留后文';
+assert.equal(skillDraft(replace, 'custom-notes', skillQuery(replace, replace.indexOf(' 保留后文'))).text,
+  '/skill:custom-notes 原有内容 保留后文');
+assert.equal(skillDraft('/skill:widget 原有内容', 'modern-web-guidance').text, '/skill:modern-web-guidance 原有内容');
 const manual = parseSkill('---\nname: custom-notes\ndescription: 自定义随手记\ndisable-model-invocation: true\n---\nCustom instructions.');
 settings.skills.push(manual);
-assert.equal(matchingSkills(settings.skills, '随手').length, 2);
-assert.equal(matchingSkills(settings.skills, 'DATA-ANALYSIS')[0].name, 'data-analysis');
-manual.enabled = false; assert.equal(matchingSkills(settings.skills, '随手').length, 1);
+assert.equal(matchingSkills(settings.skills, '随手').length, 1);
+assert.equal(matchingSkills(settings.skills, 'MODERN WEB GUIDANCE')[0].name, 'modern-web-guidance');
+manual.enabled = false; assert.equal(matchingSkills(settings.skills, '随手').length, 0);
 assert.equal(matchingSkills(settings.skills, 'nothing-matches').length, 0);
 manual.enabled = true;
 console.log('PASS cursor-aware $ queries, currency boundaries, Chinese/name/description search, enabled/manual-only Skills and command replacement preserve surrounding text');
@@ -59,7 +59,7 @@ vm.runInNewContext(compile(`${helper.getText(tree)}; class Model { ${use} } expo
 class Panel { ${['speechActive','currentSkillQuery','skillSuggested','skillMatches','selectSkill','queueComposerFocus',
   'composerActionCurrent','skillSuggestions'].map(method).join('\n')} } exports.Panel = Panel;`), scope);
 const app = new scope.exports.Model(); let mutable = true;
-Object.assign(app, { extensions: settings, active: { id: 'chat', archived: false }, draft: '$随手', busy: false, saveError: '',
+Object.assign(app, { extensions: settings, active: { id: 'chat', archived: false }, draft: '$modern', busy: false, saveError: '',
   requireSession: () => ({ canMutate: mutable }), setDraft(text) { this.draft = text; }, send() { throw Error('Picker must not send'); } });
 const panel = new scope.exports.Panel();
 Object.assign(panel, { app, thread: { id: 'chat', archived: false }, appearance: {}, voiceMode: false, speech: { phase: 'idle' },
@@ -78,11 +78,11 @@ panel.speech.phase = 'listening'; assert.equal(panel.skillSuggested(), false); p
 panel.composerSelectionStart = 0; panel.composerSelectionEnd = 2; assert.equal(panel.skillSuggested(), false);
 panel.composerSelectionStart = -1; panel.composerSelectionEnd = -1;
 panel.skillSuggestions();
-const row = nodes.find(node => node.id === 'mention-skill-notes-to-actions'); assert.ok(row?.onClick);
-mutable = false; row.onClick(); assert.equal(app.draft, '$随手'); assert.equal(frames.length, 0); mutable = true;
-row.onClick(); assert.equal(app.draft, '/skill:notes-to-actions '); assert.equal(focus.length, 0);
+const row = nodes.find(node => node.id === 'mention-skill-modern-web-guidance'); assert.ok(row?.onClick);
+mutable = false; row.onClick(); assert.equal(app.draft, '$modern'); assert.equal(frames.length, 0); mutable = true;
+row.onClick(); assert.equal(app.draft, '/skill:modern-web-guidance '); assert.equal(focus.length, 0);
 frames.shift().onIdle(); assert.deepEqual(focus, ['composer']); assert.equal(caret[0], app.draft.length);
 assert.equal(panel.skillSuggested(), false);
-app.draft = '$'; panel.composerSelectionStart = -1; panel.composerSelectionEnd = -1; panel.selectSkill('data-analysis');
+app.draft = '$'; panel.composerSelectionStart = -1; panel.composerSelectionEnd = -1; panel.selectSkill('widget');
 panel.thread.id = 'different-chat'; frames.shift().onIdle(); assert.equal(focus.length, 1);
 console.log('PASS emitted picker rows use the guarded view model, never send, focus after rendering and suppress stale-thread focus');
