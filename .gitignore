@@ -43,4 +43,6 @@
 /.playwright-cli/
 /screenshots/
 /.cache/
+/entry/libs/*/libqemu-system-aarch64-tci.so
+/entry/src/main/resources/rawfile/linux/
 /.kimi_extract/

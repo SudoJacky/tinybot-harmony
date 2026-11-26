@@ -29,7 +29,8 @@ export function toolTitle(name: string): string {
     'write_file': t('写入文件'), 'edit_file': t('编辑文件'), 'generate_image': t('生成图片'), 'image_gen': t('生成图片'),
     'view_image': t('查看图片'),
     'tool_search': t('查找可用工具'), 'mcp_call': t('调用远程工具'), 'mcp_list_tools': t('查看远程工具'), 'mcp_search_tools': t('搜索远程工具'),
-    'execute_code': t('执行代码'), 'run_job': t('执行代码'), 'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
+    'execute_code': t('执行代码'), 'run_job': t('执行代码'), 'run_linux': t('运行 Linux 脚本'),
+    'orchestrate': t('编排工具'), 'publish_data_view': t('生成图表'),
     'update_plan': t('更新计划'), 'request_user_input': t('请你补充信息'),
     'list_skills': t('查看 Skills'), 'skill_manage': t('管理 Skills'), 'mcp_manage': t('管理 MCP 服务'),
     'memory': t('维护长期记忆')

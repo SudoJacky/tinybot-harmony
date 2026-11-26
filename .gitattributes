@@ -1,2 +1,5 @@
 *.ets linguist-language=ArkTS
+scripts/linux-runtime/*.sh text eol=lf
+scripts/linux-runtime/guest-init text eol=lf
+scripts/linux-runtime/*.py text eol=lf
 entry/src/main/resources/rawfile/mermaid/mermaid.min.js binary linguist-vendored

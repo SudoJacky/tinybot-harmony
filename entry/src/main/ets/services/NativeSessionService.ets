@@ -29,6 +29,7 @@ import { prepareNativeMcp } from './NativeResourceSetup';
 import { McpClient } from './McpClient';
 import { SkillInstaller } from './SkillInstaller';
 import { CodeExecutionTools } from './CodeExecutionTools';
+import { LinuxTools } from './LinuxTools';
 import { NativeCodeExecutor } from './NativeCodeExecutor';
 import { WorkspaceCode } from './WorkspaceCode';
 import { OfficeLayoutReview } from './OfficeLayoutReview';
@@ -159,6 +160,7 @@ export class NativeSessionResources implements SessionResources {
       return this.officeLibrary;
     }, (encoded, cancellation) => OfficeLayoutReview.check(encoded, cancellation)) : undefined;
     groups.push(new CodeExecutionTools(new NativeCodeExecutor(), workspaceCode));
+    if (context && LinuxTools.available()) { groups.push(new LinuxTools(context, files)); }
     groups.push(new LifePanelTools(this.lifePanels, workspaceId || id, id, files, this.lifeBoards,
       (page, storage, context, cancellation, options) => WebUiPreflight.validatePanel(page, storage, context, cancellation, options)));
     groups.push(new MailTools());

@@ -5,6 +5,9 @@
 #include <mutex>
 #include <limits>
 void InstallOrchestrator(napi_env env, napi_value exports);
+#ifdef TINYBOT_LINUX_RUNTIME
+void InstallLinux(napi_env env, napi_value exports);
+#endif
 
 namespace {
 struct Job {
@@ -114,6 +117,9 @@ napi_value Init(napi_env env, napi_value exports)
     };
     napi_define_properties(env, exports, 2, properties);
     InstallOrchestrator(env, exports);
+#ifdef TINYBOT_LINUX_RUNTIME
+    InstallLinux(env, exports);
+#endif
     return exports;
 }
 napi_module module = {1, 0, nullptr, Init, "tinybot_sandbox", nullptr, {0}};

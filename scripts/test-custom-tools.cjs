@@ -53,8 +53,9 @@ function fixture(data = seed()) {
   f.calls = calls; return f;
 }
 async function main() {
-  assert.equal(all.length, 65); assert.equal(new Set(all).size, 65); assert.equal(BASIC_FILE_TOOLS.length, 6);
-  assert.equal(optional.length, 55);
+  assert.equal(all.length, 66); assert.equal(new Set(all).size, 66); assert.equal(BASIC_FILE_TOOLS.length, 6);
+  assert.equal(optional.length, 56);
+  assert.equal(toolEnabled('run_linux', { agentMode: 'custom', disabledTools: ['execute_code'] }), false);
   for (const name of ['list_mail_accounts', 'search_mail', 'read_mail']) assert.ok(all.includes(name));
   assert.ok(!all.includes('list_mini_apps')); assert.ok(!all.includes('publish_mini_app'));
   const retiredApps = seed(); retiredApps.productivity.options.miniAppsEnabled = true;
@@ -157,7 +158,8 @@ async function main() {
   for (const name of BASIC_FILE_TOOLS) await selected.execute(call(name), new Cancellation());
   assert.deepEqual(effects, Array.from(BASIC_FILE_TOOLS));
   const readOnly = new RuleTools(selected, true);
-  for (const name of ['memory','skill_manage']) assert.ok(!readOnly.definitions().some(tool => tool.function.name===name));
+  for (const name of ['memory','skill_manage','run_linux']) assert.ok(!readOnly.definitions().some(tool => tool.function.name===name));
+  await assert.rejects(readOnly.execute(call('run_linux'), new Cancellation()), error => error.code === 'PERMISSION_DENIED');
   await assert.rejects(readOnly.execute(call('write_file'), new Cancellation()), error => error.code === 'PERMISSION_DENIED');
   assert.equal(toolEnabled('team_recruit', { agentMode: 'custom', disabledTools: ['team_complete_task'] }), false);
   assert.equal(toolEnabled('team_resume', { agentMode: 'custom', disabledTools: ['team_complete_task'] }), false);

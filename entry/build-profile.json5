@@ -19,6 +19,11 @@
   "buildOptionSet": [
     {
       "name": "release",
+      "nativeLib": {
+        "filter": {
+          "excludes": ["**/x86_64/libqemu-system-aarch64-tci.so"]
+        }
+      },
       "externalNativeOptions": {
         "abiFilters": ["arm64-v8a"],
         // Keep native symbols for crash diagnosis; packaged libraries are stripped.
