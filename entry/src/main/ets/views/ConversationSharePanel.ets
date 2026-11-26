@@ -4,19 +4,23 @@ import { LogError } from '../model/DiagnosticLog';
 import { util } from '@kit.ArkTS';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { BottomBar, Banner } from '../common/Widgets';
-import { Btn, Space } from '../common/Theme';
+import { BottomBar, Banner, Segmented } from '../common/Widgets';
+import { Btn, Motion, Radius, Space } from '../common/Theme';
 import { MessageData } from '../model/Conversation';
 import { ConversationShareData, selectedConversation, conversationMarkdown, conversationFileName, shareMessageText } from '../model/ConversationShare';
 import { ConversationSection, conversationSections } from '../model/ConversationExport';
+import { ConversationImageStyle, conversationImageTheme } from '../model/ConversationImageStyle';
 import { exportMetadata, stampMarkdown } from '../model/ExportMetadata';
 import { t } from '../model/I18n';
 import { writeBytes } from '../services/Attachments';
 import { conversationImage } from '../services/ConversationImageExport';
 import { hostedPrivacy } from '../services/HostedPrivacy';
 import { exportFile, shareFile } from '../services/NativeActions';
-import { CONVERSATION_EXPORT_WIDTH, ConversationExportSection } from './ConversationExportSection';
+import { CONVERSATION_EXPORT_WIDTH, ConversationExportSection, loadEditorialTitleFonts } from './ConversationExportSection';
 import { MarkdownView } from './MarkdownView';
+
+const STYLE_EXAMPLE_DURATION = 3200;
+const STYLE_EXAMPLE_SCALE = 0.72;
 
 @Component
 export struct ConversationSharePanel {
@@ -27,14 +31,20 @@ export struct ConversationSharePanel {
   @State private error: string = '';
   @State private previewPath: string = '';
   @State private previewRatio: number = 1;
+  @State private imageStyle: ConversationImageStyle = ConversationImageStyle.Editorial;
+  @State private styleExampleVisible: boolean = false;
+  @State private styleExampleHeight: number = 250;
+  private styleExampleTimer: number = -1;
   private mounted: boolean = false;
 
   aboutToAppear(): void {
+    loadEditorialTitleFonts();
     this.mounted = true;
     this.selectedIds = this.data.thread.messages.map((message) => message.id);
   }
   aboutToDisappear(): void {
     this.mounted = false;
+    this.hideStyleExample();
     const path = this.previewPath;
     this.previewPath = '';
     this.removeTemporary(path).catch((error: Error) => Diagnostics.log('warn', 'export', 'cleanup_failed', undefined, error));
@@ -55,13 +65,58 @@ export struct ConversationSharePanel {
     if (this.busy) { return; }
     this.selectedIds = this.selectedIds.length === this.data.thread.messages.length ? [] : this.data.thread.messages.map((message) => message.id);
   }
+  private selectImageStyle(style: ConversationImageStyle): void {
+    if (this.busy) { return; }
+    if (this.styleExampleTimer !== -1) { clearTimeout(this.styleExampleTimer); }
+    this.imageStyle = style;
+    this.styleExampleVisible = true;
+    this.styleExampleTimer = setTimeout(() => this.hideStyleExample(), STYLE_EXAMPLE_DURATION);
+  }
+  private hideStyleExample(): void {
+    if (this.styleExampleTimer !== -1) {
+      clearTimeout(this.styleExampleTimer);
+      this.styleExampleTimer = -1;
+    }
+    this.styleExampleVisible = false;
+  }
   private context(): common.UIAbilityContext { return this.getUIContext().getHostContext() as common.UIAbilityContext; }
 
   @Builder
-  imageSection(section: ConversationSection) { ConversationExportSection({ section: section }) }
+  imageSection(section: ConversationSection, style: ConversationImageStyle) {
+    ConversationExportSection({ section: section, style: style })
+  }
+
+  private styleExampleSections(): ConversationSection[] {
+    return [
+      { kind: 'title', text: 'Lorem ipsum', user: false },
+      { kind: 'role', text: t('用户'), user: true, bubbleStart: true },
+      { kind: 'text', text: 'Lorem ipsum dolor sit amet.', user: true, bubbleEnd: true },
+      { kind: 'role', text: 'Tinybot', user: false },
+      { kind: 'text', text: 'Consectetur adipiscing elit.', user: false, lead: true },
+      { kind: 'text', text: 'Sed do eiusmod tempor incididunt.', user: false }
+    ];
+  }
+
+  @Builder
+  styleExample(style: ConversationImageStyle) {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column() {
+        ForEach(this.styleExampleSections(), (section: ConversationSection) => {
+          this.imageSection(section, style)
+        }, (_section: ConversationSection, index: number) => String(index))
+      }.width(CONVERSATION_EXPORT_WIDTH).height(LayoutPolicy.fixAtIdealSize)
+        .padding({ bottom: 12 }).backgroundColor(conversationImageTheme(style).page)
+        .onSizeChange((_oldSize: SizeOptions, size: SizeOptions) => { this.styleExampleHeight = Number(size.height); })
+        .scale({ x: STYLE_EXAMPLE_SCALE, y: STYLE_EXAMPLE_SCALE, centerX: 0, centerY: 0 })
+        .position({ x: 0, y: 0 })
+    }.width(CONVERSATION_EXPORT_WIDTH * STYLE_EXAMPLE_SCALE).height(this.styleExampleHeight * STYLE_EXAMPLE_SCALE)
+      .backgroundColor(conversationImageTheme(style).page).borderRadius(Radius.md).clip(true)
+      .border({ width: 0.5, color: $r('app.color.divider') })
+  }
 
   private async generateImage(): Promise<void> {
     if (this.busy || !this.selectedIds.length) { return; }
+    this.hideStyleExample();
     this.busy = true; this.error = '';
     let temporary = '';
     try {
@@ -69,11 +124,12 @@ export struct ConversationSharePanel {
       const thread = selectedConversation(this.data.thread, this.selectedIds);
       const context = this.context();
       const ui = this.getUIContext();
+      const style = this.imageStyle;
       const result = await conversationImage(context, conversationSections(thread, this.data.profiles), (section: ConversationSection) => {
         this.ensureActive();
-        return ui.getComponentSnapshot().createFromBuilder(() => { this.imageSection(section); }, 0, true,
+        return ui.getComponentSnapshot().createFromBuilder(() => { this.imageSection(section, style); }, 0, true,
           { scale: 720 / ui.vp2px(CONVERSATION_EXPORT_WIDTH), waitUntilRenderFinished: true });
-      }, context.resourceManager.getColorSync($r('app.color.page_background').id));
+      }, conversationImageTheme(style).page);
       temporary = result.path;
       this.ensureActive();
       this.previewRatio = result.width / result.height;
@@ -118,6 +174,7 @@ export struct ConversationSharePanel {
   }
   private async outputMarkdown(share: boolean): Promise<void> {
     if (this.busy || !this.selectedIds.length) { return; }
+    this.hideStyleExample();
     this.busy = true; this.error = '';
     let temporary = '';
     try {
@@ -158,7 +215,7 @@ export struct ConversationSharePanel {
   messageRow(message: MessageData) {
     Row({ space: 10 }) {
       Checkbox().select(this.selectedIds.includes(message.id)).selectedColor($r('app.color.accent'))
-        .width(24).height(24).margin({ top: Space.md })
+        .width(24).height(24).margin({ left: Space.xs, right: Space.xs, top: Space.md })
         .enabled(!this.busy).id('share-message-' + message.id)
         .accessibilityText(t('选择消息：{0}', [
           (shareMessageText(message).trim() || message.attachments?.[0]?.name || t('附件')).slice(0, 60)
@@ -190,7 +247,7 @@ export struct ConversationSharePanel {
           Column({ space: 8 }) {
             Row({ space: 10 }) {
               Checkbox().select(this.selectedIds.length === this.data.thread.messages.length)
-                .width(24).height(24).margin(0)
+                .width(24).height(24).margin({ left: Space.xs, right: Space.xs, top: 0, bottom: 0 })
                 .selectedColor($r('app.color.accent')).enabled(!this.busy).id('share-select-all')
                 .accessibilityText(t('全选')).onClick(() => this.selectAll())
               Text(t('全选')).fontSize(15).fontColor($r('app.color.text_primary')).height(44).align(Alignment.Start)
@@ -198,11 +255,34 @@ export struct ConversationSharePanel {
               Blank()
               Text(t('已选 {0} 条消息', [String(this.selectedIds.length)])).fontSize(13).fontColor($r('app.color.text_secondary'))
             }.width('100%')
-            List({ space: 16 }) {
-              ForEach(this.data.thread.messages, (message: MessageData) => {
-                ListItem() { this.messageRow(message) }
-              }, (message: MessageData) => message.id)
-            }.layoutWeight(1).width('100%').id('share-message-list')
+            Stack({ alignContent: Alignment.Bottom }) {
+              List({ space: 16 }) {
+                ForEach(this.data.thread.messages, (message: MessageData) => {
+                  ListItem() { this.messageRow(message) }
+                }, (message: MessageData) => message.id)
+              }.width('100%').height('100%').id('share-message-list')
+              if (this.styleExampleVisible) {
+                Row() {
+                  ForEach([this.imageStyle], (style: ConversationImageStyle) => {
+                    this.styleExample(style)
+                  }, (style: ConversationImageStyle) => String(style))
+                }.margin({ bottom: Space.sm }).borderRadius(Radius.md).shadow(ShadowStyle.OUTER_DEFAULT_MD)
+                  .id('share-image-style-example').hitTestBehavior(HitTestMode.None)
+                  .accessibilityLevel('no-hide-descendants')
+                  .transition(this.appearance.effectStrength > 0 ?
+                    TransitionEffect.OPACITY.animation({ duration: Motion.fast, curve: Motion.standard }) :
+                    TransitionEffect.IDENTITY)
+              }
+            }.layoutWeight(1).width('100%')
+            Column({ space: 5 }) {
+              Text(t('图片风格')).fontFamily(this.appearance.fontFamily).fontSize(13)
+                .fontColor($r('app.color.text_secondary'))
+              Segmented({
+                options: [t('杂志版'), t('深色海报'), t('对话实录')], selected: this.imageStyle, controlHeight: 48,
+                compIdPrefix: 'share-image-style', accentThumb: true,
+                onSelect: (index: number) => this.selectImageStyle(index as ConversationImageStyle)
+              })
+            }.width('100%').alignItems(HorizontalAlign.Start).padding({ top: 4, bottom: 4 })
           }.layoutWeight(1).width('100%').padding({ left: Space.page, right: Space.page })
         }
         if (this.error) { Banner({ text: this.error }) }

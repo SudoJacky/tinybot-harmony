@@ -23,23 +23,32 @@ assert.ok(fs.statSync(emitted).mtimeMs >= fs.statSync(source).mtimeMs, 'Build Co
 const tree = ts.createSourceFile(emitted, fs.readFileSync(emitted, 'utf8'), ts.ScriptTarget.Latest, true);
 const component = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'ConversationSharePanel');
 const names = ['aboutToAppear', 'aboutToDisappear', 'removeTemporary', 'ensureActive', 'select', 'selectAll', 'context',
-  'generateImage', 'reselect', 'outputImage', 'outputMarkdown'];
+  'selectImageStyle', 'hideStyleExample', 'generateImage', 'reselect', 'outputImage', 'outputMarkdown'];
 const methods = names.map(name => component.members.find(node => node.name?.getText(tree) === name).getText(tree)).join('\n');
 const files = new Map(), outputs = [], privacy = { allowed: true };
+const exampleTimers = new Map();
+let nextExampleTimer = 0;
 const diagnosticLogs = [], { Diagnostics } = load('Diagnostics');
+const { ConversationImageStyle, conversationImageTheme } = load('ConversationImageStyle');
 Diagnostics.configureLogSink(data => diagnosticLogs.push(data));
-let imageCalls = 0, resolveImage, deferImage = false, failOutput = false, failCleanup = false;
+let imageCalls = 0, imageBackground, resolveImage, deferImage = false, failOutput = false, failCleanup = false;
 const globals = { exports: {}, console, t, Diagnostics, $r: () => ({ id: 1 }), hostedPrivacy: privacy,
   ...load('ConversationShare'), ...load('ConversationExport'), ...load('ExportMetadata'),
+  conversationImageTheme, CONVERSATION_EXPORT_WIDTH: 360, STYLE_EXAMPLE_DURATION: 3200,
+  loadEditorialTitleFonts: () => {},
+  setTimeout: callback => { const id = ++nextExampleTimer; exampleTimers.set(id, callback); return id; },
+  clearTimeout: id => exampleTimers.delete(id),
   fs: { access: async p => files.has(p), unlink: async p => {
     if (failCleanup) throw Object.assign(Error('unlink PRIVATE_CACHE_PATH'), { code: 13900005 });
     files.delete(p);
   } },
   util: { generateRandomUUID: () => 'test', TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } },
   writeBytes: async (p, bytes) => files.set(p, Buffer.from(bytes)),
-  conversationImage: async (_ctx, sections) => {
+  conversationImage: async (_ctx, sections, capture, background) => {
     imageCalls++;
     if (deferImage) await new Promise(resolve => { resolveImage = resolve; });
+    for (const section of sections) await capture(section);
+    imageBackground = background;
     files.set('preview.png', sections.map(s => s.text).join('\n'));
     return { path: 'preview.png', width: 720, height: 1440 };
   },
@@ -54,15 +63,37 @@ function panel() {
   Object.assign(view, { data: { thread: { title: 'Selected', messages: [
     { id: 'u', role: 'user', content: 'SECRET omitted user text' },
     { id: 'a', role: 'assistant', content: 'Included answer' }
-  ] }, profiles: [] }, busy: false, error: '', previewPath: '', selectedIds: [] });
-  view.getUIContext = () => ({ getHostContext: () => ({ cacheDir: 'cache', resourceManager: { getColorSync: () => 0 } }) });
+  ] }, profiles: [] }, busy: false, error: '', previewPath: '', selectedIds: [],
+    imageStyle: ConversationImageStyle.Editorial, styleExampleVisible: false, styleExampleTimer: -1, capturedStyles: [] });
+  view.getUIContext = () => ({
+    getHostContext: () => ({ cacheDir: 'cache' }), vp2px: value => value,
+    getComponentSnapshot: () => ({ createFromBuilder: render => render() })
+  });
+  view.imageSection = (_section, style) => view.capturedStyles.push(style);
   view.aboutToAppear(); return view;
 }
 (async () => {
+  const example = panel();
+  example.selectImageStyle(ConversationImageStyle.Editorial);
+  assert.equal(example.styleExampleVisible, true, 'tapping the selected style also shows its example');
+  const initialTimer = example.styleExampleTimer;
+  example.selectImageStyle(ConversationImageStyle.Poster);
+  assert.equal(example.imageStyle, ConversationImageStyle.Poster);
+  assert.ok(!exampleTimers.has(initialTimer), 'a new style restarts the example timeout');
+  exampleTimers.get(example.styleExampleTimer)();
+  assert.equal(example.styleExampleVisible, false);
+  example.selectImageStyle(ConversationImageStyle.Transcript);
+  example.aboutToDisappear();
+  assert.equal(example.styleExampleVisible, false);
+  assert.equal(exampleTimers.size, 0, 'leaving clears the example timer');
+
   const view = panel(); view.select('u', false);
   assert.equal(view.selectedIds.join(), 'a', 'deselecting one retains the other');
   await view.generateImage();
   assert.equal(view.previewPath, 'preview.png'); assert.equal(view.previewRatio, .5);
+  assert.ok(view.capturedStyles.length > 0);
+  assert.deepEqual([...new Set(view.capturedStyles)], [ConversationImageStyle.Editorial]);
+  assert.equal(imageBackground, conversationImageTheme(ConversationImageStyle.Editorial).page);
   assert.equal(outputs.length, 0, 'generation previews without a save/share sheet');
   assert.ok(!files.get(view.previewPath).includes('SECRET'));
   await view.outputImage(false); await view.outputImage(true);
@@ -74,6 +105,20 @@ function panel() {
   assert.equal(diagnosticLogs.at(-1).fields.format, 'image'); assert.equal(diagnosticLogs.at(-1).fields.errorCode, 28);
   assert.equal(view.error, 'disk full'); assert.equal(view.busy, false); assert.ok(files.has(view.previewPath));
   await view.reselect(); assert.ok(!files.has('preview.png'));
+  for (const style of [ConversationImageStyle.Poster, ConversationImageStyle.Transcript]) {
+    view.selectImageStyle(style);
+    view.capturedStyles.length = 0;
+    const generation = view.generateImage();
+    assert.equal(view.styleExampleVisible, false, 'generation closes the placeholder example');
+    view.selectImageStyle(ConversationImageStyle.Editorial);
+    await generation;
+    assert.equal(view.imageStyle, style, 'style stays selected during generation');
+    assert.ok(view.capturedStyles.length > 0);
+    assert.deepEqual([...new Set(view.capturedStyles)], [style]);
+    assert.equal(imageBackground, conversationImageTheme(style).page);
+    assert.ok(!files.get(view.previewPath).includes('SECRET'));
+    await view.reselect();
+  }
   await view.outputMarkdown(false); await view.outputMarkdown(true);
   for (const output of outputs.slice(2)) {
     assert.ok(output.name.endsWith('.md'));
@@ -104,5 +149,5 @@ function panel() {
   assert.equal(diagnosticLogs.at(-1).fields.errorCode, 13900005);
   assert.ok(!JSON.stringify(diagnosticLogs).includes('PRIVATE_CACHE_PATH'));
   files.clear();
-  console.log('PASS selection, preview, save/share bytes, Markdown scope, failures, duplicate taps, cleanup and privacy revocation');
+  console.log('PASS selection, three image styles, example timing, preview, save/share bytes, Markdown scope, failures, duplicate taps, cleanup and privacy revocation');
 })().catch(error => { console.error(error); process.exitCode = 1; });
