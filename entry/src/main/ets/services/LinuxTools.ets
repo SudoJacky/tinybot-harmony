@@ -1,18 +1,14 @@
 import { common } from '@kit.AbilityKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
-import { EmbeddedLinux } from './EmbeddedLinux';
 import { util } from '@kit.ArkTS';
-import { fileIo as fs } from '@kit.CoreFileKit';
-import native from 'libtinybot_sandbox.so';
 import { ToolCall, ToolDefinition } from '../model/Agent';
 import { ToolFailure, ToolResultError, parseToolArguments } from '../model/ToolFailure';
 import { AgentTools, ToolInvocationContext } from './AgentLoop';
 import { Cancellation } from './Cancellation';
-import { readBounded, writeBytes } from './FileBytes';
+import { LINUX_EXCHANGE_HALF, linuxRuntime } from './LinuxRuntime';
 import { FileJobWorkspace } from './WorkspaceFiles';
 import { workspaceRelativePath } from './WorkspaceTools';
 
-const HALF = 2 * 1024 * 1024;
+const HALF = LINUX_EXCHANGE_HALF;
 const FILE_LIMIT = 1024 * 1024;
 interface LinuxArguments { language: string; source: string; inputPath?: string; outputPath?: string; }
 interface GuestRequest { language: string; source: string; collect: boolean; input?: string; }
@@ -20,12 +16,10 @@ interface GuestResponse { exitCode: number; stdout: string; stderr: string; trun
 interface LinuxReceipt { exitCode: number; stdout: string; stderr: string; truncated: boolean; outputPath?: string; bytes?: number; }
 
 export class LinuxTools implements AgentTools {
-  private static busy: boolean = false;
-  private static phoneVm: EmbeddedLinux = new EmbeddedLinux();
   private context: common.Context;
   private files: FileJobWorkspace;
   constructor(context: common.Context, files: FileJobWorkspace) { this.context = context; this.files = files; }
-  static available(): boolean { return typeof native.startLinux === 'function'; }
+  static available(): boolean { return linuxRuntime.available; }
   definitions(): ToolDefinition[] {
     return [{ type: 'function', executionMode: 'sequential', function: { name: 'run_linux',
       description: 'Run shell or Python in a fresh offline ARM64 Alpine guest. Python sqlite3 and the sqlite3 CLI are installed. ' +
@@ -58,14 +52,7 @@ export class LinuxTools implements AgentTools {
     }
     const input = args.inputPath === undefined ? undefined : workspaceRelativePath(args.inputPath, false);
     const output = args.outputPath === undefined ? undefined : workspaceRelativePath(args.outputPath, false);
-    if (LinuxTools.busy) { throw new ToolFailure('BUSY', 'A Linux guest is running.', 'wait_then_check'); }
-    LinuxTools.busy = true;
-    const id = util.generateRandomUUID();
-    const dir = this.context.cacheDir + '/linux-' + id;
-    let created = false;
-    try {
-      await fs.mkdir(dir);
-      created = true;
+    return linuxRuntime.exclusive<string>(async () => {
       const request: GuestRequest = { language: args.language, source: args.source, collect: output !== undefined };
       const base64 = new util.Base64Helper();
       if (input !== undefined) { request.input = base64.encodeToStringSync(await this.files.readJobInput(input, FILE_LIMIT, cancellation)); }
@@ -75,32 +62,13 @@ export class LinuxTools implements AgentTools {
       disk.set([84, 66, 74, 49]);
       new DataView(disk.buffer).setUint32(4, packet.byteLength, true);
       disk.set(packet, 8);
-      const separateProcess = deviceInfo.deviceType === 'tablet' || deviceInfo.deviceType === '2in1';
-      if (separateProcess || !LinuxTools.phoneVm.initialized) {
-        await writeBytes(dir + '/exchange', disk.buffer as ArrayBuffer);
-        for (const name of ['kernel', 'root.qcow2']) {
-          cancellation.check();
-          const bytes = await this.context.resourceManager.getRawFileContent('linux/' + name);
-          await writeBytes(dir + '/' + name, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length));
-        }
-      }
+      const job = await linuxRuntime.runJob(this.context, disk.buffer as ArrayBuffer, cancellation);
       cancellation.check();
-      let diagnostics: string = '';
-      let buffer: ArrayBuffer;
-      if (separateProcess) {
-        const pending = native.startLinux(id, dir);
-        const unsubscribe = cancellation.onCancel(() => { native.cancelLinux(id); });
-        try { diagnostics = await pending; } finally { unsubscribe(); cancellation.check(); }
-        const handle = await fs.open(dir + '/exchange', fs.OpenMode.READ_ONLY);
-        try { buffer = await readBounded(handle.fd, 2 * HALF); } finally { await fs.close(handle); }
-      } else {
-        buffer = await LinuxTools.phoneVm.run(dir, disk.buffer as ArrayBuffer, cancellation);
-        cancellation.check();
-      }
+      const buffer = job.buffer;
       const header = new DataView(buffer, HALF, 8);
       const length = header.getUint32(4, true);
       if (header.getUint32(0, false) !== 0x54425231 || length < 2 || length > HALF - 8) {
-        throw new ToolFailure('EXECUTION_FAILED', 'Linux guest exited without a valid receipt. ' + diagnostics, 'inspect_result_before_retry');
+        throw new ToolFailure('EXECUTION_FAILED', 'Linux guest exited without a valid receipt. ' + job.diagnostics, 'inspect_result_before_retry');
       }
       const json = util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(new Uint8Array(buffer, HALF + 8, length));
       const result = JSON.parse(json) as GuestResponse;
@@ -118,8 +86,6 @@ export class LinuxTools implements AgentTools {
         receipt.outputPath = output; receipt.bytes = bytes.length;
       }
       return JSON.stringify(receipt);
-    } finally {
-      try { if (created) { await fs.rmdir(dir); } } finally { LinuxTools.busy = false; }
-    }
+    });
   }
 }

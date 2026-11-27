@@ -15,15 +15,18 @@ inline LinuxEngineEntry LoadLinuxEngine()
     return entry;
 }
 
-inline int RunLinuxEngine(LinuxEngineEntry entry, const std::string &dir, bool embedded)
+inline int RunLinuxEngine(LinuxEngineEntry entry, const std::string &dir, bool embedded, bool interactive = false)
 {
+    // Embedded guests may switch modes after a reset. A console child waits for its UI before boot.
+    const auto serial = embedded || interactive ?
+        "unix:" + dir + "/tty,server=on,wait=" + (embedded ? "off" : "on") : std::string("none");
     std::vector<std::string> options = {
         "tinybot-linux", "-no-user-config", "-nodefaults",
         "-machine", "virt,gic-version=2", "-accel", "tcg,thread=single,tb-size=32",
         "-cpu", "max,sve=off", "-m", "192", "-smp", "1", "-display", "none",
-        "-serial", "none", "-monitor", "none", "-nic", "none",
-        "-kernel", dir + "/kernel", "-append", "root=/dev/vda ro rootwait init=/linux-init panic=1",
-        "-drive", "if=none,id=root,format=qcow2,readonly=on,file=" + dir + "/root.qcow2",
+        "-serial", serial, "-monitor", "none", "-nic", "none",
+        "-kernel", dir + "/kernel", "-append", "root=/dev/vda ro rootwait console=tty0 init=/linux-init panic=1",
+        "-drive", "if=none,id=root,format=qcow2,readonly=on,file=" + dir + "/root-console.qcow2",
         "-device", "virtio-blk-pci,drive=root,addr=4",
         "-drive", "if=none,id=job,format=raw,file=" + dir + "/exchange",
         "-device", "virtio-blk-pci,drive=job,addr=5"

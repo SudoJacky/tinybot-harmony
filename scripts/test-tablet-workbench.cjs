@@ -487,6 +487,31 @@ header.app.active.messages.push({ role: 'user' });
 header.phoneHeader(); assert.deepEqual(headerControls, ['open-history', 'chat-more', 'new-chat']);
 console.log('PASS empty phone header shows history and browser, then switches to conversation actions');
 
+async function testUtilityMenu() {
+  const MenuPage = probe('pages/Index', 'Index', ['openUtilityMenu'], { t: value => value, $r: value => value });
+  const opened = [];
+  const routes = [];
+  let choice = -1;
+  const page = Object.assign(new MenuPage(), {
+    app: { ready: true }, foreground: true,
+    detailOpen: () => true, setDetailPane: open => opened.push(open), openBrowser: () => opened.push('browser'),
+    paths: { getAllPathName: () => routes, pushPath: ({ name }) => routes.push(name) },
+    getUIContext: () => ({ getPromptAction: () => ({ showActionMenu: async ({ buttons }) => {
+      assert.equal(buttons.map(button => button.text).join(', '), '应用内浏览器, Linux 控制台');
+      return { index: choice };
+    } }) })
+  });
+  await page.openUtilityMenu();
+  choice = 0;
+  await page.openUtilityMenu();
+  choice = 1;
+  await page.openUtilityMenu();
+  await page.openUtilityMenu();
+  assert.deepEqual(opened, ['browser', false]);
+  assert.deepEqual(routes, ['linux-console']);
+  console.log('PASS utility menu cancels cleanly, opens the browser, and opens a single Linux console route');
+}
+
 // The tablet plus opens the add menu in place, while the phone opens a sheet.
 const addAt = chatSource.indexOf("'add-attachment'");
 assert.ok(addAt > 0, 'Locate the emitted composer add trigger');
@@ -925,6 +950,7 @@ function load(file) {
   return exports;
 }
 (async () => {
+  await testUtilityMenu();
   const { Fixture } = load(path.join(root, 'entry/src/test/SessionService.test'));
   const { ChatViewModel } = load(path.join(root, 'entry/src/main/ets/viewmodel/ChatViewModel'));
   const { stepPreviews } = load(path.join(root, 'entry/src/main/ets/model/PublishedPreview'));

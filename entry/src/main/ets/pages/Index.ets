@@ -14,6 +14,7 @@ import { WebUiPreflightHost } from '../views/WebUiPreflightHost';
 import { PreviewCaptureHost } from '../views/PreviewCaptureHost';
 import { OfficeReviewHost } from '../views/OfficeReviewHost';
 import { BrowserPanel } from '../views/BrowserPanel';
+import { LinuxConsolePanel } from '../views/LinuxConsolePanel';
 import { BrowserSession } from '../services/BrowserSession';
 import { AnnotationPage } from '../model/BrowserAnnotation';
 import { browserAnnotationContent } from '../model/BrowserAnnotationContent';
@@ -213,6 +214,8 @@ struct Index {
   @State private onboardingActive: boolean = false;
   @State private providerEditorActive: boolean = false;
   @State private settingsActive: boolean = false;
+  @State private linuxConsoleShown: boolean = false;
+  private toolMenuOpen: boolean = false;
   @State private rootSection: string = '';
   private toolsOrigin: string = 'productivity';
   @State private focusDraftRequest: number = 0;
@@ -1258,6 +1261,29 @@ struct Index {
     this.browserExpanded = expanded;
   }
 
+  private async openUtilityMenu(): Promise<void> {
+    if (!this.app.ready || this.toolMenuOpen) { return; }
+    this.toolMenuOpen = true;
+    try {
+      const result = await this.getUIContext().getPromptAction().showActionMenu({ buttons: [
+        { text: t('应用内浏览器'), color: $r('app.color.text_primary') },
+        { text: t('Linux 控制台'), color: $r('app.color.text_primary') }
+      ] });
+      if (!this.foreground) { return; }
+      if (result.index === 0) { this.openBrowser(); }
+      if (result.index === 1 && !this.paths.getAllPathName().includes('linux-console')) {
+        if (this.detailOpen()) { this.setDetailPane(false); }
+        this.paths.pushPath({ name: 'linux-console' });
+      }
+    } catch (error) {
+      const failure = error as BusinessError;
+      if (!failure.message.toLowerCase().includes('cancel')) {
+        Diagnostics.log('warn', 'linux-console', 'menu_failed', {}, failure);
+        this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('无法打开工具列表。') });
+      }
+    } finally { this.toolMenuOpen = false; }
+  }
+
   private openBrowser(): void {
     if (this.browser.permissionSaving) { return; }
     if (this.browser.policy !== 'enabled') {
@@ -1616,9 +1642,9 @@ struct Index {
           .onClick(() => { this.showToolScope = true; })
         MenuItem(() => this.moreMenuContent($r('sys.symbol.folder'), t('工作区文件')))
           .enabled(!this.app.busy).onClick(() => this.openFiles())
-        MenuItem(() => this.moreMenuContent($r('sys.symbol.worldclock'), t('应用内浏览器')))
-          .id('open-browser').enabled(this.app.ready && !this.browser.permissionSaving && this.app.saveError.length === 0)
-          .onClick(() => this.openBrowser())
+        MenuItem(() => this.moreMenuContent($r('sys.symbol.worldclock'), t('浏览器与 Linux')))
+          .id('open-browser').enabled(this.app.ready)
+          .onClick(() => this.openUtilityMenu())
         if (this.largeScreen) {
           MenuItem(() => this.moreMenuContent($r('sys.symbol.ellipsis_message'), t('会话详情')))
             .id('open-conversation-detail').enabled(this.app.ready).onClick(() => {
@@ -1726,6 +1752,12 @@ struct Index {
         .onShown(() => { this.onboardingActive = true; })
         .onHidden(() => { this.onboardingActive = false; })
         .onDisAppear(() => this.syncNavigationLocale())
+    } else if (name === 'linux-console') {
+      NavDestination() { LinuxConsolePanel({ active: this.linuxConsoleShown && this.foreground }) }
+        .title(t('Linux 控制台'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
+        .onShown(() => { this.linuxConsoleShown = true; })
+        .onHidden(() => { this.linuxConsoleShown = false; })
     } else if (name === 'life-panels') {
       LifePanelsPanel({ app: this.app, onShown: () => { this.rootSection = 'life-panels'; }, onChat: () => this.revealChat(), requestedTarget: this.lifePanelTarget })
     } else if (name === 'branches') {
@@ -2022,9 +2054,9 @@ struct Index {
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
           disabled: !this.app.canNavigate, onTap: () => { this.createChat(); } })
       } else {
-        IconButton({ animatedIcon: 'browser', label: t('应用内浏览器'), compId: 'empty-open-browser',
+        IconButton({ animatedIcon: 'browser', label: t('浏览器与 Linux'), compId: 'empty-open-browser',
           material: this.appearance.control, tint: $r('sys.color.font_primary'),
-          disabled: !this.app.ready || this.browser.permissionSaving, onTap: () => this.openBrowser() })
+          disabled: !this.app.ready, onTap: () => this.openUtilityMenu() })
       }
     }.width('100%').height(CHAT_HEADER_HEIGHT).padding({ left: 6, right: 6 })
       .hitTestBehavior(HitTestMode.Transparent)
@@ -2298,7 +2330,7 @@ struct Index {
             AnimatedPage({ visible: (this.largeScreen || this.workbench().docked) && this.detailOpen() &&
               ((this.detailPaneOpen && (this.showDetailContext || this.detailTabsAvailable().length === 0)) ||
                 (this.detailClosing && this.detailClosingLauncher)) }) {
-              DetailLauncher({ onFiles: () => this.openFiles(), onBrowser: () => this.openBrowser(),
+              DetailLauncher({ onFiles: () => this.openFiles(), onBrowser: () => this.openUtilityMenu(),
                 workbench: this.largeScreen, project: this.app.activeProject?.name || t('普通聊天'),
                 sideChatAvailable: this.canCreateSideChat(), onSideChat: () => this.createSideChat(),
                 context: () => { this.detailContext() }, compact: !this.workbench().docked || this.compactDetailLauncher(),

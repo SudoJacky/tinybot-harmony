@@ -54,7 +54,7 @@ export struct DetailLauncher {
   build() {
     Column() {
       Row() {
-        Text(this.workbench ? t('会话详情') : t('文件与浏览器')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
+        Text(this.workbench ? t('会话详情') : t('文件与工具')).fontFamily(this.appearance.fontFamily).fontSize(16).fontWeight(FontWeight.Medium)
           .layoutWeight(1).fontColor($r('app.color.text_primary'))
         if (this.showCollapse) {
           IconButton({ icon: $r('sys.symbol.xmark'), label: t('关闭'), compId: 'detail-launcher-close', onTap: this.onClose })
@@ -68,7 +68,7 @@ export struct DetailLauncher {
               .textOverflow({ overflow: TextOverflow.Ellipsis }).padding({ bottom: Space.xs })
           }
           this.option('folder', t('工作区文件'), 'detail-launcher-files', this.onFiles)
-          this.option('browser', t('应用内浏览器'), 'detail-launcher-browser', this.onBrowser)
+          this.option('browser', t('浏览器与 Linux'), 'detail-launcher-browser', this.onBrowser)
           if (this.sideChatAvailable) { this.option('sideChat', t('新建旁聊'), 'detail-launcher-side-chat', this.onSideChat) }
           if (this.workbench) { this.context() }
         }.width('100%').padding(Space.page).alignItems(HorizontalAlign.Start)

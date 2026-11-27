@@ -33,6 +33,7 @@ const suites = {
     'test-provider-balance.cjs',
     'test-conversation-export.cjs',
     'test-custom-tools.cjs',
+    'test-linux-console.cjs',
     'test-feedback.cjs',
     'test-file-attachments.cjs',
     'test-gemini.cjs',

@@ -9,6 +9,16 @@ export interface ThirdPartyLicense {
 // Keep notices verbatim from the distributed components; development-only tools are not shipped.
 export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
   {
+    id: 'xterm', name: 'xterm.js · 5.5.0', license: 'MIT',
+    copyright: 'The xterm.js authors, SourceLair Private Company, and Christopher Jeffrey',
+    resource: 'linux-console/LICENSE.txt'
+  },
+  {
+    id: 'xterm-fit', name: 'xterm.js Fit Addon · 0.10.0', license: 'MIT',
+    copyright: 'Copyright (c) 2019, The xterm.js authors',
+    resource: 'linux-console/FIT-LICENSE.txt'
+  },
+  {
     id: 'reactbits', name: 'ReactBits · Shiny Text / Spotlight Card / Animated Content', license: 'MIT + Commons Clause',
     copyright: 'Copyright (c) 2026 David Haz', resource: 'licenses/reactbits.txt'
   },

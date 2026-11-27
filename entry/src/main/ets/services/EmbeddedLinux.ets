@@ -11,7 +11,7 @@ interface QmpCommand { execute: string; id: number; }
 
 function pause(): Promise<void> { return new Promise<void>((resolve) => setTimeout(resolve, 30)); }
 
-// One QEMU machine in this app process. Only its private exchange inode stays open.
+// One QEMU machine in this app process, shared by jobs and the user console.
 // The guest boots from the read-only root for every call, including after cancellation.
 export class EmbeddedLinux {
   private client?: socket.LocalSocket;
@@ -31,7 +31,7 @@ export class EmbeddedLinux {
     while (!ready()) {
       cancel?.check();
       if (this.fault) { throw new Error(this.fault); }
-      if (Date.now() >= deadline) { throw new Error('Linux timed out waiting for ' + action); }
+      if (timeout > 0 && Date.now() >= deadline) { throw new Error('Linux timed out waiting for ' + action); }
       await pause();
     }
   }
@@ -105,7 +105,7 @@ export class EmbeddedLinux {
     if ((await this.command('query-status')).running !== false) { throw new Error('Guest failed to pause after reset'); }
   }
 
-  async run(dir: string, packet: ArrayBuffer, cancellation: Cancellation): Promise<ArrayBuffer> {
+  private async writeRequest(dir: string, packet: ArrayBuffer, cancellation: Cancellation): Promise<fs.File> {
     if (this.fault) { throw new Error(this.fault); }
     if (!this.client) { await this.start(dir); }
     const file = this.disk;
@@ -118,19 +118,15 @@ export class EmbeddedLinux {
     }
     await fs.fsync(file.fd);
     cancellation.check();
+    return file;
+  }
+
+  private async boot<T>(timeout: number, cancellation: Cancellation, finish: () => Promise<T>): Promise<T> {
     this.shutdown = false;
     try {
       await this.command('cont');
-      await this.until(() => this.shutdown, 120000, 'guest completion', cancellation);
-      const result = new Uint8Array(packet.byteLength);
-      pos = 0;
-      while (pos < result.length) {
-        const chunk = new ArrayBuffer(result.length - pos);
-        const count = await fs.read(file.fd, chunk, { offset: pos });
-        if (count <= 0) { throw new Error('Incomplete Linux receipt'); }
-        result.set(new Uint8Array(chunk, 0, count), pos); pos += count;
-      }
-      return result.buffer as ArrayBuffer;
+      await this.until(() => this.shutdown, timeout, 'guest completion', cancellation);
+      return await finish();
     } finally {
       try { await this.reset(); }
       catch (error) {
@@ -138,5 +134,27 @@ export class EmbeddedLinux {
         throw new Error(this.fault);
       }
     }
+  }
+
+  async console(dir: string, packet: ArrayBuffer, cancellation: Cancellation, connect: () => Promise<void>): Promise<void> {
+    await this.writeRequest(dir, packet, cancellation);
+    await connect();
+    cancellation.check();
+    await this.boot<void>(0, cancellation, async () => {});
+  }
+
+  async run(dir: string, packet: ArrayBuffer, cancellation: Cancellation): Promise<ArrayBuffer> {
+    const file = await this.writeRequest(dir, packet, cancellation);
+    return this.boot<ArrayBuffer>(120000, cancellation, async () => {
+      const result = new Uint8Array(packet.byteLength);
+      let pos = 0;
+      while (pos < result.length) {
+        const chunk = new ArrayBuffer(result.length - pos);
+        const count = await fs.read(file.fd, chunk, { offset: pos });
+        if (count <= 0) { throw new Error('Incomplete Linux receipt'); }
+        result.set(new Uint8Array(chunk, 0, count), pos); pos += count;
+      }
+      return result.buffer as ArrayBuffer;
+    });
   }
 }

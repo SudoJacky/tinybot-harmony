@@ -3,6 +3,8 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { describe, it, expect } from '@ohos/hypium';
 import { LinuxTools } from '../../../main/ets/services/LinuxTools';
+import { linuxRuntime } from '../../../main/ets/services/LinuxRuntime';
+import { LinuxSerial } from '../../../main/ets/services/LinuxSerial';
 import { Cancellation, RunCancelledError } from '../../../main/ets/services/Cancellation';
 import { NativeWorkspaceFiles } from '../../../main/ets/services/NativeWorkspaceFiles';
 import { ToolResultError } from '../../../main/ets/model/ToolFailure';
@@ -56,6 +58,46 @@ export default function testsuite() {
         expect((await files.read('summary.csv', new Cancellation())).content.trim()).assertEqual('total\n7');
         await runner.print('After cancellation, SQLite exported total=7: ' + (Date.now() - exportStart) + ' ms\n');
       } finally { await fs.rmdir(dir); }
+    });
+
+    it('keepsAnInteractiveShellUntilExit', 0, async () => {
+      const context = abilityDelegatorRegistry.getAbilityDelegator().getAppContext().createModuleContext('entry_test');
+      const stop = new Cancellation();
+      let ready = false;
+      let ended = false;
+      let output = '';
+      let failure: Error | undefined;
+      const serial = new LinuxSerial({ ready: () => { ready = true; }, output: (bytes) => {
+        output += new util.TextDecoder('utf-8').decodeToString(bytes);
+      }, failed: (error) => { failure = error; stop.cancel(); } });
+      const pending = linuxRuntime.runConsole(context, serial, stop).catch((error: Error) => { failure = error; })
+        .finally(() => { ended = true; });
+      const waitFor = async (condition: () => boolean): Promise<void> => {
+        const deadline = Date.now() + 45000;
+        while (!condition()) {
+          if (failure) { throw failure; }
+          if (Date.now() >= deadline) { throw new Error('Timed out waiting for Linux console output: ' + output.slice(-500)); }
+          await new Promise<void>((resolve) => setTimeout(resolve, 30));
+        }
+      };
+      try {
+        await waitFor(() => ready);
+        await serial.resize(113, 37);
+        await serial.input('cd /tmp\rprintf "cwd-%s\\n" "$PWD"\rstty size\r');
+        await waitFor(() => output.includes('cwd-/tmp') && output.includes('37 113'));
+        await serial.input('sleep 120\r');
+        await waitFor(() => output.includes('sleep 120'));
+        await new Promise<void>((resolve) => setTimeout(resolve, 400));
+        await serial.input('\x03');
+        await serial.input('printf "caught-%s\\n" interrupt\r');
+        await waitFor(() => output.includes('caught-interrupt'));
+        expect(await linuxRuntime.exclusive(async () => true).catch(() => false)).assertFalse();
+        await serial.input('exit\r');
+        await waitFor(() => ended);
+        await pending;
+        if (failure) { throw failure; }
+        expect(await linuxRuntime.exclusive(async () => true)).assertTrue();
+      } finally { stop.cancel(); await pending; }
     });
   });
 }
