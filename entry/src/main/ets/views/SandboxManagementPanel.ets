@@ -185,7 +185,7 @@ export struct SandboxManagementPanel {
       Column({ space: Space.md }) {
         GroupCard() {
           Column({ space: Space.sm }) {
-            Text('Linux Runtime').fontFamily(this.appearance.fontFamily).fontSize(Font.title)
+            Text(t('Linux 运行时')).fontFamily(this.appearance.fontFamily).fontSize(Font.title)
               .fontColor($r('app.color.text_primary')).fontWeight(FontWeight.Medium)
             Text(this.status()).id('linux-runtime-status').fontFamily(this.appearance.fontFamily)
               .fontSize(Font.body).fontColor($r('app.color.text_primary'))

@@ -1768,7 +1768,10 @@ struct Index {
         .onHidden(() => { this.onboardingActive = false; })
         .onDisAppear(() => this.syncNavigationLocale())
     } else if (name === 'linux-console') {
-      NavDestination() { LinuxConsolePanel({ active: this.linuxConsoleShown && this.foreground }) }
+      NavDestination() {
+        LinuxConsolePanel({ active: this.linuxConsoleShown && this.foreground,
+          onManage: () => { this.paths.pushPath({ name: 'sandbox-management' }); } })
+      }
         .title(t('Linux 控制台'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background'))
         .onShown(() => { this.linuxConsoleShown = true; })

@@ -59,7 +59,7 @@ export class LinuxWorkspace {
   private legacyPath: string;
 
   constructor(context: common.Context, scope: LinuxWorkspaceScope) {
-    this.store = new WorkspaceStore(context.filesDir);
+    this.store = new WorkspaceStore(context.getApplicationContext().filesDir);
     this.scope = scope;
     const root = this.store.pathFor(scope.id);
     this.configPath = root + '/.tinybot-linux-settings.json';

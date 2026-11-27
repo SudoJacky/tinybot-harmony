@@ -109,7 +109,7 @@ export default function testsuite() {
       const context = runner.getAppContext().createModuleContext('entry_test');
       linuxRuntime.initialize(context);
       const scope: LinuxWorkspaceScope = { id: 'linux-test-' + util.generateRandomUUID(), project: true };
-      const workspaces = new WorkspaceStore(context.filesDir);
+      const workspaces = new WorkspaceStore(context.getApplicationContext().filesDir);
       await workspaces.ensureThread(scope.id);
       const path = workspaces.pathFor(scope.id);
       const workspace = new LinuxWorkspace(context, scope);

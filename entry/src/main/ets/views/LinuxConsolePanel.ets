@@ -42,6 +42,8 @@ export struct LinuxConsolePanel {
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @Prop @Watch('visibilityChanged') active: boolean = false;
   @State private phase: ConsolePhase = 'loading';
+  onManage: () => void = () => {};
+  @State private sandboxEnabled: boolean = linuxRuntime.snapshot().settings.enabled;
   @State private running: boolean = false;
   @State private error: string = '';
   private mounted: boolean = false;
@@ -71,7 +73,10 @@ export struct LinuxConsolePanel {
 
   private visibilityChanged(): void {
     if (!this.active) { this.stop(); }
-    else { this.startIfReady(); }
+    else {
+      this.sandboxEnabled = linuxRuntime.snapshot().settings.enabled;
+      this.startIfReady();
+    }
   }
 
   private async pageLoaded(): Promise<void> {
@@ -86,7 +91,7 @@ export struct LinuxConsolePanel {
   }
 
   private startIfReady(): void {
-    if (!this.mounted || !this.active || !this.pageReady || !this.autoStart) { return; }
+    if (!this.mounted || !this.active || !this.sandboxEnabled || !this.pageReady || !this.autoStart) { return; }
     this.autoStart = false;
     this.start();
   }
@@ -249,6 +254,7 @@ export struct LinuxConsolePanel {
 
   private status(): string {
     if (!linuxRuntime.available) { return t('不可用'); }
+    if (!this.sandboxEnabled) { return t('已停用'); }
     if (this.phase === 'connected') { return t('已连接'); }
     if (this.phase === 'starting') { return t('正在启动 Linux'); }
     if (this.phase === 'stopping') { return t('正在停止'); }
@@ -260,7 +266,9 @@ export struct LinuxConsolePanel {
   @Builder
   specialKey(name: string, label: string, accessibility: string) {
     Button(label).id('linux-console-key-' + name).fontFamily(this.appearance.fontFamily)
-      .attributeModifier(Btn.tonal).constraintSize({ minWidth: 40, minHeight: 40 })
+      .type(ButtonType.Normal).width(name === 'interrupt' ? 56 : 44).height(44).padding(0)
+      .fontSize(Font.caption + 1).fontWeight(FontWeight.Medium).borderRadius(Radius.sm)
+      .fontColor($r('app.color.text_primary')).backgroundColor($r('app.color.surface_variant'))
       .enabled(this.phase === 'connected').accessibilityText(accessibility)
       .onClick(() => this.evaluate('window.tinybotTerminal.key(' + JSON.stringify(name) + ')'))
   }
@@ -273,12 +281,13 @@ export struct LinuxConsolePanel {
       Text(this.status()).id('linux-console-status').fontFamily(this.appearance.fontFamily)
         .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).layoutWeight(1).maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-      if (linuxRuntime.available) {
+      if (linuxRuntime.available && this.sandboxEnabled) {
         Button(t('复制')).id('linux-console-copy').attributeModifier(Btn.textSmall).constraintSize({ minHeight: 44 })
           .enabled(this.phase === 'connected' || this.phase === 'stopped')
           .onClick(() => this.evaluate('window.tinybotTerminal.copy()'))
         PasteButton({ text: PasteDescription.PASTE, buttonType: ButtonType.Normal })
-          .id('linux-console-paste').constraintSize({ minHeight: 44 })
+          .id('linux-console-paste').constraintSize({ minHeight: 44 }).borderRadius(Radius.sm)
+          .fontSize(13).fontColor($r('app.color.text_primary')).backgroundColor($r('app.color.surface_variant'))
           .enabled(this.phase === 'connected').onClick((_event: ClickEvent, result: PasteButtonOnClickResult) => {
             if (result === PasteButtonOnClickResult.SUCCESS) { this.paste(); }
             else { this.toast(t('无法访问剪贴板。')); }
@@ -298,7 +307,7 @@ export struct LinuxConsolePanel {
     Column({ space: Space.sm }) {
       this.controls()
       if (this.error) { Banner({ text: this.error, compId: 'linux-console-error' }) }
-      if (linuxRuntime.available) {
+      if (linuxRuntime.available && this.sandboxEnabled) {
         Web({ src: TERMINAL_PAGE, controller: this.controller })
           .id('linux-console-web').width('100%').layoutWeight(1).borderRadius(Radius.md).clip(true)
           .backgroundColor(TERMINAL_BACKGROUND).javaScriptAccess(true).domStorageAccess(false)
@@ -318,7 +327,6 @@ export struct LinuxConsolePanel {
             this.specialKey('esc', 'Esc', t('Escape 键'))
             this.specialKey('tab', 'Tab', t('Tab 键'))
             this.specialKey('interrupt', 'Ctrl+C', t('中断当前命令'))
-            Blank().constraintSize({ minWidth: Space.sm })
             this.specialKey('left', '←', t('向左键'))
             this.specialKey('down', '↓', t('向下键'))
             this.specialKey('up', '↑', t('向上键'))
@@ -326,9 +334,12 @@ export struct LinuxConsolePanel {
           }.constraintSize({ minHeight: 44 })
         }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').align(Alignment.Start)
       } else {
-        Column() {
-          Text(t('当前安装包未包含 Linux 运行时。')).fontFamily(this.appearance.fontFamily)
+        Column({ space: Space.md }) {
+          Text(linuxRuntime.available ? t('启用 Linux 沙盒后即可使用控制台。') : t('当前安装包未包含 Linux 运行时。')).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.body).fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
+          if (linuxRuntime.available) {
+            Button(t('沙盒管理')).id('linux-console-manage').attributeModifier(Btn.tonal).onClick(() => this.onManage())
+          }
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
       }
     }.width('100%').height('100%').padding({ left: Space.md, right: Space.md, bottom: Space.sm })
