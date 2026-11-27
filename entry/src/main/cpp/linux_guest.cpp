@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -15,6 +16,12 @@ extern "C" __attribute__((visibility("default"))) void RunLinuxGuest(NativeChild
         if (item->fdName && std::strcmp(item->fdName, "control") == 0) channel = item->fd;
     }
     if (channel < 0 || !args.entryParams) return;
+    const std::string params(args.entryParams);
+    const auto divider = params.find('\n');
+    if (divider == std::string::npos) return;
+    const auto memory = std::atoi(params.c_str());
+    if (!LinuxMemorySupported(memory)) return;
+    const auto directory = params.substr(divider + 1);
     std::thread([channel]() {
         char byte;
         while (read(channel, &byte, 1) < 0 && errno == EINTR) {}
@@ -23,7 +30,7 @@ extern "C" __attribute__((visibility("default"))) void RunLinuxGuest(NativeChild
 
     if (dup2(channel, STDERR_FILENO) < 0) return;
     try {
-        int status = RunLinuxEngine(LoadLinuxEngine(), args.entryParams, false);
+        int status = RunLinuxEngine(LoadLinuxEngine(), directory, memory, false);
         if (status) dprintf(channel, "QEMU exit %d", status);
         _exit(status);
     } catch (const std::exception &error) {

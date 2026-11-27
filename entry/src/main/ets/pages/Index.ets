@@ -43,6 +43,8 @@ import { PanelExpiryUpdates } from '../services/PanelExpiryUpdates';
 import { SearchSettingsPanel } from '../views/SearchSettingsPanel';
 import { MailSettingsPanel } from '../views/MailSettingsPanel';
 import { ImaSettingsPanel } from '../views/ImaSettingsPanel';
+import { SandboxManagementPanel } from '../views/SandboxManagementPanel';
+import { linuxRuntime } from '../services/LinuxRuntime';
 import { KnowledgeBaseSettingsPanel } from '../views/KnowledgeBaseSettingsPanel';
 import { imaClient } from '../services/ImaClient';
 import { knowledgeBaseAccess } from '../services/KnowledgeBaseAccess';
@@ -225,6 +227,7 @@ struct Index {
   @State private settingsSearchWidth: number = 44;
   private settingsSearchRevision: number = 0;
   private settingsSearchFocusPending: boolean = false;
+  private linuxStartupChecked: boolean = false;
   @State private toolsTab: string = 'memory';
   @State private toolsTabRequest: number = 0;
 
@@ -249,6 +252,7 @@ struct Index {
     this.account.initialize(context).then(() => this.account.refresh());
     const starting = !this.session;
     if (!this.session) {
+      linuxRuntime.initialize(context);
       try { knowledgeBaseAccess.initialize(context); }
       catch (error) { Diagnostics.log('warn', 'knowledge-base', 'load_failed', {}, error as Error); }
       imaClient.load().catch((error: Error) => { Diagnostics.log('warn', 'ima', 'settings_failed', {}, error); });
@@ -282,6 +286,7 @@ struct Index {
       }
       this.offerOnboarding();
       if (starting && this.app.ready && !this.onboardingActive && this.paths.size() === 0) { this.restoreDetailSelection(); }
+      this.prewarmLinuxOnStartup();
       this.offerStartupBackup();
       this.offerAnnouncement();
     });
@@ -453,8 +458,17 @@ struct Index {
       this.desktopCommandsDialog?.close();
       this.closeReviewInvitation(); this.startupBackupDialog?.close();
     }
-    if (this.foreground) { this.offerStartupBackup(); }
+    if (this.foreground) { this.offerStartupBackup(); this.prewarmLinuxOnStartup(); }
     this.offerAnnouncement();
+  }
+
+  private prewarmLinuxOnStartup(): void {
+    if (this.linuxStartupChecked || !this.privacy.allowed || !this.app.ready || !this.foreground) { return; }
+    this.linuxStartupChecked = true;
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    linuxRuntime.prewarmOnStartup(context).catch((error: Error) => {
+      Diagnostics.log('warn', 'linux-runtime', 'startup_prewarm_failed', {}, error);
+    });
   }
 
   private pcWindowVisibilityChanged(): void {
@@ -1678,6 +1692,7 @@ struct Index {
       onAddProvider: () => this.openSettingPage('provider-presets'),
       onUsage: () => this.openSettingPage('usage'),
       onStorage: () => this.openSettingPage('storage'),
+      onSandbox: () => this.openSettingPage('sandbox-management'),
       onModels: () => this.openSettingPage('model-settings'),
       onImageGeneration: () => this.openSettingPage('image-generation'),
       onSearch: () => this.openSettingPage('search-settings'),
@@ -1782,6 +1797,13 @@ struct Index {
       NavDestination() {
         StorageCategoryPanel({ app: this.app, category: param as string })
       }.title(t(storageCategoryKey(param as string)), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
+        .backgroundColor($r('app.color.page_background'))
+    } else if (name === 'sandbox-management') {
+      NavDestination() {
+        SandboxManagementPanel({ readOnly: this.app.productivity.options?.readOnly === true,
+          workspaceId: this.app.ready ? this.app.activeWorkspaceId : '', projectName: this.app.activeProject?.name || '' })
+      }
+        .title(t('沙盒管理'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'productivity') {
       NavDestination() { ProductivityPanel({ app: this.app, tab: (param as string) || 'memory',
