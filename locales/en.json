@@ -3252,5 +3252,7 @@
   "启用工作区导入和导出后，任务才能使用项目持久目录。": "Enable workspace imports and exports to use the persistent project directory.",
   "启用工作区导入后，任务才能读取挂载的目录。": "Enable workspace imports to read mounted directories.",
   "请输入 {0} 到 {1} MiB 之间的整数。": "Enter a whole number between {0} and {1} MiB.",
-  "虚拟机内存（MiB）": "Virtual machine memory (MiB)"
+  "虚拟机内存（MiB）": "Virtual machine memory (MiB)",
+  "Linux 运行时": "Linux runtime",
+  "启用 Linux 沙盒后即可使用控制台。": "Enable the Linux sandbox to use the console."
 }

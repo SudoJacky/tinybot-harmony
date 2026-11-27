@@ -236,7 +236,7 @@ async function main() {
   const { Cancellation, RunCancelledError } = load(path.join(root, 'services/Cancellation'));
   const { findSettings } = load(path.join(root, 'model/SettingsSearch'));
   const loading = [];
-  const context = { cacheDir: '/cache', filesDir: '/files', resourceManager: {
+  const context = { cacheDir: '/cache', filesDir: '/entry/files', getApplicationContext: () => ({ filesDir: '/files' }), resourceManager: {
     getRawFileContent: async name => { loading.push(name); return new Uint8Array(1); }
   } };
   const workspace = {
