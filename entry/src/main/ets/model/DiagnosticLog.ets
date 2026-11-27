@@ -21,6 +21,7 @@ export interface LogFields {
   protocol?: string; phase?: string; action?: string; policy?: string; scheme?: string; library?: string; status?: string; balanceAdapter?: string;
   threadId?: string; messageId?: string; sessionId?: string; providerId?: string; previewId?: string; surfaceId?: string;
   channel?: string;
+  isolated?: boolean; selfTest?: boolean; timeoutSeconds?: number;
 }
 export interface LogData { level: LogLevel; module: string; event: string; fields: Record<string, LogValue>; }
 interface LogFailureDetails { httpStatus?: number; nativeCode?: number; remoteCode?: number; service?: string; }
@@ -83,6 +84,7 @@ EVENTS.mermaid = ['startup_timeout', 'render_timeout', 'script_failed', 'diagram
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved', 'compare_reference_failed'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
 EVENTS['linux-console'] = ['session_failed', 'clipboard_failed', 'menu_failed'];
+EVENTS['linux-runtime'] = ['settings_load_failed', 'settings_save_failed', 'job_failed', 'startup_prewarm_failed'];
 EVENTS.tool = ['failed', 'partial'];
 EVENTS.workspace = ['mutation_failed', 'preview_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];
 EVENTS.storage = ['scan_failed', 'metric_failed', 'cleanup_failed', 'cleanup_protected', 'usage_save_failed', 'migration_committed'];
@@ -105,8 +107,8 @@ EVENTS.diagnostics = ['started', 'stopped', 'marker', 'failed', 'level_changed']
 const NUMBERS: string[] = ['sdk', 'line', 'operationId', 'instanceId', 'generation', 'active', 'count', 'total', 'chars', 'bytes', 'elapsedMs', 'durationMs', 'delayMs', 'firstTokenMs', 'outputTokens', 'http', 'code',
   'commonMessages', 'sharedCharacters', 'systemHash', 'toolsHash', 'dataVersion',
   'messages', 'tools', 'nodes', 'keys', 'width', 'height', 'widthVp', 'request', 'chunk', 'eventCode', 'newChats', 'skippedChats', 'level', 'style',
-  'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected', 'requests', 'panels', 'boards'];
-const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable'];
+  'tokens', 'budget', 'removed', 'retained', 'duplicates', 'characters', 'added', 'updated', 'round', 'revision', 'threads', 'changedThreads', 'selected', 'requests', 'panels', 'boards', 'timeoutSeconds'];
+const BOOLEANS: string[] = ['initialSupported', 'supported', 'available', 'pageSceneObserver', 'mounted', 'attached', 'visible', 'foreground', 'enabled', 'failed', 'cancelled', 'uncertain', 'speaking', 'preflight', 'closed', 'streaming', 'ready', 'hasModel', 'retryable', 'isolated', 'selfTest'];
 const REFERENCES: string[] = ['threadId', 'messageId', 'sessionId', 'providerId', 'previewId', 'surfaceId', 'serverId'];
 const STRINGS: Record<string, string[]> = {};
 STRINGS.channel = ['answer', 'reasoning'];

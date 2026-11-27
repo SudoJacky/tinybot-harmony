@@ -48,6 +48,8 @@ const ITEMS: SettingsSearchItem[] = [
   { id: 'open-memory', section: 'assistant', group: '记忆与上下文', title: '管理长期记忆', route: 'productivity', param: 'memory', requiresEditable: true },
   { id: 'auto-compact', section: 'assistant', group: '记忆与上下文', title: '自动压缩历史', keywords: '上下文 摘要 compact summarize context' },
   { id: 'read-only', section: 'tools', title: '只读模式', keywords: '权限 read only' },
+  { id: 'open-sandbox-management', section: 'tools', title: '沙盒管理', route: 'sandbox-management',
+    keywords: 'Linux Runtime QEMU Alpine Python 自检 停止 任务超时 预热 内存 持久目录 挂载 sandbox mounts' },
   { id: 'web-enabled', section: 'tools', title: '允许网页读取与搜索', keywords: '网页权限 联网 web access' },
   { id: 'open-search-settings', section: 'tools', title: '搜索服务', route: 'search-settings',
     keywords: '联网搜索 DeepSeek Tavily SearXNG Bing 必应 web search', requiresEditable: true },

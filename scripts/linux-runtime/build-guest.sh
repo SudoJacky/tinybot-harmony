@@ -18,7 +18,7 @@ echo 'd78d2a9ebadc8179b3b9063c3316e948f594c833db51eaeabe67f1d044245527  apk.tar.
 2e4c85ae16cabeb53b4145006f883bf8e57d454bd3faff14d35ec7d8a0d05b1a  keys.tar.gz' | sha256sum -c -
 tar -xzf apk.tar.gz sbin/apk.static
 tar -xzf keys.tar.gz etc/apk/keys
-./sbin/apk.static --root "$b/root" --arch aarch64 --keys-dir "$b/etc/apk/keys" --repository "$main" --no-cache --no-scripts --initdb add musl busybox python3 sqlite ncurses-terminfo-base
+./sbin/apk.static --root "$b/root" --arch aarch64 --keys-dir "$b/etc/apk/keys" --repository "$main" --no-cache --no-scripts --initdb add musl busybox python3 sqlite e2fsprogs ncurses-terminfo-base
 mkdir -p root/{dev/pts,proc,sys,work,tmp}
 while IFS= read -r applet; do
   mkdir -p "root/$(dirname "$applet")"
@@ -32,6 +32,6 @@ mke2fs -q -F -t ext4 -d root -E root_owner=0:0 root.ext4
 qemu-img convert -f raw -O qcow2 -c root.ext4 root.qcow2
 curl -fsSL --retry 2 https://github.com/harmoninux/linux-config/releases/download/kernel-20260228/kernel_aarch64 -o kernel
 echo '914e3d790e191c17e7e1a845418c1deaede5bff318eb69754382f6deadd156f5  kernel' | sha256sum -c -
-install -m 0644 root.qcow2 "$out/root-console.qcow2"
+install -m 0644 root.qcow2 "$out/root-v3-console.qcow2"
 install -m 0644 kernel "$out/kernel"
-sha256sum "$out/root-console.qcow2" "$out/kernel"
+sha256sum "$out/root-v3-console.qcow2" "$out/kernel"

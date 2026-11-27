@@ -5,9 +5,11 @@ import { describe, it, expect } from '@ohos/hypium';
 import { LinuxTools } from '../../../main/ets/services/LinuxTools';
 import { linuxRuntime } from '../../../main/ets/services/LinuxRuntime';
 import { LinuxSerial } from '../../../main/ets/services/LinuxSerial';
+import { LinuxWorkspace, LinuxWorkspaceScope } from '../../../main/ets/services/LinuxWorkspace';
 import { Cancellation, RunCancelledError } from '../../../main/ets/services/Cancellation';
 import { NativeWorkspaceFiles } from '../../../main/ets/services/NativeWorkspaceFiles';
 import { ToolResultError } from '../../../main/ets/model/ToolFailure';
+import { WorkspaceStore } from '../../../main/ets/model/WorkspaceStore';
 
 interface Result { exitCode: number; stdout: string; stderr: string; }
 interface Args { language: string; source: string; inputPath?: string; outputPath?: string; }
@@ -15,9 +17,10 @@ interface Args { language: string; source: string; inputPath?: string; outputPat
 export default function testsuite() {
   describe('LinuxRuntime', () => {
     it('runsOfflineJobsAndCancelsTheGuest', 0, async () => {
-      expect(LinuxTools.available()).assertTrue();
+      expect(linuxRuntime.available).assertTrue();
       const runner = abilityDelegatorRegistry.getAbilityDelegator();
       const context = runner.getAppContext().createModuleContext('entry_test');
+      linuxRuntime.initialize(context);
       const dir = context.cacheDir + '/test-' + util.generateRandomUUID();
       await fs.mkdir(dir);
       const files = new NativeWorkspaceFiles(dir), tools = new LinuxTools(context, files);
@@ -62,6 +65,7 @@ export default function testsuite() {
 
     it('keepsAnInteractiveShellUntilExit', 0, async () => {
       const context = abilityDelegatorRegistry.getAbilityDelegator().getAppContext().createModuleContext('entry_test');
+      linuxRuntime.initialize(context);
       const stop = new Cancellation();
       let ready = false;
       let ended = false;
@@ -91,13 +95,46 @@ export default function testsuite() {
         await serial.input('\x03');
         await serial.input('printf "caught-%s\\n" interrupt\r');
         await waitFor(() => output.includes('caught-interrupt'));
-        expect(await linuxRuntime.exclusive(async () => true).catch(() => false)).assertFalse();
+        expect(await linuxRuntime.selfTest(context).then(() => true).catch(() => false)).assertFalse();
         await serial.input('exit\r');
         await waitFor(() => ended);
         await pending;
         if (failure) { throw failure; }
-        expect(await linuxRuntime.exclusive(async () => true)).assertTrue();
+        expect(await linuxRuntime.selfTest(context).then(() => true)).assertTrue();
       } finally { stop.cancel(); await pending; }
+    });
+
+    it('restoresOnlySuccessfulProjectJobs', 0, async () => {
+      const runner = abilityDelegatorRegistry.getAbilityDelegator();
+      const context = runner.getAppContext().createModuleContext('entry_test');
+      linuxRuntime.initialize(context);
+      const scope: LinuxWorkspaceScope = { id: 'linux-test-' + util.generateRandomUUID(), project: true };
+      const workspaces = new WorkspaceStore(context.filesDir);
+      await workspaces.ensureThread(scope.id);
+      const path = workspaces.pathFor(scope.id);
+      const workspace = new LinuxWorkspace(context, scope);
+      const tools = new LinuxTools(context, new NativeWorkspaceFiles(path), scope);
+      const run = async (source: string): Promise<Result> => {
+        const args: Args = { language: 'shell', source: source };
+        const text = await tools.execute({ id: 'project-test', type: 'function', function: {
+          name: 'run_linux', arguments: JSON.stringify(args) } }, new Cancellation());
+        return JSON.parse(text) as Result;
+      };
+      try {
+        await linuxRuntime.editWorkspace(() => workspace.setPersistent(true));
+        await run('set -e\ncd "$TINYBOT_PROJECT_DIR"\nmkdir nested\nprintf kept > nested/value\n' +
+          'dd if=/dev/zero of=nested/large bs=1048576 count=5 2>/dev/null\n' +
+          'i=0; while [ "$i" -lt 300 ]; do : > "nested/entry-$i"; i=$((i + 1)); done');
+        let failed = false;
+        try { await run('printf discarded > "$TINYBOT_PROJECT_DIR/nested/value"; exit 2'); }
+        catch (error) { if (!(error instanceof ToolResultError)) { throw error as Error; } failed = true; }
+        expect(failed).assertTrue();
+        const restored = await run('cd "$TINYBOT_PROJECT_DIR/nested" && cat value && printf "\\n" && ' +
+          'wc -c < large && find . -name "entry-*" | wc -l');
+        expect(restored.stdout.trim().split(/\s+/).join(' ')).assertEqual('kept 5242880 300');
+        await linuxRuntime.editWorkspace(() => workspace.clearProject());
+        expect((await workspace.info()).storedBytes).assertEqual(0);
+      } finally { await fs.rmdir(path); }
     });
   });
 }
