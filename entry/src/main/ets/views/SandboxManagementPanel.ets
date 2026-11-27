@@ -127,20 +127,17 @@ export struct SandboxManagementPanel {
     if (!this.runtime.ready) { return t('无法读取 Linux 沙盒配置。'); }
     if (this.runtime.stopping) { return t('正在停止任务'); }
     if (this.runtime.active === 'warm-up') { return t('正在预热'); }
-    if (this.runtime.active === 'self-test') { return t('正在运行自检'); }
-    if (this.runtime.active === 'console') { return t('Linux 控制台'); }
     if (this.runtime.active) { return t('运行中'); }
     if (this.runtime.fault) { return t('需要重启应用'); }
     if (!this.runtime.settings.enabled) { return t('已停用'); }
-    if (this.runtime.memoryInUse !== undefined) { return t('引擎已就绪'); }
+    if (this.runtime.memoryInUse !== undefined) { return t('Linux 已就绪'); }
     if (this.runtime.assetsReady) { return t('镜像已就绪'); }
     return t('待命');
   }
 
   private jobLabel(job: LinuxJobStatus): string {
     const outcome = job.outcome === 'complete' ? t('已完成') : job.outcome === 'cancelled' ? t('已停止') : t('失败');
-    const label = job.kind === 'self-test' ? t('运行自检') : job.kind === 'warm-up' ? t('预热') :
-      job.kind === 'console' ? t('Linux 控制台') : t('沙盒任务');
+    const label = job.kind === 'warm-up' ? t('启动 Linux') : t('沙盒任务');
     return label + ' · ' + outcome + ' · ' + t('{0} 秒', [(job.elapsedMs / 1000).toFixed(1)]);
   }
 
@@ -172,9 +169,9 @@ export struct SandboxManagementPanel {
     this.save({ memoryMiB: Number(this.memoryDraft) });
   }
 
-  private async selfTest(warmUp: boolean = false): Promise<void> {
+  private async warmUp(): Promise<void> {
     this.error = '';
-    try { await linuxRuntime.selfTest(this.host(), warmUp); }
+    try { await linuxRuntime.warmUp(this.host()); }
     catch (error) {
       if (this.unsubscribe && !(error instanceof RunCancelledError)) { this.error = (error as Error).message; }
     }
@@ -199,20 +196,14 @@ export struct SandboxManagementPanel {
                 Text(t('内核与镜像 {0} MiB', [(this.assetBytes / 1048576).toFixed(1)])).fontFamily(this.appearance.fontFamily)
                   .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
               }
-              if (this.runtime.active) {
+              if (this.runtime.active === 'tool') {
                 Button(t('停止当前任务')).id('linux-runtime-stop').fontFamily(this.appearance.fontFamily)
                   .attributeModifier(Btn.tonal).enabled(!this.runtime.stopping).onClick(() => linuxRuntime.stop())
-              } else {
-                Row({ space: Space.sm }) {
-                  Button(t('手动预热')).id('linux-runtime-warm-up').fontFamily(this.appearance.fontFamily)
-                    .attributeModifier(Btn.tonal)
-                    .enabled(!this.locked() && this.runtime.settings.enabled && !this.runtime.fault)
-                    .onClick(() => this.selfTest(true))
-                  Button(t('运行自检')).id('linux-runtime-self-test').fontFamily(this.appearance.fontFamily)
-                    .attributeModifier(Btn.tonal)
-                    .enabled(!this.locked() && this.runtime.settings.enabled && !this.runtime.fault)
-                    .onClick(() => this.selfTest())
-                }
+              } else if (!this.runtime.active && this.runtime.memoryInUse === undefined) {
+                Button(t('手动预热')).id('linux-runtime-warm-up').fontFamily(this.appearance.fontFamily)
+                  .attributeModifier(Btn.tonal)
+                  .enabled(!this.locked() && this.runtime.settings.enabled && !this.runtime.fault)
+                  .onClick(() => this.warmUp())
               }
             }
           }.width('100%').alignItems(HorizontalAlign.Start).padding(Space.lg)
@@ -340,8 +331,7 @@ export struct SandboxManagementPanel {
           Column({ space: Space.xs }) {
             Text(this.jobLabel(job)).fontFamily(this.appearance.fontFamily).fontSize(Font.body)
               .fontColor($r('app.color.text_primary'))
-            Text(new Date(job.startedAt).toLocaleString() + (job.bootMs === undefined ? '' :
-              ' · ' + t('Linux 启动 {0} 秒', [(job.bootMs / 1000).toFixed(1)])))
+            Text(new Date(job.startedAt).toLocaleString())
               .fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
             if (job.error) {
               Text(job.error).fontFamily(this.appearance.fontFamily).fontSize(Font.caption).fontColor($r('app.color.danger'))

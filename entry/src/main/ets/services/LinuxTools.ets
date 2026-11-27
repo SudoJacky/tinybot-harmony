@@ -24,10 +24,14 @@ export class LinuxTools implements AgentTools {
     const settings = linuxRuntime.snapshot().settings;
     const properties: Record<string, ToolProperty> = {
       'language': { type: 'string', description: 'Interpreter.', enum: ['shell', 'python'] },
-      'source': { type: 'string', description: 'Program source.' }
+      'source': { type: 'string', description: 'Program source.' },
+      'session': { type: 'string', enum: ['terminal', 'workspace'],
+        description: 'Default terminal uses the user’s live interactive shell. Select workspace for project files and mounted folders.' }
     };
-    let description = 'Run shell or Python in a fresh offline ARM64 Alpine guest. Python sqlite3 and the sqlite3 CLI are installed. ' +
-      'The working directory is /work. Guest changes expire after the job. ';
+    let description = 'Run shell or Python in the app’s single offline ARM64 Alpine Linux. By default shell source executes in the ' +
+      'live terminal as sandbox root (UID 0 in its user namespace): cd, exported variables and shell PID are shared with the user and other chats. Python inherits that environment. ' +
+      'If the user is typing or running a foreground command, wait. The workspace session runs a private task in /work in the same Linux; ' +
+      'inputPath or outputPath automatically select workspace. Python sqlite3 and the sqlite3 CLI are installed. ';
     if (settings.allowInput) {
       properties.inputPath = { type: 'string', description: 'Optional private input file.' };
       description += 'Optional inputPath copies one private workspace file (up to 1 MiB) to /work/input. ';
@@ -58,12 +62,14 @@ export class LinuxTools implements AgentTools {
     const args = parseToolArguments(call.function.arguments) as LinuxJob;
     if (!args || !['shell', 'python'].includes(args.language) || typeof args.source !== 'string' ||
       !args.source.trim() || args.source.length > 32768 ||
-      Object.keys(args).some((key: string) => !['language', 'source', 'inputPath', 'outputPath'].includes(key)) ||
+      Object.keys(args).some((key: string) => !['language', 'source', 'session', 'inputPath', 'outputPath'].includes(key)) ||
+      (args.session !== undefined && !['terminal', 'workspace'].includes(args.session)) ||
+      (args.session === 'terminal' && (args.inputPath !== undefined || args.outputPath !== undefined)) ||
       (args.inputPath !== undefined && typeof args.inputPath !== 'string') ||
       (args.outputPath !== undefined && typeof args.outputPath !== 'string')) {
       throw new ToolFailure('INVALID_ARGUMENTS', 'Expected shell or python, up to 32768 characters of source, and optional file paths.', 'fix_arguments');
     }
-    const job: LinuxJob = { language: args.language, source: args.source,
+    const job: LinuxJob = { language: args.language, source: args.source, session: args.session,
       inputPath: args.inputPath === undefined ? undefined : workspaceRelativePath(args.inputPath, false),
       outputPath: args.outputPath === undefined ? undefined : workspaceRelativePath(args.outputPath, false) };
     return JSON.stringify(await linuxRuntime.runTool(this.context, job, this.files, cancellation, this.scope));

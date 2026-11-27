@@ -230,7 +230,6 @@ struct Index {
   @State private settingsSearchWidth: number = 44;
   private settingsSearchRevision: number = 0;
   private settingsSearchFocusPending: boolean = false;
-  private linuxStartupChecked: boolean = false;
   @State private toolsTab: string = 'memory';
   @State private toolsTabRequest: number = 0;
 
@@ -256,6 +255,9 @@ struct Index {
     const starting = !this.session;
     if (!this.session) {
       linuxRuntime.initialize(context);
+      linuxRuntime.prewarmOnStartup(context).catch((error: Error) => {
+        Diagnostics.log('warn', 'linux-runtime', 'startup_prewarm_failed', {}, error);
+      });
       try { knowledgeBaseAccess.initialize(context); }
       catch (error) { Diagnostics.log('warn', 'knowledge-base', 'load_failed', {}, error as Error); }
       imaClient.load().catch((error: Error) => { Diagnostics.log('warn', 'ima', 'settings_failed', {}, error); });
@@ -289,7 +291,6 @@ struct Index {
       }
       this.offerOnboarding();
       if (starting && this.app.ready && !this.onboardingActive && this.paths.size() === 0) { this.restoreDetailSelection(); }
-      this.prewarmLinuxOnStartup();
       this.offerStartupBackup();
       this.offerAnnouncement();
     });
@@ -461,17 +462,8 @@ struct Index {
       this.desktopCommandsDialog?.close();
       this.closeReviewInvitation(); this.startupBackupDialog?.close();
     }
-    if (this.foreground) { this.offerStartupBackup(); this.prewarmLinuxOnStartup(); }
+    if (this.foreground) { this.offerStartupBackup(); }
     this.offerAnnouncement();
-  }
-
-  private prewarmLinuxOnStartup(): void {
-    if (this.linuxStartupChecked || !this.privacy.allowed || !this.app.ready || !this.foreground) { return; }
-    this.linuxStartupChecked = true;
-    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    linuxRuntime.prewarmOnStartup(context).catch((error: Error) => {
-      Diagnostics.log('warn', 'linux-runtime', 'startup_prewarm_failed', {}, error);
-    });
   }
 
   private pcWindowVisibilityChanged(): void {
@@ -1281,7 +1273,7 @@ struct Index {
     try {
       const result = await this.getUIContext().getPromptAction().showActionMenu({ buttons: [
         { text: t('应用内浏览器'), color: $r('app.color.text_primary') },
-        { text: t('Linux 控制台'), color: $r('app.color.text_primary') }
+        { text: t('Linux 终端'), color: $r('app.color.text_primary') }
       ] });
       if (!this.foreground) { return; }
       if (result.index === 0) { this.openBrowser(); }
@@ -1769,11 +1761,10 @@ struct Index {
         .onDisAppear(() => this.syncNavigationLocale())
     } else if (name === 'linux-console') {
       NavDestination() {
-        LinuxConsolePanel({ active: this.linuxConsoleShown && this.foreground,
+        LinuxConsolePanel({ active: this.linuxConsoleShown && this.foreground, onBack: () => { this.paths.pop(); },
           onManage: () => { this.paths.pushPath({ name: 'sandbox-management' }); } })
       }
-        .title(t('Linux 控制台'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
-        .backgroundColor($r('app.color.page_background'))
+        .hideTitleBar(true).backgroundColor($r('app.color.console_canvas'))
         .onShown(() => { this.linuxConsoleShown = true; })
         .onHidden(() => { this.linuxConsoleShown = false; })
     } else if (name === 'life-panels') {

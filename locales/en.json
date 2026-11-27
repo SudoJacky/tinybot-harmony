@@ -3254,5 +3254,19 @@
   "请输入 {0} 到 {1} MiB 之间的整数。": "Enter a whole number between {0} and {1} MiB.",
   "虚拟机内存（MiB）": "Virtual machine memory (MiB)",
   "Linux 运行时": "Linux runtime",
-  "启用 Linux 沙盒后即可使用控制台。": "Enable the Linux sandbox to use the console."
+  "启用 Linux 沙盒后即可使用控制台。": "Enable the Linux sandbox to use the console.",
+  "Linux 终端": "Linux Terminal",
+  "终端外观": "Terminal appearance",
+  "光标样式": "Cursor shape",
+  "方块": "Block",
+  "竖线": "Bar",
+  "下划线": "Underline",
+  "终端已断开": "Disconnected",
+  "连接终端": "Connect",
+  "正在断开": "Disconnecting",
+  "终端输出过快，请重新连接。": "Terminal output exceeded the display buffer. Reconnect to continue.",
+  "终端已连接": "Connected",
+  "启动 Linux": "Start Linux",
+  "Linux 已就绪": "Linux ready",
+  "助手正在执行命令": "Assistant running"
 }

@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  background: #171b24;
+  background: #1c1e20;
 }
 
 html, body {
@@ -12,7 +12,7 @@ html, body {
 
 body {
   box-sizing: border-box;
-  padding: 12px 12px 10px;
+  padding: 8px 12px;
 }
 
 #terminal, .xterm {
@@ -26,5 +26,5 @@ body {
 }
 
 @media (min-width: 700px) {
-  body { padding: 16px 18px 14px; }
+  body { padding: 10px 16px; }
 }

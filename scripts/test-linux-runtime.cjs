@@ -12,15 +12,16 @@ const directories = new Set();
 const files = new Map();
 const grants = new Set();
 const requests = [];
-const deviceInfo = { deviceType: 'tablet' };
+const deviceInfo = { deviceType: 'phone' };
+const boots = [];
+let serialEvents;
+const power = [];
 const MIB = 1024 * 1024;
 const TREE_OFFSET = 4 * MIB;
 const LARGE_FILE = Buffer.alloc(5 * MIB + 42, 0x65);
 let saved;
 let failFlush = false;
 let nativeStarted;
-let finishNativeJob;
-let cancelledJobId;
 let packingStarted;
 let finishPacking;
 let nextId = 0;
@@ -62,7 +63,7 @@ function executeGuest(disk) {
     inspectTree(disk, TREE_OFFSET + (request.projectBytes ?? 0), request.mountBytes);
   requests.push({ ...request, project, mounts });
   const failed = request.source === 'fail';
-  const result = { exitCode: failed ? 1 : 0, stdout: 'tinybot-linux-ok\n', stderr: '', truncated: false, bootMs: 1420 };
+  const result = { exitCode: failed ? 1 : 0, stdout: 'ok\n', stderr: '', truncated: false };
   if (request.collect && !failed) result.artifact = Buffer.from('exported').toString('base64');
   if (project !== undefined) {
     const state = failed || request.source === 'new-value' ? record('discarded', Buffer.from('bad')) :
@@ -84,30 +85,10 @@ function info(file) {
 const native = {
   linuxMemoryLimit: () => 2048,
   linuxStorageBytes: () => 24 * MIB,
-  async startLinux(id, dir, timeoutSeconds, memoryMiB) {
-    assert.ok(directories.has(dir));
-    jobs.push({ mode: 'child', id, timeoutSeconds, memoryMiB });
-    const disk = files.get(dir + '/exchange');
-    if (nativeStarted) {
-      const notify = nativeStarted;
-      nativeStarted = undefined;
-      return new Promise(resolve => {
-        finishNativeJob = resolve;
-        notify();
-      });
-    }
-    executeGuest(disk);
-    return '';
-  },
-  startLinuxConsole(id, dir, timeoutSeconds, memoryMiB) {
-    assert.equal(files.get(dir + '/exchange').toString('ascii', 0, 4), 'TBC1');
-    jobs.push({ mode: 'console-child', id, timeoutSeconds, memoryMiB });
-    return new Promise(resolve => { finishNativeJob = resolve; });
-  },
-  cancelLinux(id) {
-    assert.equal(id, jobs.at(-1).id);
-    cancelledJobId = id;
-    finishNativeJob('');
+  startEmbeddedLinux(dir, memoryMiB) { boots.push({ mode: 'phone', memoryMiB, dir }); },
+  startLinuxChild(id, dir, memoryMiB) {
+    boots.push({ mode: 'tablet', memoryMiB, dir });
+    return new Promise(() => {});
   },
   async packLinuxDirectory(dir, name, fd, offset) {
     assert.equal(dir, '/' + name);
@@ -182,23 +163,22 @@ const platform = {
   },
   'libtinybot_sandbox.so': { default: native },
   '../model/Diagnostics': { Diagnostics: { log: (...event) => logged.push(event) } },
-  './EmbeddedLinux': { EmbeddedLinux: class {
-    initialized = false;
-    failure = '';
-    async start(dir, memoryMiB) {
-      assert.ok(files.has(dir + '/exchange'));
-      this.memoryMiB = memoryMiB;
-      this.initialized = true;
-      this.dir = dir;
-    }
-    async run(signal, timeoutSeconds) {
-      signal.check();
-      if (timeoutSeconds === 0) {
-        assert.equal(files.get(this.dir + '/exchange').toString('ascii', 0, 4), 'TBC1');
-        await new Promise(resolve => signal.onCancel(resolve));
+  './LinuxControl': { LinuxControl: class {
+    async connect(dir) { assert.ok(files.has(dir + '/exchange')); }
+    async setRunning(running) { power.push(running); if (running) serialEvents.ready(); }
+  } },
+  './LinuxSerial': { LinuxSerial: class {
+    constructor(events) { this.events = events; }
+    async connect(path) { this.dir = path.slice(0, -4); serialEvents = this.events; }
+    async close() {}
+    async runJob(signal, seconds, shared) {
+      jobs.push({ seconds, shared });
+      if (nativeStarted) {
+        const notify = nativeStarted;
+        nativeStarted = undefined;
+        await new Promise(resolve => { signal.onCancel(resolve); notify(); });
         signal.check();
       }
-      jobs.push({ mode: 'embedded', timeoutSeconds, memoryMiB: this.memoryMiB });
       executeGuest(files.get(this.dir + '/exchange'));
     }
   } },
@@ -218,7 +198,7 @@ function load(file) {
   const { outputText } = ts.transpileModule(fs.readFileSync(file + '.ets', 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
   });
-  vm.runInNewContext(outputText, { exports, require: id => {
+  vm.runInNewContext(outputText, { exports, setTimeout, clearTimeout, require: id => {
     if (Object.hasOwn(platform, id)) return platform[id];
     if (!id.startsWith('.')) throw new Error('Unexpected platform dependency ' + id);
     return load(path.resolve(path.dirname(file), id));
@@ -261,7 +241,7 @@ async function main() {
   assert.equal(linuxRuntime.snapshot().settings.memoryMiB, 192);
   await linuxRuntime.prewarmOnStartup(context);
   assert.equal(jobs.length, 0);
-  assert.deepEqual(properties(), ['language', 'source', 'inputPath', 'outputPath']);
+  assert.deepEqual(properties(), ['language', 'source', 'session', 'inputPath', 'outputPath']);
   assert.equal(readOnly.definitions().length, 0);
   await assert.rejects(readOnly.execute(call({}), new Cancellation()), { code: 'PERMISSION_DENIED' });
   assert.equal(findSettings('Linux Runtime', [], false)[0].route, 'sandbox-management');
@@ -270,7 +250,7 @@ async function main() {
   const settings = { enabled: true, allowInput: false, allowOutput: false, timeoutSeconds: 30, startup: 'on-demand', memoryMiB: 256 };
   await linuxRuntime.save(settings);
   assert.deepEqual(JSON.parse(saved), settings);
-  assert.deepEqual(properties(), ['language', 'source']);
+  assert.deepEqual(properties(), ['language', 'source', 'session']);
   await assert.rejects(catalog.execute(call({ inputPath: 'input' }), new Cancellation()), { code: 'PERMISSION_DENIED' });
   await assert.rejects(catalog.execute(call({ outputPath: 'output' }), new Cancellation()), { code: 'PERMISSION_DENIED' });
   assert.equal(jobs.length, 0);
@@ -282,36 +262,35 @@ async function main() {
   assert.equal(linuxRuntime.snapshot().settings.enabled, true);
   assert.equal(logged.at(-1)[2], 'settings_save_failed');
 
-  await linuxRuntime.selfTest(context);
-  assert.equal(linuxRuntime.snapshot().history[0].outcome, 'complete');
-  assert.equal(linuxRuntime.snapshot().history[0].bootMs, 1420);
-  assert.equal(jobs.at(-1).timeoutSeconds, 30);
-  assert.equal(jobs.at(-1).memoryMiB, 256);
-  deviceInfo.deviceType = 'phone';
+  await Promise.all([linuxRuntime.warmUp(context), linuxRuntime.warmUp(context),
+    catalog.execute(call({}), new Cancellation())]);
+  assert.equal(boots.length, 1);
+  assert.equal(requests.length, 1);
+  assert.equal(jobs.at(-1).shared, true);
+  assert.equal(boots[0].memoryMiB, 256);
+  assert.equal(linuxRuntime.snapshot().history[0].kind, 'tool');
+  assert.equal(linuxRuntime.snapshot().history[1].kind, 'warm-up');
   await linuxRuntime.save({ timeoutSeconds: 60 });
-  await linuxRuntime.selfTest(context);
-  assert.equal(linuxRuntime.snapshot().history[0].kind, 'self-test');
-  assert.deepEqual(jobs.at(-1), { mode: 'embedded', timeoutSeconds: 60, memoryMiB: 256 });
+  await catalog.execute(call({}), new Cancellation());
+  assert.equal(jobs.at(-1).seconds, 60);
   const customMemory = 768;
   await linuxRuntime.save({ memoryMiB: customMemory });
   for (const bad of [191, 192.25, 2049]) {
     await assert.rejects(linuxRuntime.save({ memoryMiB: bad }), /192.*2048/);
   }
-  await linuxRuntime.selfTest(context);
+  await linuxRuntime.warmUp(context);
   assert.equal(linuxRuntime.snapshot().memoryInUse, 256);
-  assert.equal(jobs.at(-1).memoryMiB, 256);
-  assert.deepEqual(loading, ['linux/kernel', 'linux/root-v3-console.qcow2']);
+  assert.equal(boots.length, 1);
+  assert.deepEqual(loading, ['linux/kernel', 'linux/root-v5-shell.qcow2']);
 
-  deviceInfo.deviceType = 'tablet';
   const started = new Promise(resolve => { nativeStarted = resolve; });
   const parent = new Cancellation();
   const pending = catalog.execute(call({}), parent);
   await started;
   assert.equal(linuxRuntime.snapshot().active, 'tool');
-  await assert.rejects(linuxRuntime.selfTest(context), { code: 'BUSY' });
+  await assert.rejects(catalog.execute(call({}), new Cancellation()), { code: 'BUSY' });
   await assert.rejects(linuxRuntime.save(settings), /current sandbox operation|当前沙盒操作/);
   linuxRuntime.stop();
-  assert.equal(cancelledJobId, jobs.at(-1).id);
   assert.equal(linuxRuntime.snapshot().stopping, true);
   await assert.rejects(pending, RunCancelledError);
   assert.equal(parent.cancelled, false);
@@ -324,7 +303,7 @@ async function main() {
   const scope = { id: 'project-1', project: true };
   const scoped = new LinuxWorkspace(context, scope);
   const projectTools = new LinuxTools(context, workspace, scope);
-  const projectRun = source => projectTools.execute(call({ source }), new Cancellation());
+  const projectRun = source => projectTools.execute(call({ source, session: 'workspace' }), new Cancellation());
   await linuxRuntime.editWorkspace(() => scoped.setPersistent(true));
   await linuxRuntime.editWorkspace(() => scoped.addMount('file:///outside'));
   for (let index = 0; index < 9; index++) {
@@ -340,6 +319,7 @@ async function main() {
   await exchangeTools.execute(call({ inputPath: 'in', outputPath: 'out' }), new Cancellation());
   assert.equal(Buffer.from(requests.at(-1).input, 'base64').toString(), 'imported');
   assert.equal(outputs.get('out'), 'exported');
+  assert.equal(jobs.at(-1).shared, false);
   const packing = new Promise(resolve => { packingStarted = resolve; });
   const snapshotPending = projectRun('true');
   await packing;
@@ -350,7 +330,7 @@ async function main() {
   assert.equal(files.has(legacyPath), false);
   assert.equal(requests.at(-1).mounts.length, 311);
   assert.deepEqual(requests.at(-1).mounts[1], { name: 'outside/large.bin', dataSize: LARGE_FILE.length });
-  assert.equal(jobs.at(-1).memoryMiB, customMemory);
+  assert.equal(boots.at(-1).memoryMiB, 256);
   await assert.rejects(projectRun('fail'), { code: 'EXECUTION_FAILED' });
   await assert.rejects(projectTools.execute(call({ source: 'new-value', outputPath: 'blocked' }), new Cancellation()), /Disallowed file was created/);
   await projectRun('true');
@@ -368,6 +348,7 @@ async function main() {
   assert.deepEqual(requests.at(-1).project, []);
 
   await linuxRuntime.save({ startup: 'prewarm' });
+  deviceInfo.deviceType = 'tablet';
   modules.delete(runtimeModule);
   const restored = load(runtimeModule).linuxRuntime;
   restored.initialize(context);
@@ -375,35 +356,37 @@ async function main() {
   assert.deepEqual(JSON.parse(JSON.stringify(restored.snapshot().settings)), {
     ...settings, timeoutSeconds: 60, allowInput: true, allowOutput: true, startup: 'prewarm', memoryMiB: customMemory
   });
-  await restored.prewarmOnStartup(context);
-  const count = jobs.length;
-  await restored.prewarmOnStartup(context);
-  assert.equal(jobs.length, count);
-  assert.equal(restored.snapshot().history[0].kind, 'warm-up');
-  assert.deepEqual(requests.at(-1).mounts, undefined);
-
-  for (const mode of ['phone', 'tablet']) {
-    deviceInfo.deviceType = mode;
-    const stop = new Cancellation();
-    let notify, closed = false;
-    const connected = new Promise(resolve => { notify = resolve; });
-    const serial = { async connect() { notify(); }, async close() { closed = true; } };
-    const pendingConsole = linuxRuntime.runConsole(context, serial, stop);
-    await connected;
-    assert.equal(linuxRuntime.snapshot().active, 'console');
-    await assert.rejects(linuxRuntime.selfTest(context), { code: 'BUSY' });
-    stop.cancel();
-    await assert.rejects(pendingConsole, RunCancelledError);
-    assert.equal(closed, true);
-    assert.equal(linuxRuntime.snapshot().history[0].outcome, 'cancelled');
-    await linuxRuntime.selfTest(context);
-  }
-
+  const count = requests.length;
+  const stop = new Cancellation();
+  let attach;
+  const attached = new Promise(resolve => { attach = resolve; });
+  const output = [];
+  const observer = { ready: attach, output: bytes => output.push(Buffer.from(bytes).toString()), failed: assert.fail };
+  const firstView = restored.runConsole(context, observer, stop);
+  await Promise.all([attached, restored.prewarmOnStartup(context), restored.prewarmOnStartup(context)]);
+  assert.equal(boots.length, 2);
+  assert.equal(boots.at(-1).mode, 'tablet');
+  assert.equal(requests.length, count);
+  serialEvents.output(Buffer.from('before'));
+  stop.cancel();
+  await firstView;
+  serialEvents.output(Buffer.from('after'));
+  const again = new Cancellation();
+  let replay;
+  const reconnected = new Promise(resolve => { replay = resolve; });
+  const reattach = restored.runConsole(context, { ...observer, ready: replay }, again);
+  await reconnected;
+  assert.deepEqual(output, ['before', 'before', 'after']);
+  await restored.runTool(context, { language: 'shell', source: 'true' }, workspace, new Cancellation());
+  assert.equal(boots.length, 2);
+  again.cancel();
+  await reattach;
   await linuxRuntime.save({ enabled: false });
   assert.equal(catalog.definitions().length, 0);
   await assert.rejects(linuxRuntime.runConsole(context, {}, new Cancellation()), { code: 'TOOL_UNAVAILABLE' });
   await assert.rejects(tools.execute(call({}), new Cancellation()), { code: 'TOOL_UNAVAILABLE' });
-  await assert.rejects(linuxRuntime.selfTest(context), { code: 'TOOL_UNAVAILABLE' });
+  await assert.rejects(linuxRuntime.warmUp(context), { code: 'TOOL_UNAVAILABLE' });
+  assert.equal(power.at(-1), false);
   console.log('PASS Linux streaming exchange, large directory trees, project migration and rollback, custom memory, permissions and cancellation');
 }
 

@@ -3,8 +3,8 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { describe, it, expect } from '@ohos/hypium';
 import { LinuxTools } from '../../../main/ets/services/LinuxTools';
-import { linuxRuntime } from '../../../main/ets/services/LinuxRuntime';
-import { LinuxSerial } from '../../../main/ets/services/LinuxSerial';
+import { LinuxJob, linuxRuntime } from '../../../main/ets/services/LinuxRuntime';
+import { LinuxSerialEvents } from '../../../main/ets/services/LinuxSerial';
 import { LinuxWorkspace, LinuxWorkspaceScope } from '../../../main/ets/services/LinuxWorkspace';
 import { Cancellation, RunCancelledError } from '../../../main/ets/services/Cancellation';
 import { NativeWorkspaceFiles } from '../../../main/ets/services/NativeWorkspaceFiles';
@@ -12,7 +12,7 @@ import { ToolResultError } from '../../../main/ets/model/ToolFailure';
 import { WorkspaceStore } from '../../../main/ets/model/WorkspaceStore';
 
 interface Result { exitCode: number; stdout: string; stderr: string; }
-interface Args { language: string; source: string; inputPath?: string; outputPath?: string; }
+interface Args { session?: string; language: string; source: string; inputPath?: string; outputPath?: string; }
 
 export default function testsuite() {
   describe('LinuxRuntime', () => {
@@ -63,7 +63,7 @@ export default function testsuite() {
       } finally { await fs.rmdir(dir); }
     });
 
-    it('keepsAnInteractiveShellUntilExit', 0, async () => {
+    it('sharesTheGuestAndPreservesTheInteractiveShell', 0, async () => {
       const context = abilityDelegatorRegistry.getAbilityDelegator().getAppContext().createModuleContext('entry_test');
       linuxRuntime.initialize(context);
       const stop = new Cancellation();
@@ -71,10 +71,14 @@ export default function testsuite() {
       let ended = false;
       let output = '';
       let failure: Error | undefined;
-      const serial = new LinuxSerial({ ready: () => { ready = true; }, output: (bytes) => {
-        output += new util.TextDecoder('utf-8').decodeToString(bytes);
-      }, failed: (error) => { failure = error; stop.cancel(); } });
-      const pending = linuxRuntime.runConsole(context, serial, stop).catch((error: Error) => { failure = error; })
+      const events: LinuxSerialEvents = { ready: () => { ready = true; }, output: (bytes, history) => {
+        const chunk = new util.TextDecoder('utf-8').decodeToString(bytes);
+        output += chunk;
+        if (!history && chunk.includes('\x1b[6n')) {
+          linuxRuntime.input('\x1b[12;7R').catch((error: Error) => { failure = error; stop.cancel(); });
+        }
+      }, failed: (error) => { failure = error; stop.cancel(); } };
+      const pending = linuxRuntime.runConsole(context, events, stop).catch((error: Error) => { failure = error; })
         .finally(() => { ended = true; });
       const waitFor = async (condition: () => boolean): Promise<void> => {
         const deadline = Date.now() + 45000;
@@ -86,21 +90,34 @@ export default function testsuite() {
       };
       try {
         await waitFor(() => ready);
-        await serial.resize(113, 37);
-        await serial.input('cd /tmp\rprintf "cwd-%s\\n" "$PWD"\rstty size\r');
+        await linuxRuntime.resize(113, 37);
+        await linuxRuntime.input('export TB_TEST=shared; cd /tmp\rprintf "cwd-%s\\n" "$PWD"\rstty size\r');
         await waitFor(() => output.includes('cwd-/tmp') && output.includes('37 113'));
-        await serial.input('sleep 120\r');
+        await linuxRuntime.input('sleep 120\r');
         await waitFor(() => output.includes('sleep 120'));
         await new Promise<void>((resolve) => setTimeout(resolve, 400));
-        await serial.input('\x03');
-        await serial.input('printf "caught-%s\\n" interrupt\r');
+        await linuxRuntime.input('\x03');
+        await linuxRuntime.input('printf "caught-%s\\n" interrupt\r');
         await waitFor(() => output.includes('caught-interrupt'));
-        expect(await linuxRuntime.selfTest(context).then(() => true).catch(() => false)).assertFalse();
-        await serial.input('exit\r');
+        const job: LinuxJob = { language: 'shell', source:
+          'test "$(id -u):$(id -g):$(id -un)" = 0:0:root && test "$TB_TEST:$PWD" = shared:/tmp && ' +
+          'export TB_FROM_CHAT=ok && cat /proc/sys/kernel/random/boot_id' };
+        const receipt = await linuxRuntime.runTool(context, job, new NativeWorkspaceFiles(context.cacheDir), new Cancellation());
+        const bootId = receipt.stdout.trim();
+        expect(bootId.length).assertEqual(36);
+        await linuxRuntime.input('cat /proc/sys/kernel/random/boot_id\r');
+        await waitFor(() => output.includes(bootId));
+        stop.cancel();
         await waitFor(() => ended);
-        await pending;
-        if (failure) { throw failure; }
-        expect(await linuxRuntime.selfTest(context).then(() => true)).assertTrue();
+        const again = new Cancellation();
+        ready = false;
+        output = '';
+        const reattached = linuxRuntime.runConsole(context, events, again);
+        try {
+          await waitFor(() => ready && output.includes(bootId));
+          await linuxRuntime.input('printf "still-%s\\n" "$TB_FROM_CHAT:$PWD"\r');
+          await waitFor(() => output.includes('still-ok:/tmp'));
+        } finally { again.cancel(); await reattached; }
       } finally { stop.cancel(); await pending; }
     });
 
@@ -115,7 +132,7 @@ export default function testsuite() {
       const workspace = new LinuxWorkspace(context, scope);
       const tools = new LinuxTools(context, new NativeWorkspaceFiles(path), scope);
       const run = async (source: string): Promise<Result> => {
-        const args: Args = { language: 'shell', source: source };
+        const args: Args = { language: 'shell', source: source, session: 'workspace' };
         const text = await tools.execute({ id: 'project-test', type: 'function', function: {
           name: 'run_linux', arguments: JSON.stringify(args) } }, new Cancellation());
         return JSON.parse(text) as Result;

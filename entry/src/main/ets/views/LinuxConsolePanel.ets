@@ -1,19 +1,28 @@
 import { common } from '@kit.AbilityKit';
 import { webview } from '@kit.ArkWeb';
+import { preferences } from '@kit.ArkData';
 import { util } from '@kit.ArkTS';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
-import { Btn, Font, Radius, Space } from '../common/Theme';
-import { Banner } from '../common/Widgets';
+import { Btn, Font, Motion, Radius, Space } from '../common/Theme';
+import { Banner, IconButton } from '../common/Widgets';
 import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
 import { ToolFailure } from '../model/ToolFailure';
 import { Cancellation, RunCancelledError } from '../services/Cancellation';
 import { linuxRuntime } from '../services/LinuxRuntime';
-import { LinuxSerial, LinuxSerialEvents } from '../services/LinuxSerial';
+import { LinuxSerialEvents } from '../services/LinuxSerial';
 
 type ConsolePhase = 'loading' | 'starting' | 'connected' | 'stopping' | 'stopped' | 'failed';
-const TERMINAL_BACKGROUND: string = '#171B24';
+const TERMINAL_BACKGROUND: string = '#1C1E20';
+const TOOLBAR_INK: string = '#F2F0EA';
+const FONT_SIZES: number[] = [12, 14, 16];
+const CURSOR_STYLES: string[] = ['block', 'bar', 'underline'];
+
+interface TerminalAppearance {
+  fontSize: number;
+  cursor: string;
+}
 const TERMINAL_PAGE: string = 'resource://rawfile/linux-console/index.html';
 const OUTPUT_LIMIT: number = 1024 * 1024;
 const BATCH_BYTES: number = 48 * 1024;
@@ -42,37 +51,88 @@ export struct LinuxConsolePanel {
   @StorageProp('tinybot.locale') private locale: string = 'zh-CN';
   @Prop @Watch('visibilityChanged') active: boolean = false;
   @State private phase: ConsolePhase = 'loading';
+  @State private terminalStyle: TerminalAppearance = { fontSize: 12, cursor: 'block' };
+  onBack: () => void = () => {};
   onManage: () => void = () => {};
   @State private sandboxEnabled: boolean = linuxRuntime.snapshot().settings.enabled;
   @State private running: boolean = false;
+  @State private terminalInUse: boolean = false;
+  private unsubscribe?: () => void;
   @State private error: string = '';
   private mounted: boolean = false;
   private pageReady: boolean = false;
   private autoStart: boolean = true;
   private controller: webview.WebviewController = new webview.WebviewController();
-  private serial?: LinuxSerial;
   private signal?: Cancellation;
   private columns: number = 80;
   private rows: number = 24;
-  private startupTimer: number = -1;
   private output: Uint8Array[] = [];
   private outputBytes: number = 0;
+  private historyBytes: number = 0;
   private receipt: number = 0;
   private inFlight: number = 0;
   private bridge: ConsoleBridge = new ConsoleBridge((text) => this.onInput(text), (columns, rows) => this.onSize(columns, rows),
     (receipt) => this.onWritten(receipt), (text) => this.copySelection(text));
 
-  aboutToAppear(): void { this.mounted = true; }
+  private styleStore(): preferences.Preferences {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    return preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
+  }
+
+  aboutToAppear(): void {
+    this.mounted = true;
+    this.terminalInUse = linuxRuntime.snapshot().terminalInUse;
+    this.unsubscribe = linuxRuntime.subscribe(() => {
+      const busy = linuxRuntime.snapshot().terminalInUse;
+      if (busy === this.terminalInUse) { return; }
+      this.terminalInUse = busy;
+      if (this.phase === 'connected') { this.updateInput(); }
+    });
+    try {
+      const saved = this.styleStore().getSync('linuxConsoleAppearance', '');
+      if (saved === '') { return; }
+      const style = JSON.parse(saved as string) as TerminalAppearance;
+      if (!style || !FONT_SIZES.includes(style.fontSize) || !CURSOR_STYLES.includes(style.cursor)) {
+        throw new Error('Invalid Linux terminal appearance');
+      }
+      this.terminalStyle = style;
+    } catch (error) { this.styleError(error as Error); }
+  }
+
+  private styleError(error: Error): void {
+    Diagnostics.log('warn', 'linux-console', 'appearance_failed', {}, error);
+    this.toast(t('终端外观') + ' · ' + error.message);
+  }
+
+  private applyTerminalStyle(): void {
+    this.evaluate('window.tinybotTerminal.setAppearance(' + this.terminalStyle.fontSize + ',' +
+      JSON.stringify(this.terminalStyle.cursor) + ')');
+  }
+
+  private chooseStyle(fontSize: number, cursor: string): void {
+    const next: TerminalAppearance = { fontSize: fontSize, cursor: cursor };
+    try {
+      const store = this.styleStore();
+      store.putSync('linuxConsoleAppearance', JSON.stringify(next));
+      try { store.flushSync(); }
+      catch (error) {
+        store.putSync('linuxConsoleAppearance', JSON.stringify(this.terminalStyle));
+        throw error as Error;
+      }
+      this.terminalStyle = next;
+      this.applyTerminalStyle();
+    } catch (error) { this.styleError(error as Error); }
+  }
 
   aboutToDisappear(): void {
     this.mounted = false;
+    this.unsubscribe?.();
     this.signal?.cancel();
-    this.clearStartupTimer();
     this.discardOutput();
   }
 
   private visibilityChanged(): void {
-    if (!this.active) { this.stop(); }
+    if (!this.active) { this.autoStart = true; this.stop(); }
     else {
       this.sandboxEnabled = linuxRuntime.snapshot().settings.enabled;
       this.startIfReady();
@@ -82,16 +142,17 @@ export struct LinuxConsolePanel {
   private async pageLoaded(): Promise<void> {
     if (!this.mounted || this.pageReady) { return; }
     try {
-      await this.controller.runJavaScript('window.tinybotTerminal.configure(' + JSON.stringify(t('Linux 控制台')) + ',' +
+      await this.controller.runJavaScript('window.tinybotTerminal.configure(' + JSON.stringify(t('Linux 终端')) + ',' +
         JSON.stringify(this.locale) + ')');
       if (!this.mounted) { return; }
       this.pageReady = true;
+      this.applyTerminalStyle();
       this.startIfReady();
     } catch (error) { this.fail(error as Error); }
   }
 
   private startIfReady(): void {
-    if (!this.mounted || !this.active || !this.sandboxEnabled || !this.pageReady || !this.autoStart) { return; }
+    if (!this.mounted || !this.active || !this.sandboxEnabled || !this.pageReady || !this.autoStart || this.signal) { return; }
     this.autoStart = false;
     this.start();
   }
@@ -104,35 +165,27 @@ export struct LinuxConsolePanel {
     this.running = true;
     const signal = new Cancellation();
     this.signal = signal;
-    let connected = false;
     const events: LinuxSerialEvents = {
       ready: () => {
         if (!this.mounted || signal.cancelled) { return; }
-        connected = true;
-        this.clearStartupTimer();
         this.phase = 'connected';
-        this.evaluate('window.tinybotTerminal.setConnected(true)');
+        this.updateInput();
         this.onSize(this.columns, this.rows);
       },
-      output: (bytes) => this.queueOutput(bytes),
+      output: (bytes, history) => this.queueOutput(bytes, history),
       failed: (error) => { if (!signal.cancelled) { this.fail(error); } }
     };
-    const serial = new LinuxSerial(events);
-    this.serial = serial;
-    this.startupTimer = setTimeout(() => this.fail(new Error(t('Linux 控制台启动超时。'))), 45000);
     try {
       await this.controller.runJavaScript('window.tinybotTerminal.reset()');
       signal.check();
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      await linuxRuntime.runConsole(context, serial, signal);
-      if (!connected && !signal.cancelled) { throw new Error(t('Linux 在控制台就绪前退出。')); }
+      await linuxRuntime.runConsole(context, events, signal);
     } catch (error) {
       if (!(error instanceof RunCancelledError)) { this.fail(error as Error); }
     } finally {
-      this.clearStartupTimer();
       this.signal = undefined;
-      this.serial = undefined;
       this.finish();
+      this.startIfReady();
     }
   }
 
@@ -143,11 +196,6 @@ export struct LinuxConsolePanel {
     this.evaluate('window.tinybotTerminal.setConnected(false)');
   }
 
-  private clearStartupTimer(): void {
-    if (this.startupTimer >= 0) { clearTimeout(this.startupTimer); }
-    this.startupTimer = -1;
-  }
-
   private stop(): void {
     if (!this.signal || this.signal.cancelled) { return; }
     this.phase = 'stopping';
@@ -156,7 +204,6 @@ export struct LinuxConsolePanel {
 
   private fail(error: Error): void {
     if (!this.mounted || this.phase === 'failed') { return; }
-    this.clearStartupTimer();
     Diagnostics.log('warn', 'linux-console', 'session_failed', {}, error);
     this.error = error instanceof ToolFailure && error.code === 'BUSY' ? t('Linux 正在执行另一项任务。') : error.message;
     this.phase = 'failed';
@@ -170,9 +217,17 @@ export struct LinuxConsolePanel {
     }
   }
 
+  private updateInput(): void {
+    this.evaluate('window.tinybotTerminal.setConnected(' + String(!this.terminalInUse) + ')');
+  }
+
   private onInput(text: string): void {
-    if (this.phase === 'connected' && this.serial && typeof text === 'string' && text.length > 0) {
-      this.serial.input(text).catch((error: Error) => this.fail(error));
+    if (this.terminalInUse) {
+      if (text === '\x03') { linuxRuntime.stop(); }
+      return;
+    }
+    if (this.phase === 'connected' && typeof text === 'string' && text.length > 0) {
+      linuxRuntime.input(text).catch((error: Error) => this.fail(error));
     }
   }
 
@@ -180,21 +235,23 @@ export struct LinuxConsolePanel {
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 2 || rows < 2) { return; }
     this.columns = Math.min(500, columns);
     this.rows = Math.min(300, rows);
-    this.serial?.resize(this.columns, this.rows).catch((error: Error) => this.fail(error));
+    linuxRuntime.resize(this.columns, this.rows).catch((error: Error) => this.fail(error));
   }
 
   private discardOutput(): void {
     this.output = [];
     this.outputBytes = 0;
+    this.historyBytes = 0;
     this.inFlight = 0;
   }
 
-  private queueOutput(bytes: Uint8Array): void {
+  private queueOutput(bytes: Uint8Array, history: boolean = false): void {
     if (!this.mounted || this.signal?.cancelled) { return; }
     if (this.outputBytes + bytes.length > OUTPUT_LIMIT) {
-      this.fail(new Error(t('终端输出过快，会话已停止。')));
+      this.fail(new Error(t('终端输出过快，请重新连接。')));
       return;
     }
+    if (history) { this.historyBytes += bytes.length; }
     this.output.push(bytes);
     this.outputBytes += bytes.length;
     this.flushOutput();
@@ -202,7 +259,9 @@ export struct LinuxConsolePanel {
 
   private flushOutput(): void {
     if (!this.mounted || !this.pageReady || this.inFlight !== 0 || this.outputBytes === 0) { return; }
-    const batch = new Uint8Array(Math.min(this.outputBytes, BATCH_BYTES));
+    const history = this.historyBytes > 0;
+    const batch = new Uint8Array(Math.min(history ? this.historyBytes : this.outputBytes, BATCH_BYTES));
+    if (history) { this.historyBytes -= batch.length; }
     let length = 0;
     while (length < batch.length) {
       const next = this.output[0];
@@ -215,7 +274,7 @@ export struct LinuxConsolePanel {
     this.outputBytes -= batch.length;
     this.inFlight = ++this.receipt;
     const encoded = new util.Base64Helper().encodeToStringSync(batch);
-    this.evaluate('window.tinybotTerminal.write(' + JSON.stringify(encoded) + ',' + this.inFlight + ')');
+    this.evaluate('window.tinybotTerminal.write(' + JSON.stringify(encoded) + ',' + this.inFlight + ',' + String(history) + ')');
   }
 
   private onWritten(receipt: number): void {
@@ -255,10 +314,10 @@ export struct LinuxConsolePanel {
   private status(): string {
     if (!linuxRuntime.available) { return t('不可用'); }
     if (!this.sandboxEnabled) { return t('已停用'); }
-    if (this.phase === 'connected') { return t('已连接'); }
+    if (this.phase === 'connected') { return this.terminalInUse ? t('助手正在执行命令') : t('终端已连接'); }
     if (this.phase === 'starting') { return t('正在启动 Linux'); }
-    if (this.phase === 'stopping') { return t('正在停止'); }
-    if (this.phase === 'stopped') { return t('会话已结束'); }
+    if (this.phase === 'stopping') { return t('正在断开'); }
+    if (this.phase === 'stopped') { return t('终端已断开'); }
     if (this.phase === 'failed') { return t('失败'); }
     return t('正在加载');
   }
@@ -267,61 +326,130 @@ export struct LinuxConsolePanel {
   specialKey(name: string, label: string, accessibility: string) {
     Button(label).id('linux-console-key-' + name).fontFamily(this.appearance.fontFamily)
       .type(ButtonType.Normal).width(name === 'interrupt' ? 56 : 44).height(44).padding(0)
-      .fontSize(Font.caption + 1).fontWeight(FontWeight.Medium).borderRadius(Radius.sm)
-      .fontColor($r('app.color.text_primary')).backgroundColor($r('app.color.surface_variant'))
-      .enabled(this.phase === 'connected').accessibilityText(accessibility)
-      .onClick(() => this.evaluate('window.tinybotTerminal.key(' + JSON.stringify(name) + ')'))
+      .fontSize(Font.caption + 1).fontWeight(FontWeight.Medium)
+      .fontColor($r('app.color.text_primary'))
+      .linearGradient({ angle: 180, colors: [[$r('app.color.console_key_top'), 0], [$r('app.color.console_key_bottom'), 1]] })
+      .border({ width: { top: 0.5, left: 0.5, right: 0.5, bottom: 1 }, color: $r('app.color.console_key_edge'), radius: 9 })
+      .shadow({ radius: 2, offsetY: 1, color: '#17000000' })
+      .clickEffect(this.appearance.effectStrength > 0 ? Motion.pressSmall : null)
+      .enabled(this.phase === 'connected' && (!this.terminalInUse || name === 'interrupt')).accessibilityText(accessibility)
+      .onClick(() => {
+        if (name === 'interrupt' && this.terminalInUse) { linuxRuntime.stop(); }
+        else { this.evaluate('window.tinybotTerminal.key(' + JSON.stringify(name) + ')'); }
+      })
+  }
+
+  private cursorLabel(style: string): string {
+    if (style === 'bar') { return t('竖线'); }
+    if (style === 'underline') { return t('下划线'); }
+    return t('方块');
   }
 
   @Builder
-  controls() {
-    Row({ space: Space.sm }) {
-      Circle().width(8).height(8).fill(this.phase === 'connected' ? '#4C9C73' : $r('app.color.text_tertiary'))
-        .accessibilityLevel('no')
-      Text(this.status()).id('linux-console-status').fontFamily(this.appearance.fontFamily)
-        .fontSize(Font.caption).fontColor($r('app.color.text_secondary')).layoutWeight(1).maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+  styleMenu() {
+    Menu() {
+      MenuItemGroup({ header: t('字号') }) {
+        ForEach(FONT_SIZES, (size: number) => {
+          MenuItem({ content: String(size) + ' px' }).id('linux-console-font-' + size)
+            .selected(this.terminalStyle.fontSize === size).selectIcon(true)
+            .onClick(() => this.chooseStyle(size, this.terminalStyle.cursor))
+        }, (size: number) => String(size))
+      }
+      MenuItemGroup({ header: t('光标样式') }) {
+        ForEach(CURSOR_STYLES, (style: string) => {
+          MenuItem({ content: this.cursorLabel(style) }).id('linux-console-cursor-' + style)
+            .selected(this.terminalStyle.cursor === style).selectIcon(true)
+            .onClick(() => this.chooseStyle(this.terminalStyle.fontSize, style))
+        }, (style: string) => style)
+      }
+    }
+  }
+
+  @Builder
+  sessionButton(stop: boolean) {
+    Button({ type: ButtonType.Normal }) {
+      Row({ space: 6 }) {
+        if (stop) {
+          Rect().width(9).height(9).radius(2).fill(this.appearance.onAccentContainer)
+        } else {
+          SymbolGlyph($r('sys.symbol.play_fill')).fontSize(12).fontColor([this.appearance.onAccentContainer])
+        }
+        Text(stop ? t('断开连接') : t('连接终端')).fontSize(Font.small).fontWeight(FontWeight.Medium)
+          .fontColor(this.appearance.onAccentContainer).fontFamily(this.appearance.fontFamily)
+      }
+    }.id(stop ? 'linux-console-stop' : 'linux-console-start').height(44).padding({ left: 14, right: 14 })
+      .backgroundColor(this.appearance.accentContainer).borderRadius(12)
+      .accessibilityText(stop ? t('断开连接') : t('连接终端'))
+      .enabled(stop ? this.phase !== 'stopping' : this.pageReady && this.active && !this.running)
+      .onClick(() => { if (stop) { this.autoStart = false; this.stop(); } else { this.start(); } })
+  }
+
+  @Builder
+  header() {
+    Row({ space: Space.xs }) {
+      IconButton({ chevron: 'left', label: t('返回'), compId: 'linux-console-back',
+        fill: $r('app.color.console_canvas'), onTap: this.onBack })
+      Text(t('Linux 终端')).fontSize(Font.title).fontWeight(FontWeight.Bold).fontFamily(this.appearance.fontFamily)
+        .fontColor($r('app.color.text_primary')).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
       if (linuxRuntime.available && this.sandboxEnabled) {
-        Button(t('复制')).id('linux-console-copy').attributeModifier(Btn.textSmall).constraintSize({ minHeight: 44 })
-          .enabled(this.phase === 'connected' || this.phase === 'stopped')
-          .onClick(() => this.evaluate('window.tinybotTerminal.copy()'))
-        PasteButton({ text: PasteDescription.PASTE, buttonType: ButtonType.Normal })
-          .id('linux-console-paste').constraintSize({ minHeight: 44 }).borderRadius(Radius.sm)
-          .fontSize(13).fontColor($r('app.color.text_primary')).backgroundColor($r('app.color.surface_variant'))
-          .enabled(this.phase === 'connected').onClick((_event: ClickEvent, result: PasteButtonOnClickResult) => {
-            if (result === PasteButtonOnClickResult.SUCCESS) { this.paste(); }
-            else { this.toast(t('无法访问剪贴板。')); }
-          })
+        Button({ type: ButtonType.Circle }) {
+          SymbolGlyph($r('sys.symbol.textformat')).fontSize(18).fontColor([$r('app.color.text_secondary')])
+        }.id('linux-console-appearance').width(44).height(44).padding(0).backgroundColor(Color.Transparent)
+          .accessibilityText(t('终端外观')).bindMenu(this.styleMenu, { systemMaterial: this.appearance.menu, mask: false })
         if (this.phase === 'starting' || this.phase === 'connected' || this.phase === 'stopping') {
-          Button(t('停止')).id('linux-console-stop').attributeModifier(Btn.textSmall).constraintSize({ minHeight: 44 })
-            .enabled(this.phase !== 'stopping').onClick(() => this.stop())
-        } else if (this.phase === 'stopped' || this.phase === 'failed') {
-          Button(t('启动')).id('linux-console-start').attributeModifier(Btn.tonal).constraintSize({ minHeight: 44 })
-            .enabled(this.pageReady && this.active && !this.running).onClick(() => this.start())
+          this.sessionButton(true)
+        } else {
+          this.sessionButton(false)
         }
       }
-    }.width('100%').constraintSize({ minHeight: 48 })
+    }.width('100%').constraintSize({ minHeight: 52 })
+  }
+
+  @Builder
+  terminalBar() {
+    Row({ space: Space.xs }) {
+      Circle().width(8).height(8).fill(this.phase === 'connected' ? (this.terminalInUse ? '#E5BE72' : '#81D996') :
+        this.phase === 'failed' ? '#F0A090' : '#A09F99').accessibilityLevel('no')
+      Text(this.status()).id('linux-console-status').fontFamily(this.appearance.fontFamily).margin({ left: 3 })
+        .fontSize(Font.small).fontColor(TOOLBAR_INK).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      Button({ type: ButtonType.Normal }) {
+        SymbolGlyph($r('sys.symbol.rectangle_on_rectangle')).fontSize(19).fontColor([TOOLBAR_INK])
+      }.id('linux-console-copy').width(44).height(44).padding(0).backgroundColor(TERMINAL_BACKGROUND)
+        .enabled(this.phase === 'connected' || this.phase === 'stopped').accessibilityText(t('复制'))
+        .onClick(() => this.evaluate('window.tinybotTerminal.copy()'))
+      PasteButton({ icon: PasteIconStyle.LINES, buttonType: ButtonType.Normal })
+        .id('linux-console-paste').width(44).height(44).iconSize(19).iconColor(TOOLBAR_INK)
+        .backgroundColor(TERMINAL_BACKGROUND).borderRadius(8)
+        .enabled(this.phase === 'connected' && !this.terminalInUse).onClick((_event: ClickEvent, result: PasteButtonOnClickResult) => {
+          if (result === PasteButtonOnClickResult.SUCCESS) { this.paste(); }
+          else { this.toast(t('无法访问剪贴板。')); }
+        })
+    }.width('100%').padding({ left: 12, right: 4 })
   }
 
   build() {
     Column({ space: Space.sm }) {
-      this.controls()
+      this.header()
       if (this.error) { Banner({ text: this.error, compId: 'linux-console-error' }) }
       if (linuxRuntime.available && this.sandboxEnabled) {
-        Web({ src: TERMINAL_PAGE, controller: this.controller })
-          .id('linux-console-web').width('100%').layoutWeight(1).borderRadius(Radius.md).clip(true)
-          .backgroundColor(TERMINAL_BACKGROUND).javaScriptAccess(true).domStorageAccess(false)
-          .fileAccess(false).onlineImageAccess(false).blockNetwork(true).multiWindowAccess(false)
-          .javaScriptProxy({ object: this.bridge, name: 'tinybotConsoleHost',
-            methodList: ['consoleInput', 'consoleSize', 'consoleWritten', 'consoleCopy'], controller: this.controller })
-          .onLoadIntercept((event) => event.data.isMainFrame() && (this.pageReady || event.data.getRequestUrl() !== TERMINAL_PAGE))
-          .onPageEnd(() => this.pageLoaded())
-          .onPermissionRequest((event) => event.request.deny())
-          .onErrorReceive((event) => this.fail(new Error(event.error.getErrorInfo())))
-          .onRenderExited(() => {
-            this.pageReady = false;
-            this.fail(new Error(t('终端界面已退出，请重新打开。')));
-          })
+        Column() {
+          this.terminalBar()
+          Divider().strokeWidth(0.5).color('#464848').width('94%')
+          Web({ src: TERMINAL_PAGE, controller: this.controller })
+            .id('linux-console-web').width('100%').layoutWeight(1)
+            .backgroundColor(TERMINAL_BACKGROUND).javaScriptAccess(true).domStorageAccess(false)
+            .fileAccess(false).onlineImageAccess(false).blockNetwork(true).multiWindowAccess(false)
+            .javaScriptProxy({ object: this.bridge, name: 'tinybotConsoleHost',
+              methodList: ['consoleInput', 'consoleSize', 'consoleWritten', 'consoleCopy'], controller: this.controller })
+            .onLoadIntercept((event) => event.data.isMainFrame() && (this.pageReady || event.data.getRequestUrl() !== TERMINAL_PAGE))
+            .onPageEnd(() => this.pageLoaded())
+            .onPermissionRequest((event) => event.request.deny())
+            .onErrorReceive((event) => this.fail(new Error(event.error.getErrorInfo())))
+            .onRenderExited(() => {
+              this.pageReady = false;
+              this.fail(new Error(t('终端界面已退出，请重新打开。')));
+            })
+        }.width('100%').layoutWeight(1).backgroundColor(TERMINAL_BACKGROUND).borderRadius(Radius.md).clip(true)
         Scroll() {
           Row({ space: Space.xs }) {
             this.specialKey('esc', 'Esc', t('Escape 键'))
@@ -331,10 +459,11 @@ export struct LinuxConsolePanel {
             this.specialKey('down', '↓', t('向下键'))
             this.specialKey('up', '↑', t('向上键'))
             this.specialKey('right', '→', t('向右键'))
-          }.constraintSize({ minHeight: 44 })
+          }.padding({ top: 2, bottom: 3, left: 1, right: 1 }).constraintSize({ minHeight: 44 })
         }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').align(Alignment.Start)
       } else {
         Column({ space: Space.md }) {
+          Text(this.status()).id('linux-console-status').fontSize(Font.small).fontColor($r('app.color.text_secondary'))
           Text(linuxRuntime.available ? t('启用 Linux 沙盒后即可使用控制台。') : t('当前安装包未包含 Linux 运行时。')).fontFamily(this.appearance.fontFamily)
             .fontSize(Font.body).fontColor($r('app.color.text_secondary')).textAlign(TextAlign.Center)
           if (linuxRuntime.available) {
@@ -343,6 +472,6 @@ export struct LinuxConsolePanel {
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
       }
     }.width('100%').height('100%').padding({ left: Space.md, right: Space.md, bottom: Space.sm })
-      .backgroundColor($r('app.color.page_background'))
+      .backgroundColor($r('app.color.console_canvas'))
   }
 }

@@ -4,14 +4,14 @@
   const surface = document.getElementById('terminal');
   const terminal = new window.Terminal({
     theme: {
-      background: '#171b24',
-      foreground: '#e4e9f2',
-      cursor: '#a5c9ff',
-      cursorAccent: '#171b24',
+      background: '#1c1e20',
+      foreground: '#f2f0eb',
+      cursor: '#fff3db',
+      cursorAccent: '#1c1e20',
       selectionBackground: '#3d5777',
       black: '#242b38',
       red: '#ef8d8d',
-      green: '#a1d2a9',
+      green: '#88dd9d',
       yellow: '#ebc787',
       blue: '#a5c9ff',
       magenta: '#cfabec',
@@ -19,9 +19,10 @@
       white: '#e4e9f2',
     },
     fontFamily: '"DejaVu Sans Mono", "Courier New", monospace',
-    fontSize: 14,
-    lineHeight: 1.2,
-    cursorStyle: 'bar',
+    fontSize: 12,
+    lineHeight: 1,
+    cursorStyle: 'block',
+    cursorInactiveStyle: 'block',
     scrollback: 3000,
     disableStdin: true,
     linkHandler: { activate() {} },
@@ -29,6 +30,10 @@
   const fit = new window.FitAddon.FitAddon();
   terminal.loadAddon(fit);
   terminal.parser.registerOscHandler(52, () => true);
+  let writingHistory = false;
+  // Replaying a past cursor or device query must not send a second reply to the shell.
+  terminal.parser.registerCsiHandler({ final: 'n' }, () => writingHistory);
+  terminal.parser.registerCsiHandler({ final: 'c' }, () => writingHistory);
   terminal.open(surface);
 
   let layoutFrame = 0;
@@ -59,10 +64,20 @@
       terminal.textarea?.setAttribute('aria-label', label);
       scheduleFit();
     },
-    write(encoded, receipt) {
+    setAppearance(fontSize, cursorStyle) {
+      terminal.options.fontSize = fontSize;
+      terminal.options.cursorStyle = cursorStyle;
+      terminal.options.cursorInactiveStyle = cursorStyle;
+      scheduleFit();
+    },
+    write(encoded, receipt, history) {
       const raw = atob(encoded);
       const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
-      terminal.write(bytes, () => host().consoleWritten(receipt));
+      writingHistory = history;
+      terminal.write(bytes, () => {
+        writingHistory = false;
+        host().consoleWritten(receipt);
+      });
     },
     setConnected(connected) {
       terminal.options.disableStdin = !connected;

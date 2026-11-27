@@ -195,26 +195,32 @@ def run_job(request, disk):
     return receipt
 
 
+def load_request(disk):
+    magic, size = HEADER.unpack(read_exact(disk, HEADER.size))
+    if magic != b"TBJ3" or not 0 < size <= HALF - HEADER.size:
+        raise ValueError("invalid request frame")
+    return json.loads(read_exact(disk, size))
+
+
+def store_result(disk, result):
+    data = json.dumps(result, ensure_ascii=False).encode()
+    if len(data) > HALF - HEADER.size:
+        raise ValueError("response exceeds exchange disk")
+    os.fsync(disk.fileno())
+    disk.seek(HALF)
+    write_all(disk, HEADER.pack(b"TBR3", len(data)) + data)
+    os.fsync(disk.fileno())
+
+
 def main():
+    subprocess.run(["/bin/busybox", "mount", "--make-rprivate", "/"], check=True)
+    subprocess.run(["/bin/busybox", "mount", "-t", "proc", "proc", "/proc"], check=True)
     with open("/dev/vdb", "r+b", buffering=0) as disk:
         try:
-            magic, size = HEADER.unpack(read_exact(disk, HEADER.size))
-            if magic != b"TBJ3" or not 0 < size <= HALF - HEADER.size:
-                raise ValueError("invalid request frame")
-            with open("/proc/uptime", encoding="ascii") as uptime:
-                boot_ms = int(float(uptime.read().split()[0]) * 1000)
-            result = run_job(json.loads(read_exact(disk, size)), disk)
-            result["bootMs"] = boot_ms
+            result = run_job(load_request(disk), disk)
         except Exception as error:
             result = {"error": str(error)}
-        data = json.dumps(result, ensure_ascii=False).encode()
-        if len(data) > HALF - HEADER.size:
-            raise ValueError("response exceeds exchange disk")
-        # Report success only after the project stream reaches the exchange disk.
-        os.fsync(disk.fileno())
-        disk.seek(HALF)
-        write_all(disk, HEADER.pack(b"TBR3", len(data)) + data)
-        os.fsync(disk.fileno())
+        store_result(disk, result)
 
 
 if __name__ == "__main__":

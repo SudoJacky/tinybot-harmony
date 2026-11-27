@@ -33,30 +33,23 @@ inline bool LinuxMemorySupported(int memoryMiB)
     return memoryMiB >= 192 && memoryMiB <= LinuxMemoryLimitMiB();
 }
 
-inline int RunLinuxEngine(LinuxEngineEntry entry, const std::string &dir, int memoryMiB, bool embedded, bool interactive = false)
+inline int RunLinuxEngine(LinuxEngineEntry entry, const std::string &dir, int memoryMiB)
 {
-    const auto assets = dir.substr(0, dir.rfind('/')) + "/tinybot-linux-assets-v3-console";
-    // Embedded guests may switch modes after a reset. A console child waits for its UI before boot.
-    const auto serial = embedded || interactive ?
-        "unix:" + dir + "/tty,server=on,wait=" + (embedded ? "off" : "on") : std::string("none");
+    const auto assets = dir.substr(0, dir.rfind('/')) + "/tinybot-linux-assets-v5-shell";
     std::vector<std::string> options = {
         "tinybot-linux", "-no-user-config", "-nodefaults",
         "-machine", "virt,gic-version=2", "-accel", "tcg,thread=single,tb-size=32",
         "-cpu", "max,sve=off", "-m", std::to_string(memoryMiB), "-smp", "1", "-display", "none",
-        "-serial", serial, "-monitor", "none", "-nic", "none",
+        "-serial", "unix:" + dir + "/tty,server=on,wait=off", "-monitor", "none", "-nic", "none",
         "-kernel", assets + "/kernel", "-append", "root=/dev/vda ro rootwait console=tty0 init=/linux-init panic=1",
-        "-drive", "if=none,id=root,format=qcow2,readonly=on,file=" + assets + "/root-v3-console.qcow2",
+        "-drive", "if=none,id=root,format=qcow2,readonly=on,file=" + assets + "/root-v5-shell.qcow2",
         "-device", "virtio-blk-pci,drive=root,addr=4",
         "-drive", "if=none,id=job,format=raw,file=" + dir + "/exchange",
         "-device", "virtio-blk-pci,drive=job,addr=5",
         "-drive", "if=none,id=workspace,format=raw,file=" + dir + "/workspace",
-        "-device", "virtio-blk-pci,drive=workspace,addr=6"
+        "-device", "virtio-blk-pci,drive=workspace,addr=6",
+        "-S", "-no-reboot", "-no-shutdown", "-qmp", "unix:" + dir + "/qmp,server=on,wait=off"
     };
-    if (embedded) {
-        options.insert(options.end(), {"-S", "-no-shutdown", "-qmp", "unix:" + dir + "/qmp,server=on,wait=off"});
-    } else {
-        options.push_back("-no-reboot");
-    }
     std::vector<char *> argv;
     for (auto &option : options) argv.push_back(option.data());
     argv.push_back(nullptr);

@@ -497,7 +497,7 @@ async function testUtilityMenu() {
     detailOpen: () => true, setDetailPane: open => opened.push(open), openBrowser: () => opened.push('browser'),
     paths: { getAllPathName: () => routes, pushPath: ({ name }) => routes.push(name) },
     getUIContext: () => ({ getPromptAction: () => ({ showActionMenu: async ({ buttons }) => {
-      assert.equal(buttons.map(button => button.text).join(', '), '应用内浏览器, Linux 控制台');
+      assert.equal(buttons.map(button => button.text).join(', '), '应用内浏览器, Linux 终端');
       return { index: choice };
     } }) })
   });

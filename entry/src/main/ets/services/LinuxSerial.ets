@@ -1,15 +1,16 @@
 import { util } from '@kit.ArkTS';
 import { fileIo as fs } from '@kit.CoreFileKit';
 import { socket } from '@kit.NetworkKit';
+import { ToolFailure } from '../model/ToolFailure';
 import { Cancellation } from './Cancellation';
 
-const READY: number[] = [84, 66, 67, 49]; // TBC1
+const READY: number[] = [84, 66, 67, 50]; // TBC2
 const CHUNK: number = 16384;
 const INPUT_LIMIT: number = 128 * 1024;
 
 export interface LinuxSerialEvents {
   ready: () => void;
-  output: (bytes: Uint8Array) => void;
+  output: (bytes: Uint8Array, history?: boolean) => void;
   failed: (error: Error) => void;
 }
 
@@ -20,6 +21,8 @@ export class LinuxSerial {
   private marker: number = 0;
   private waitingBytes: number = 0;
   private pending: Promise<void> = Promise.resolve();
+  private incoming: Uint8Array = new Uint8Array(0);
+  private jobDone?: (error?: Error, busy?: string) => void;
   private events: LinuxSerialEvents;
 
   constructor(events: LinuxSerialEvents) { this.events = events; }
@@ -32,13 +35,37 @@ export class LinuxSerial {
     let offset = 0;
     while (this.marker < READY.length && offset < bytes.length) {
       if (bytes[offset++] !== READY[this.marker++]) {
-        this.stopping = true;
-        this.events.failed(new Error('Invalid Linux console startup response'));
+        this.fail(new Error('Invalid Linux console startup response'));
         return;
       }
       if (this.marker === READY.length) { this.events.ready(); }
     }
-    if (offset < bytes.length && !this.stopping) { this.events.output(bytes.subarray(offset)); }
+    if (offset === bytes.length) { return; }
+    const data = new Uint8Array(this.incoming.length + bytes.length - offset);
+    data.set(this.incoming);
+    data.set(bytes.subarray(offset), this.incoming.length);
+    const view = new DataView(data.buffer);
+    let pos = 0;
+    while (pos + 3 <= data.length) {
+      const kind = data[pos];
+      const size = view.getUint16(pos + 1, true);
+      if (!(kind === 1 && size > 0 && size <= CHUNK || kind === 3 && size === 1)) {
+        this.fail(new Error('Invalid Linux runtime frame'));
+        return;
+      }
+      const end = pos + 3 + size;
+      if (end > data.length) { break; }
+      if (kind === 1) { this.events.output(data.slice(pos + 3, end)); }
+      else if (this.jobDone) {
+        const status = data[pos + 3];
+        if (status > 4) { this.fail(new Error('Invalid Linux task status')); return; }
+        const reasons: string[] = ['', '', 'The terminal has an unfinished input line.',
+          'The terminal is processing keyboard input.', 'The terminal is running a foreground command.'];
+        this.jobDone(status === 1 ? new Error('Linux task worker exited') : undefined, reasons[status]);
+      }
+      pos = end;
+    }
+    this.incoming = data.slice(pos);
   }
 
   async connect(path: string, cancellation: Cancellation, exited: () => boolean = () => false): Promise<void> {
@@ -53,8 +80,8 @@ export class LinuxSerial {
     const client = socket.constructLocalSocketInstance();
     this.client = client;
     client.on('message', (event: socket.LocalSocketMessageInfo) => { this.receive(event.message); });
-    client.on('error', (error: Error) => { if (!this.stopping) { this.events.failed(error); } });
-    client.on('close', () => { this.connected = false; });
+    client.on('error', (error: Error) => { this.fail(error); });
+    client.on('close', () => { this.connected = false; this.fail(new Error('Linux serial disconnected')); });
     await client.connect({ address: { address: path }, timeout: 3000 });
     this.connected = true;
     cancellation.check();
@@ -94,6 +121,44 @@ export class LinuxSerial {
     fields.setUint16(0, columns, true);
     fields.setUint16(2, rows, true);
     return this.queue(2, size);
+  }
+
+  fail(error: Error): void {
+    if (this.stopping) { return; }
+    this.stopping = true;
+    this.jobDone?.(error);
+    this.events.failed(error);
+  }
+
+  async runJob(signal: Cancellation, seconds: number, shared: boolean): Promise<void> {
+    signal.check();
+    if (!this.ready || this.stopping || this.jobDone) { throw new Error('Linux job channel unavailable'); }
+    let abort: Error | undefined;
+    let watchdog: number = -1;
+    let disconnect: () => void = () => {};
+    const control = (kind: number): void => {
+      this.queue(kind, new Uint8Array([0])).catch((error: Error) => this.fail(error));
+    };
+    const cancel = (error: Error): void => {
+      if (abort || !this.jobDone) { return; }
+      abort = error;
+      control(4);
+      watchdog = setTimeout(() => this.fail(new Error('Linux did not acknowledge cancellation')), 10000);
+    };
+    const timeout = setTimeout(() => cancel(new Error('Linux task exceeded ' + seconds + ' seconds')), seconds * 1000);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.jobDone = (error?: Error, busy?: string): void => {
+          this.jobDone = undefined;
+          if (abort || error) { reject(abort ?? error); }
+          else if (busy) { reject(new ToolFailure('BUSY', busy, 'wait_then_check')); }
+          else { resolve(); }
+        };
+        control(shared ? 5 : 3);
+        disconnect = signal.onCancel(() => cancel(new Error('Linux job cancelled')));
+      });
+    } catch (error) { signal.check(); throw error as Error; }
+    finally { disconnect(); clearTimeout(timeout); clearTimeout(watchdog); }
   }
 
   async close(): Promise<void> {

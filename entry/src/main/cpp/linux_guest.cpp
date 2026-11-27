@@ -8,8 +8,7 @@
 #include <string>
 #include <thread>
 
-namespace {
-void Run(NativeChildProcess_Args args, bool interactive)
+extern "C" __attribute__((visibility("default"))) void RunLinuxGuest(NativeChildProcess_Args args)
 {
     int channel = -1;
     for (auto *item = args.fdList.head; item != nullptr; item = item->next) {
@@ -30,22 +29,10 @@ void Run(NativeChildProcess_Args args, bool interactive)
 
     if (dup2(channel, STDERR_FILENO) < 0) return;
     try {
-        int status = RunLinuxEngine(LoadLinuxEngine(), directory, memory, false, interactive);
+        int status = RunLinuxEngine(LoadLinuxEngine(), directory, memory);
         if (status) dprintf(channel, "QEMU exit %d", status);
         _exit(status);
     } catch (const std::exception &error) {
         dprintf(channel, "Loading TCI: %s", error.what());
     }
-}
-}
-
-// AppSpawn starts a fresh process for each VM.
-extern "C" __attribute__((visibility("default"))) void RunLinuxGuest(NativeChildProcess_Args args)
-{
-    Run(args, false);
-}
-
-extern "C" __attribute__((visibility("default"))) void RunLinuxConsole(NativeChildProcess_Args args)
-{
-    Run(args, true);
 }

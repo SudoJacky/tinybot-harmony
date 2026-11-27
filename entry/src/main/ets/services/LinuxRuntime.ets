@@ -8,18 +8,17 @@ import { Diagnostics } from '../model/Diagnostics';
 import { t } from '../model/I18n';
 import { ToolFailure, ToolResultError } from '../model/ToolFailure';
 import { Cancellation, RunCancelledError } from './Cancellation';
-import { EmbeddedLinux } from './EmbeddedLinux';
+import { LinuxControl } from './LinuxControl';
 import { writeBytes } from './FileBytes';
-import { createLinuxDisks, LINUX_TREE_OFFSET, readLinuxResponse, resetLinuxDisk, writeLinuxBytes, writeLinuxRequest } from './LinuxExchange';
-import { LinuxSerial } from './LinuxSerial';
+import { createLinuxDisks, LINUX_TREE_OFFSET, readLinuxResponse, resetLinuxDisk, writeLinuxRequest } from './LinuxExchange';
+import { LinuxSerial, LinuxSerialEvents } from './LinuxSerial';
 import { LinuxWorkspace, LinuxWorkspaceScope } from './LinuxWorkspace';
 import { FileJobWorkspace } from './WorkspaceFiles';
 
 const SETTINGS_KEY: string = 'settings';
 const FILE_LIMIT: number = 1024 * 1024;
-const SELF_TEST_OUTPUT: string = 'tinybot-linux-ok';
-const GUEST_ASSETS: string[] = ['kernel', 'root-v3-console.qcow2'];
-const ASSET_CACHE: string = '/tinybot-linux-assets-v3-console';
+const GUEST_ASSETS: string[] = ['kernel', 'root-v5-shell.qcow2'];
+const ASSET_CACHE: string = '/tinybot-linux-assets-v5-shell';
 const EMBEDDED_CACHE: string = '/tinybot-linux-embedded-v3';
 export const LINUX_TIMEOUTS: number[] = [30, 60, 120];
 export const LINUX_MEMORY: number[] = [192, 256, 384];
@@ -45,6 +44,7 @@ export interface LinuxRuntimeSettingsUpdate {
 }
 
 export interface LinuxJob {
+  session?: string;
   language: string;
   source: string;
   inputPath?: string;
@@ -57,10 +57,10 @@ interface GuestRequest {
 }
 interface GuestResponse {
   exitCode: number; stdout: string; stderr: string; truncated: boolean; error?: string; artifact?: string;
-  bootMs: number; projectBytes?: number;
+  projectBytes?: number;
 }
 interface LinuxReceipt { exitCode: number; stdout: string; stderr: string; truncated: boolean; outputPath?: string; bytes?: number; }
-type LinuxJobKind = 'tool' | 'self-test' | 'warm-up' | 'console';
+type LinuxJobKind = 'tool' | 'warm-up';
 type LinuxJobOutcome = 'complete' | 'failed' | 'cancelled';
 
 export interface LinuxJobStatus {
@@ -68,7 +68,6 @@ export interface LinuxJobStatus {
   outcome: LinuxJobOutcome;
   elapsedMs: number;
   startedAt: number;
-  bootMs?: number;
   error: string;
 }
 
@@ -79,6 +78,7 @@ export interface LinuxRuntimeSnapshot {
   separateProcess: boolean;
   active?: LinuxJobKind;
   stopping: boolean;
+  terminalInUse: boolean;
   fault: string;
   settingsError: string;
   history: LinuxJobStatus[];
@@ -101,13 +101,25 @@ class LinuxRuntime {
   private assetsReady: boolean = false;
   private memoryInUse?: number;
   private memoryLimit: number = 0;
-  private guestBootMs?: number;
+  private boot?: Promise<void>;
+  private starting: boolean = false;
+  private terminalInUse: boolean = false;
+  private fault: string = '';
+  private startupResult?: (error?: Error) => void;
+  private terminals: Set<LinuxSerialEvents> = new Set<LinuxSerialEvents>();
+  private transcript: Uint8Array[] = [];
+  private transcriptBytes: number = 0;
   private listeners: Set<() => void> = new Set<() => void>();
-  private phoneVm: EmbeddedLinux = new EmbeddedLinux(() => this.publish());
+  private control: LinuxControl = new LinuxControl((error) => this.fail(error));
+  private serial: LinuxSerial = new LinuxSerial({
+    ready: () => this.startupResult?.(),
+    output: (bytes) => this.recordOutput(bytes),
+    failed: (error) => this.fail(error)
+  });
 
-  get available(): boolean { return typeof native.startLinux === 'function'; }
+  get available(): boolean { return typeof native.startLinuxChild === 'function'; }
   get toolEnabled(): boolean {
-    return this.available && this.store !== undefined && this.settings.enabled && !this.phoneVm.failure;
+    return this.available && this.store !== undefined && this.settings.enabled && !this.fault;
   }
 
   private get separateProcess(): boolean { return deviceInfo.deviceType === 'tablet' || deviceInfo.deviceType === '2in1'; }
@@ -138,7 +150,7 @@ class LinuxRuntime {
 
   snapshot(): LinuxRuntimeSnapshot {
     return { available: this.available, ready: this.store !== undefined, saving: this.saving, separateProcess: this.separateProcess,
-      active: this.active, stopping: this.signal?.cancelled === true, fault: this.phoneVm.failure, settingsError: this.settingsError,
+      terminalInUse: this.terminalInUse, active: this.active ?? (this.starting ? 'warm-up' : undefined), stopping: this.signal?.cancelled === true, fault: this.fault, settingsError: this.settingsError,
       history: this.history, assetsReady: this.assetsReady, memoryInUse: this.memoryInUse,
       memoryLimit: this.memoryLimit, settings: this.settings };
   }
@@ -179,18 +191,24 @@ class LinuxRuntime {
     if (update.memoryMiB !== undefined) { this.validateMemory(update.memoryMiB); }
     this.validate(settings);
     await this.editWorkspace(async () => {
-      store.putSync(SETTINGS_KEY, JSON.stringify(settings));
-      try { await store.flush(); }
+      const changePower = settings.enabled !== this.settings.enabled && this.memoryInUse !== undefined && !this.fault;
+      if (changePower) { await this.control.setRunning(settings.enabled); }
+      try {
+        store.putSync(SETTINGS_KEY, JSON.stringify(settings));
+        await store.flush();
+      }
       catch (error) {
-        store.putSync(SETTINGS_KEY, JSON.stringify(this.settings));
+        try { store.putSync(SETTINGS_KEY, JSON.stringify(this.settings)); }
+        finally { if (changePower) { await this.control.setRunning(this.settings.enabled); } }
         throw error as Error;
       }
       this.settings = settings;
+      if (!settings.enabled) { this.terminals.forEach((view) => view.failed(new Error(t('已停用')))); }
     });
   }
 
   async editWorkspace(change: () => Promise<void>): Promise<void> {
-    if (this.active || this.saving) { throw new Error(t('请等待当前沙盒操作结束。')); }
+    if (this.starting || this.active || this.saving) { throw new Error(t('请等待当前沙盒操作结束。')); }
     this.saving = true;
     try { this.publish(); await change(); }
     catch (error) {
@@ -204,24 +222,98 @@ class LinuxRuntime {
 
   stop(): void { this.signal?.cancel(); }
 
-  runTool(context: common.Context, job: LinuxJob, files: FileJobWorkspace, cancellation: Cancellation,
-    scope?: LinuxWorkspaceScope): Promise<LinuxReceipt> {
-    return this.run(context, 'tool', job, cancellation, files, scope);
-  }
-
-  async selfTest(context: common.Context, warmUp: boolean = false): Promise<void> {
-    const job: LinuxJob = { language: 'python', source: 'import sqlite3\n' +
-      'with sqlite3.connect(":memory:") as db:\n' +
-      '    assert db.execute("SELECT 1").fetchone() == (1,)\n' +
-      'print("' + SELF_TEST_OUTPUT + '")' };
-    await this.run(context, warmUp ? 'warm-up' : 'self-test', job);
-  }
-
   async prewarmOnStartup(context: common.Context): Promise<void> {
-    if (this.toolEnabled && this.settings.startup === 'prewarm' && !this.active && !this.assetsReady) {
-      await this.selfTest(context, true);
+    if (this.toolEnabled && this.settings.startup === 'prewarm') { await this.warmUp(context); }
+  }
+
+  warmUp(context: common.Context): Promise<void> {
+    if (!this.toolEnabled || this.saving) {
+      return Promise.reject(new ToolFailure('TOOL_UNAVAILABLE', this.fault || t('Linux 沙盒不可用或已停用。'), 'inspect_error'));
+    }
+    if (!this.boot) { this.boot = this.bootGuest(context); }
+    return this.boot;
+  }
+
+  private fail(error: Error): void {
+    if (this.fault) { return; }
+    this.fault = error.message || String(error);
+    this.startupResult?.(error);
+    this.serial.fail(error);
+    this.terminals.forEach((view) => view.failed(error));
+    Diagnostics.log('warn', 'linux-runtime', 'guest_failed', {}, error);
+    this.publish();
+  }
+
+  private async bootGuest(context: common.Context): Promise<void> {
+    const started = Date.now();
+    const dir = context.cacheDir + EMBEDDED_CACHE;
+    const memory = this.settings.memoryMiB;
+    this.starting = true;
+    let childId: string = '';
+    let timer: number = -1;
+    try {
+      this.publish();
+      this.validateMemory(memory);
+      const startup = new Cancellation();
+      await this.stageAssets(context, startup);
+      if (await fs.access(dir)) { await fs.rmdir(dir); }
+      await fs.mkdir(dir);
+      await createLinuxDisks(dir, native.linuxStorageBytes(context.cacheDir));
+      if (this.separateProcess) {
+        childId = util.generateRandomUUID();
+        native.startLinuxChild(childId, dir, memory).then(() => {
+          this.fail(new Error('Linux child exited'));
+        }, (error: Error) => this.fail(error));
+      } else { native.startEmbeddedLinux(dir, memory); }
+      await this.control.connect(dir);
+      await this.serial.connect(dir + '/tty', startup, () => !!this.fault);
+      const ready = new Promise<void>((resolve, reject) => {
+        this.startupResult = (error?: Error): void => { if (error) { reject(error); } else { resolve(); } };
+        timer = setTimeout(() => reject(new Error(t('Linux 控制台启动超时。'))), 45000);
+      });
+      await Promise.all([ready, this.control.setRunning(true)]);
+      if (this.fault) { throw new Error(this.fault); }
+      this.memoryInUse = memory;
+      Diagnostics.log('info', 'linux-runtime', 'guest_ready', { elapsedMs: Date.now() - started });
+    } catch (error) {
+      this.fail(error as Error);
+      if (childId) { native.cancelLinux(childId); }
+      await this.serial.close();
+      throw error as Error;
+    } finally {
+      clearTimeout(timer);
+      this.startupResult = undefined;
+      this.starting = false;
+      const status: LinuxJobStatus = { kind: 'warm-up', startedAt: started, elapsedMs: Date.now() - started,
+        outcome: this.fault ? 'failed' : 'complete', error: this.fault };
+      this.history = [status].concat(this.history.slice(0, 11));
+      this.publish();
     }
   }
+
+  private recordOutput(bytes: Uint8Array): void {
+    this.transcript.push(bytes);
+    this.transcriptBytes += bytes.length;
+    while (this.transcriptBytes > 256 * 1024 || this.transcript.length > 4096) {
+      this.transcriptBytes -= this.transcript.shift()!.length;
+    }
+    this.terminals.forEach((view) => view.output(bytes));
+  }
+
+  async runConsole(context: common.Context, events: LinuxSerialEvents, signal: Cancellation): Promise<void> {
+    signal.check();
+    await this.warmUp(context);
+    signal.check();
+    this.terminals.add(events);
+    try {
+      events.ready();
+      this.transcript.forEach((bytes) => events.output(bytes, true));
+      await new Promise<void>((resolve) => signal.onCancel(resolve));
+    } finally { this.terminals.delete(events); }
+  }
+
+  input(text: string): Promise<void> { return this.settings.enabled ? this.serial.input(text) : Promise.resolve(); }
+  resize(columns: number, rows: number): Promise<void> { return this.serial.resize(columns, rows); }
 
   async imageSize(context: common.Context): Promise<number> {
     let total = 0;
@@ -234,79 +326,34 @@ class LinuxRuntime {
     return total;
   }
 
-  private async run(context: common.Context, kind: LinuxJobKind, job: LinuxJob, parent?: Cancellation,
-    files?: FileJobWorkspace, scope?: LinuxWorkspaceScope): Promise<LinuxReceipt> {
-    return this.withRuntime<LinuxReceipt>(kind, parent, async (signal) => {
+  runTool(context: common.Context, job: LinuxJob, files: FileJobWorkspace, parent: Cancellation,
+    scope?: LinuxWorkspaceScope): Promise<LinuxReceipt> {
+    return this.withRuntime<LinuxReceipt>(parent, async (signal) => {
       if (job.inputPath !== undefined && (!this.settings.allowInput || !files)) {
         throw new ToolFailure('PERMISSION_DENIED', t('Linux 沙盒未获准从工作区导入文件。'), 'check_permissions');
       }
       if (job.outputPath !== undefined && (!this.settings.allowOutput || !files)) {
         throw new ToolFailure('PERMISSION_DENIED', t('Linux 沙盒未获准向工作区导出文件。'), 'check_permissions');
       }
-      const receipt = await this.execute(context, job, signal, files, scope);
-      if (kind !== 'tool' && receipt.stdout.trim() !== SELF_TEST_OUTPUT) {
-        throw new Error(t('Linux 自检返回了意外结果。'));
-      }
-      return receipt;
+      return this.execute(context, job, signal, files, scope);
     });
   }
 
-  async runConsole(context: common.Context, serial: LinuxSerial, parent: Cancellation): Promise<void> {
-    await this.withRuntime<void>('console', parent, async (signal) => {
-      await this.withDisks<void>(context, signal, async (id, dir, fd) => {
-        await writeLinuxBytes(fd, new Uint8Array([84, 66, 67, 49]).buffer as ArrayBuffer, 0);
-        await fs.fsync(fd);
-        signal.check();
-        try {
-          if (this.separateProcess) {
-            await this.runConsoleChild(dir, id, serial, signal);
-          } else {
-            await this.startEmbedded(dir);
-            await serial.connect(dir + '/tty', signal);
-            await this.phoneVm.run(signal, 0);
-          }
-        } finally { await serial.close(); }
-      });
-    });
-  }
-
-  private async runConsoleChild(dir: string, id: string, serial: LinuxSerial, cancellation: Cancellation): Promise<void> {
-    let exited = false;
-    let failure: Error | undefined;
-    const pending = native.startLinuxConsole(id, dir, this.settings.timeoutSeconds, this.settings.memoryMiB).then((_diagnostics: string) => { exited = true; }, (error: Error) => {
-      failure = error;
-      exited = true;
-    });
-    const unsubscribe = cancellation.onCancel(() => { native.cancelLinux(id); });
-    try {
-      try { await serial.connect(dir + '/tty', cancellation, () => exited); }
-      catch (error) { throw failure ?? error as Error; }
-      await pending;
-      cancellation.check();
-      if (failure) { throw failure; }
-    } finally {
-      unsubscribe();
-      if (!exited) { native.cancelLinux(id); }
-      await pending;
-    }
-  }
-
-  private async withRuntime<T>(kind: LinuxJobKind, parent: Cancellation | undefined,
+  private async withRuntime<T>(parent: Cancellation,
     operation: (signal: Cancellation) => Promise<T>): Promise<T> {
-    parent?.check();
+    parent.check();
     if (!this.available || !this.store || !this.settings.enabled) {
       throw new ToolFailure('TOOL_UNAVAILABLE', t('Linux 沙盒不可用或已停用。'), 'check_available_tools');
     }
-    if (this.phoneVm.failure) { throw new ToolFailure('EXECUTION_FAILED', this.phoneVm.failure, 'inspect_error'); }
+    if (this.fault) { throw new ToolFailure('EXECUTION_FAILED', this.fault, 'inspect_error'); }
     if (this.active || this.saving) { throw new ToolFailure('BUSY', t('请等待当前沙盒操作结束。'), 'wait_then_check'); }
     this.validateMemory(this.memoryInUse ?? this.settings.memoryMiB);
     const signal = new Cancellation();
     const stopUpdates = signal.onCancel(() => this.publish());
-    const disconnect = parent?.onCancel(() => signal.cancel());
+    const disconnect = parent.onCancel(() => signal.cancel());
     const started = Date.now();
     this.signal = signal;
-    this.active = kind;
-    this.guestBootMs = undefined;
+    this.active = 'tool';
     let outcome: LinuxJobOutcome = 'complete';
     let message: string = '';
     try {
@@ -318,14 +365,14 @@ class LinuxRuntime {
       if (outcome === 'failed') {
         message = failure.message.slice(0, 500);
         Diagnostics.log('warn', 'linux-runtime', 'job_failed', { elapsedMs: Date.now() - started,
-          isolated: this.separateProcess, selfTest: kind === 'self-test' || kind === 'warm-up', timeoutSeconds: this.settings.timeoutSeconds }, failure);
+          isolated: this.separateProcess, timeoutSeconds: this.settings.timeoutSeconds }, failure);
       }
       throw failure;
     } finally {
-      disconnect?.();
+      disconnect();
       stopUpdates();
-      const result: LinuxJobStatus = { kind: kind, outcome: outcome, elapsedMs: Date.now() - started,
-        startedAt: started, bootMs: this.guestBootMs, error: message };
+      const result: LinuxJobStatus = { kind: 'tool', outcome: outcome, elapsedMs: Date.now() - started,
+        startedAt: started, error: message };
       this.history = [result].concat(this.history.slice(0, 11));
       this.active = undefined;
       this.signal = undefined;
@@ -346,27 +393,6 @@ class LinuxRuntime {
     this.assetsReady = true;
   }
 
-  private async startEmbedded(dir: string): Promise<void> {
-    if (!this.phoneVm.initialized) {
-      await this.phoneVm.start(dir, this.settings.memoryMiB);
-      this.memoryInUse = this.settings.memoryMiB;
-    }
-  }
-
-  private async runGuest(id: string, dir: string, fd: number, signal: Cancellation): Promise<string> {
-    let diagnostics = '';
-    if (this.separateProcess) {
-      const pending = native.startLinux(id, dir, this.settings.timeoutSeconds, this.settings.memoryMiB);
-      const unsubscribe = signal.onCancel(() => { native.cancelLinux(id); });
-      try { diagnostics = await pending; } finally { unsubscribe(); signal.check(); }
-    } else {
-      await this.startEmbedded(dir);
-      await this.phoneVm.run(signal, this.settings.timeoutSeconds);
-    }
-    signal.check();
-    return readLinuxResponse(fd, diagnostics);
-  }
-
   private async execute(context: common.Context, job: LinuxJob, signal: Cancellation, files?: FileJobWorkspace,
     scope?: LinuxWorkspaceScope): Promise<LinuxReceipt> {
     const request: GuestRequest = { language: job.language, source: job.source, collect: job.outputPath !== undefined };
@@ -374,55 +400,43 @@ class LinuxRuntime {
       const bytes = await files.readJobInput(job.inputPath, FILE_LIMIT, signal);
       request.input = bytes.length > 0 ? new util.Base64Helper().encodeToStringSync(bytes) : '';
     }
-    const workspace = scope ? new LinuxWorkspace(context, scope) : undefined;
-    return this.withDisks<LinuxReceipt>(context, signal, async (id, dir, fd) => {
-      try {
-        if (scope && workspace && this.settings.allowInput) {
-          const config = await workspace.config();
-          if (scope.project && config.persistent && this.settings.allowOutput) {
-            request.projectBytes = await workspace.packProject(fd, signal);
-          }
-          if (config.mounts.length > 0) {
-            request.mountBytes = await workspace.packMounts(config.mounts, fd, LINUX_TREE_OFFSET + (request.projectBytes ?? 0), signal);
-          }
-        }
-        signal.check();
-        await writeLinuxRequest(fd, JSON.stringify(request));
-        signal.check();
-        const json = await this.runGuest(id, dir, fd, signal);
-        return await this.finishJob(json, request, job, signal, fd, files, workspace);
-      } finally {
-        if (!this.separateProcess && !this.phoneVm.failure && (request.projectBytes !== undefined || request.mountBytes !== undefined)) {
-          const scratch = await fs.open(dir + '/workspace', fs.OpenMode.READ_WRITE);
-          try { await resetLinuxDisk(scratch.fd); } finally { await fs.close(scratch); }
-        }
-      }
-    });
-  }
-
-  private async withDisks<T>(context: common.Context, signal: Cancellation,
-    operation: (id: string, dir: string, fd: number) => Promise<T>): Promise<T> {
-    const separate = this.separateProcess;
-    const id = util.generateRandomUUID();
-    const dir = context.cacheDir + (separate ? '/linux-' + id : EMBEDDED_CACHE);
-    if (separate || !this.phoneVm.initialized) {
-      await this.stageAssets(context, signal);
-      if (!separate && await fs.access(dir)) { await fs.rmdir(dir); }
-      await fs.mkdir(dir);
-    }
+    const shared = job.session !== 'workspace' && job.inputPath === undefined && job.outputPath === undefined;
+    const workspace = !shared && scope ? new LinuxWorkspace(context, scope) : undefined;
+    await this.warmUp(context);
+    signal.check();
+    const dir = context.cacheDir + EMBEDDED_CACHE;
+    const disk = await fs.open(dir + '/exchange', fs.OpenMode.READ_WRITE);
+    const fd = disk.fd;
     try {
-      if (separate || !this.phoneVm.initialized) { await createLinuxDisks(dir, native.linuxStorageBytes(context.cacheDir)); }
-      const disk = await fs.open(dir + '/exchange', fs.OpenMode.READ_WRITE);
-      try {
-        return await operation(id, dir, disk.fd);
-      } finally {
-        try {
-          if (!separate && !this.phoneVm.failure) {
-            await resetLinuxDisk(disk.fd);
-          }
-        } finally { await fs.close(disk); }
+      if (scope && workspace && this.settings.allowInput) {
+        const config = await workspace.config();
+        if (scope.project && config.persistent && this.settings.allowOutput) {
+          request.projectBytes = await workspace.packProject(fd, signal);
+        }
+        if (config.mounts.length > 0) {
+          request.mountBytes = await workspace.packMounts(config.mounts, fd, LINUX_TREE_OFFSET + (request.projectBytes ?? 0), signal);
+        }
       }
-    } finally { if (separate) { await fs.rmdir(dir); } }
+      signal.check();
+      await writeLinuxRequest(fd, JSON.stringify(request));
+      signal.check();
+      this.terminalInUse = shared;
+      try { this.publish(); await this.serial.runJob(signal, this.settings.timeoutSeconds, shared); }
+      finally { this.terminalInUse = false; this.publish(); }
+      signal.check();
+      const json = await readLinuxResponse(fd);
+      return await this.finishJob(json, request, job, signal, fd, files, workspace);
+    } finally {
+      try {
+        if (!this.fault) {
+          await resetLinuxDisk(fd);
+          if (request.projectBytes !== undefined || request.mountBytes !== undefined) {
+            const scratch = await fs.open(dir + '/workspace', fs.OpenMode.READ_WRITE);
+            try { await resetLinuxDisk(scratch.fd); } finally { await fs.close(scratch); }
+          }
+        }
+      } finally { await fs.close(disk); }
+    }
   }
 
   private async finishJob(json: string, request: GuestRequest, job: LinuxJob, signal: Cancellation, fd: number,
@@ -430,10 +444,9 @@ class LinuxRuntime {
     const result = JSON.parse(json) as GuestResponse;
     if (result.error) { throw new ToolFailure('EXECUTION_FAILED', result.error, 'fix_code'); }
     if (!Number.isInteger(result.exitCode) || typeof result.stdout !== 'string' || typeof result.stderr !== 'string' ||
-      typeof result.truncated !== 'boolean' || !Number.isInteger(result.bootMs) || result.bootMs < 0) {
+      typeof result.truncated !== 'boolean') {
       throw new ToolFailure('INVALID_RESPONSE', 'Invalid Linux result.', 'inspect_result_before_retry');
     }
-    this.guestBootMs = result.bootMs;
     const receipt: LinuxReceipt = { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr, truncated: result.truncated };
     if (receipt.exitCode !== 0) { throw new ToolResultError(JSON.stringify(receipt), 'EXECUTION_FAILED', 'fix_code'); }
     if (request.projectBytes !== undefined && (result.projectBytes === undefined || !Number.isSafeInteger(result.projectBytes) ||

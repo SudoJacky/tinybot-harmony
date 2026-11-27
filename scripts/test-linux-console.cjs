@@ -31,7 +31,7 @@ function load(file) {
   const { outputText } = ts.transpileModule(fs.readFileSync(file + '.ets', 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 }
   });
-  vm.runInNewContext(outputText, { exports, setTimeout, require: id => {
+  vm.runInNewContext(outputText, { exports, setTimeout, clearTimeout, require: id => {
     if (Object.hasOwn(platform, id)) return platform[id];
     if (!id.startsWith('.')) throw new Error('Unexpected dependency ' + id);
     return load(path.resolve(path.dirname(file), id));
@@ -51,8 +51,8 @@ async function main() {
   await stream.input('ignored before handshake');
   assert.equal(tty.sent.length, 0);
   tty.emit([84, 66]);
-  tty.emit([67, 49, 0xe7]);
-  tty.emit([0x8c, 0xab]);
+  tty.emit([67, 50, 1, 3]);
+  tty.emit([0, 0xe7, 0x8c, 0xab]);
   assert.deepEqual(events, ['ready']);
   assert.equal(Buffer.concat(output).toString(), '猫');
   await stream.resize(120, 36);
@@ -62,6 +62,22 @@ async function main() {
   await stream.input('x'.repeat(16385));
   assert.deepEqual(tty.sent.slice(-2).map(frame => frame.readUInt16LE(1)), [16384, 1]);
   await assert.rejects(stream.input('x'.repeat(140000)), /input queue is full/);
+  const job = stream.runJob(new Cancellation(), 30, true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual([...tty.sent.at(-1)], [5, 1, 0, 0]);
+  tty.emit([3, 1, 0, 0]);
+  await job;
+  const busy = stream.runJob(new Cancellation(), 30, true);
+  await new Promise(resolve => setImmediate(resolve));
+  tty.emit([3, 1, 0, 2]);
+  await assert.rejects(busy, { code: 'BUSY', message: /unfinished input/ });
+  const stop = new Cancellation();
+  const interrupted = stream.runJob(stop, 30, false);
+  stop.cancel();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual([...tty.sent.at(-1)], [4, 1, 0, 0]);
+  tty.emit([3, 1, 0, 1]);
+  await assert.rejects(interrupted, { code: 'CANCELLED' });
   await stream.close();
 
   const broken = new LinuxSerial(observer);
