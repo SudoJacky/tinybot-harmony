@@ -62,6 +62,8 @@ async function main() {
   await stream.input('x'.repeat(16385));
   assert.deepEqual(tty.sent.slice(-2).map(frame => frame.readUInt16LE(1)), [16384, 1]);
   await assert.rejects(stream.input('x'.repeat(140000)), /input queue is full/);
+  await stream.input('still connected');
+  assert.equal(tty.sent.at(-1).subarray(3).toString(), 'still connected');
   const job = stream.runJob(new Cancellation(), 30, true);
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual([...tty.sent.at(-1)], [5, 1, 0, 0]);
@@ -86,7 +88,39 @@ async function main() {
   assert.match(events.at(-1), /Invalid Linux console startup response/);
   await broken.close();
 
-  console.log('PASS Linux console serial handshake, UTF-8, resize and input framing');
+  testScreenCopy();
+  console.log('PASS Linux console serial handshake, UTF-8, resize, input framing and viewport copy');
+}
+
+function testScreenCopy() {
+  const rows = [
+    ['off screen', false], ['wide  ', false], ['猫   ', true], ['  ', false], ['after viewport', false]
+  ];
+  const host = { consoleCopy: (...args) => copies.push(args) };
+  const copies = [];
+  let selected = '', native = null;
+  const surface = { contains: node => node === surface };
+  class Terminal {
+    constructor() {
+      this.parser = { registerOscHandler() {}, registerCsiHandler() {} };
+      this.rows = 3;
+      this.buffer = { active: { viewportY: 1, length: rows.length, getLine: index => ({
+        isWrapped: rows[index][1], translateToString: trim => trim ? rows[index][0].trimEnd() : rows[index][0]
+      }) } };
+    }
+    loadAddon() {} open() {} onScroll() {} onData() {}
+    getSelection() { return selected; }
+  }
+  const window = { Terminal, FitAddon: { FitAddon: class {} }, addEventListener() {},
+    tinybotConsoleHost: host, getSelection: () => native };
+  const document = { getElementById: id => id === 'terminal' ? surface : { addEventListener() {} } };
+  vm.runInNewContext(fs.readFileSync(path.join(root, '../resources/rawfile/linux-console/console.js'), 'utf8'), { window, document });
+  window.tinybotTerminal.copy();
+  native = { anchorNode: surface, toString: () => 'touch selection' };
+  window.tinybotTerminal.copy();
+  selected = 'xterm selection';
+  window.tinybotTerminal.copy();
+  assert.deepEqual(copies, [['wide  猫', true], ['touch selection', false], ['xterm selection', false]]);
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

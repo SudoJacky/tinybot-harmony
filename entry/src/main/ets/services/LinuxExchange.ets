@@ -28,15 +28,18 @@ export async function resetLinuxDisk(fd: number): Promise<void> {
 export async function writeLinuxBytes(fd: number, bytes: ArrayBuffer, offset: number): Promise<void> {
   let written = 0;
   while (written < bytes.byteLength) {
-    const count = await fs.write(fd, bytes.slice(written), { offset: offset + written });
+    const count = await fs.write(fd, written === 0 ? bytes : bytes.slice(written), { offset: offset + written });
     if (count <= 0) { throw new Error('Incomplete Linux request'); }
     written += count;
   }
 }
 
 async function readAt(fd: number, size: number, offset: number): Promise<ArrayBuffer> {
-  const bytes = new Uint8Array(size);
-  let read = 0;
+  const buffer = new ArrayBuffer(size);
+  if (!size) { return buffer; }
+  let read = await fs.read(fd, buffer, { offset: offset });
+  if (read <= 0) { throw new Error('Incomplete Linux receipt'); }
+  const bytes = new Uint8Array(buffer);
   while (read < size) {
     const chunk = new ArrayBuffer(size - read);
     const count = await fs.read(fd, chunk, { offset: offset + read });
@@ -44,7 +47,7 @@ async function readAt(fd: number, size: number, offset: number): Promise<ArrayBu
     bytes.set(new Uint8Array(chunk, 0, count), read);
     read += count;
   }
-  return bytes.buffer as ArrayBuffer;
+  return buffer;
 }
 
 export async function copyLinuxBytes(source: number, destination: number, sourceOffset: number, destinationOffset: number,

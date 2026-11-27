@@ -31,9 +31,9 @@ class ConsoleBridge {
   private input: (text: string) => void;
   private size: (columns: number, rows: number) => void;
   private written: (receipt: number) => void;
-  private copy: (text: string) => void;
+  private copy: (text: string, screen: boolean) => void;
   constructor(input: (text: string) => void, size: (columns: number, rows: number) => void,
-    written: (receipt: number) => void, copy: (text: string) => void) {
+    written: (receipt: number) => void, copy: (text: string, screen: boolean) => void) {
     this.input = input;
     this.size = size;
     this.written = written;
@@ -42,7 +42,7 @@ class ConsoleBridge {
   consoleInput(text: string): void { this.input(text); }
   consoleSize(columns: number, rows: number): void { this.size(columns, rows); }
   consoleWritten(receipt: number): void { this.written(receipt); }
-  consoleCopy(text: string): void { this.copy(text); }
+  consoleCopy(text: string, screen: boolean): void { this.copy(text, screen); }
 }
 
 @Component
@@ -57,10 +57,12 @@ export struct LinuxConsolePanel {
   @State private sandboxEnabled: boolean = linuxRuntime.snapshot().settings.enabled;
   @State private running: boolean = false;
   @State private terminalInUse: boolean = false;
+  @State private startLabel: string = '';
   private unsubscribe?: () => void;
   @State private error: string = '';
   private mounted: boolean = false;
   private pageReady: boolean = false;
+  private shellAttached: boolean = false;
   private autoStart: boolean = true;
   private controller: webview.WebviewController = new webview.WebviewController();
   private signal?: Cancellation;
@@ -72,7 +74,7 @@ export struct LinuxConsolePanel {
   private receipt: number = 0;
   private inFlight: number = 0;
   private bridge: ConsoleBridge = new ConsoleBridge((text) => this.onInput(text), (columns, rows) => this.onSize(columns, rows),
-    (receipt) => this.onWritten(receipt), (text) => this.copySelection(text));
+    (receipt) => this.onWritten(receipt), (text, screen) => this.copyText(text, screen));
 
   private styleStore(): preferences.Preferences {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -81,13 +83,9 @@ export struct LinuxConsolePanel {
 
   aboutToAppear(): void {
     this.mounted = true;
-    this.terminalInUse = linuxRuntime.snapshot().terminalInUse;
-    this.unsubscribe = linuxRuntime.subscribe(() => {
-      const busy = linuxRuntime.snapshot().terminalInUse;
-      if (busy === this.terminalInUse) { return; }
-      this.terminalInUse = busy;
-      if (this.phase === 'connected') { this.updateInput(); }
-    });
+    this.refreshRuntime();
+    this.unsubscribe = linuxRuntime.subscribe(() => this.refreshRuntime());
+    this.startIfReady();
     try {
       const saved = this.styleStore().getSync('linuxConsoleAppearance', '');
       if (saved === '') { return; }
@@ -102,6 +100,16 @@ export struct LinuxConsolePanel {
   private styleError(error: Error): void {
     Diagnostics.log('warn', 'linux-console', 'appearance_failed', {}, error);
     this.toast(t('终端外观') + ' · ' + error.message);
+  }
+
+  private refreshRuntime(): void {
+    const runtime = linuxRuntime.snapshot();
+    this.startLabel = runtime.memoryInUse !== undefined ? t('正在连接终端') :
+      runtime.assetsReady ? t('正在启动 Linux') : t('正在准备 Linux 镜像');
+    if (this.terminalInUse !== runtime.terminalInUse) {
+      this.terminalInUse = runtime.terminalInUse;
+      if (this.phase === 'connected') { this.updateInput(); }
+    }
   }
 
   private applyTerminalStyle(): void {
@@ -143,22 +151,23 @@ export struct LinuxConsolePanel {
     if (!this.mounted || this.pageReady) { return; }
     try {
       await this.controller.runJavaScript('window.tinybotTerminal.configure(' + JSON.stringify(t('Linux 终端')) + ',' +
-        JSON.stringify(this.locale) + ')');
+        JSON.stringify(this.locale) + ',' + JSON.stringify(t('回到最新输出')) + ')');
       if (!this.mounted) { return; }
       this.pageReady = true;
       this.applyTerminalStyle();
+      this.connectPage();
       this.startIfReady();
     } catch (error) { this.fail(error as Error); }
   }
 
   private startIfReady(): void {
-    if (!this.mounted || !this.active || !this.sandboxEnabled || !this.pageReady || !this.autoStart || this.signal) { return; }
+    if (!this.mounted || !this.active || !linuxRuntime.available || !this.sandboxEnabled || !this.autoStart || this.signal) { return; }
     this.autoStart = false;
     this.start();
   }
 
   private async start(): Promise<void> {
-    if (!this.mounted || !this.active || !this.pageReady || this.signal) { return; }
+    if (!this.mounted || !this.active || this.signal) { return; }
     this.error = '';
     this.discardOutput();
     this.phase = 'starting';
@@ -168,25 +177,34 @@ export struct LinuxConsolePanel {
     const events: LinuxSerialEvents = {
       ready: () => {
         if (!this.mounted || signal.cancelled) { return; }
-        this.phase = 'connected';
-        this.updateInput();
-        this.onSize(this.columns, this.rows);
+        this.shellAttached = true;
+        this.connectPage();
       },
       output: (bytes, history) => this.queueOutput(bytes, history),
       failed: (error) => { if (!signal.cancelled) { this.fail(error); } }
     };
     try {
-      await this.controller.runJavaScript('window.tinybotTerminal.reset()');
+      // A new Web already has an empty terminal. Boot while ArkWeb loads it.
+      if (this.pageReady) { await this.controller.runJavaScript('window.tinybotTerminal.reset()'); }
       signal.check();
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       await linuxRuntime.runConsole(context, events, signal);
     } catch (error) {
       if (!(error instanceof RunCancelledError)) { this.fail(error as Error); }
     } finally {
+      this.shellAttached = false;
       this.signal = undefined;
       this.finish();
       this.startIfReady();
     }
+  }
+
+  private connectPage(): void {
+    if (!this.pageReady || !this.shellAttached || this.signal?.cancelled || !this.active) { return; }
+    this.phase = 'connected';
+    this.updateInput();
+    this.onSize(this.columns, this.rows);
+    this.flushOutput();
   }
 
   private finish(): void {
@@ -227,7 +245,11 @@ export struct LinuxConsolePanel {
       return;
     }
     if (this.phase === 'connected' && typeof text === 'string' && text.length > 0) {
-      linuxRuntime.input(text).catch((error: Error) => this.fail(error));
+      linuxRuntime.input(text).catch((error: Error) => {
+        if (error instanceof ToolFailure && error.code === 'LIMIT_EXCEEDED') {
+          this.toast(t('这段输入未发送，请分段输入。'));
+        } else { this.fail(error); }
+      });
     }
   }
 
@@ -235,7 +257,9 @@ export struct LinuxConsolePanel {
     if (!Number.isInteger(columns) || !Number.isInteger(rows) || columns < 2 || rows < 2) { return; }
     this.columns = Math.min(500, columns);
     this.rows = Math.min(300, rows);
-    linuxRuntime.resize(this.columns, this.rows).catch((error: Error) => this.fail(error));
+    if (this.active && this.phase === 'connected') {
+      linuxRuntime.resize(this.columns, this.rows).catch((error: Error) => this.fail(error));
+    }
   }
 
   private discardOutput(): void {
@@ -288,21 +312,24 @@ export struct LinuxConsolePanel {
     if (this.mounted) { this.getUIContext().getPromptAction().showToast({ message: message, systemMaterial: this.appearance.surface }); }
   }
 
-  private async copySelection(text: string): Promise<void> {
+  private async copyText(text: string, screen: boolean): Promise<void> {
     if (!this.mounted || typeof text !== 'string') { return; }
-    if (!text) { this.toast(t('请先选中终端文本。')); return; }
+    if (!text) { this.toast(t('当前屏幕没有可复制的文本。')); return; }
     try {
       await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
-      this.toast(t('已复制'));
+      this.toast(screen ? t('已复制当前屏幕') : t('已复制'));
     } catch (error) { this.clipboardError(error as Error); }
   }
 
   private async paste(): Promise<void> {
+    const connection = this.signal;
     try {
       const data = await pasteboard.getSystemPasteboard().getData();
       const text = data.getPrimaryText();
       if (!text) { this.toast(t('剪贴板没有文本。')); return; }
-      if (this.phase === 'connected') { this.evaluate('window.tinybotTerminal.paste(' + JSON.stringify(text) + ')'); }
+      if (this.active && connection === this.signal && !connection?.cancelled && this.phase === 'connected' && !this.terminalInUse) {
+        this.evaluate('window.tinybotTerminal.paste(' + JSON.stringify(text) + ')');
+      }
     } catch (error) { this.clipboardError(error as Error); }
   }
 
@@ -315,7 +342,7 @@ export struct LinuxConsolePanel {
     if (!linuxRuntime.available) { return t('不可用'); }
     if (!this.sandboxEnabled) { return t('已停用'); }
     if (this.phase === 'connected') { return this.terminalInUse ? t('助手正在执行命令') : t('终端已连接'); }
-    if (this.phase === 'starting') { return t('正在启动 Linux'); }
+    if (this.phase === 'starting') { return this.startLabel; }
     if (this.phase === 'stopping') { return t('正在断开'); }
     if (this.phase === 'stopped') { return t('终端已断开'); }
     if (this.phase === 'failed') { return t('失败'); }
@@ -325,7 +352,7 @@ export struct LinuxConsolePanel {
   @Builder
   specialKey(name: string, label: string, accessibility: string) {
     Button(label).id('linux-console-key-' + name).fontFamily(this.appearance.fontFamily)
-      .type(ButtonType.Normal).width(name === 'interrupt' ? 56 : 44).height(44).padding(0)
+      .type(ButtonType.Normal).width(label.startsWith('Ctrl+') ? 56 : 44).height(44).padding(0)
       .fontSize(Font.caption + 1).fontWeight(FontWeight.Medium)
       .fontColor($r('app.color.text_primary'))
       .linearGradient({ angle: 180, colors: [[$r('app.color.console_key_top'), 0], [$r('app.color.console_key_bottom'), 1]] })
@@ -409,13 +436,13 @@ export struct LinuxConsolePanel {
   terminalBar() {
     Row({ space: Space.xs }) {
       Circle().width(8).height(8).fill(this.phase === 'connected' ? (this.terminalInUse ? '#E5BE72' : '#81D996') :
-        this.phase === 'failed' ? '#F0A090' : '#A09F99').accessibilityLevel('no')
+        this.phase === 'failed' ? '#F0A090' : this.phase === 'starting' ? '#E5BE72' : '#A09F99').accessibilityLevel('no')
       Text(this.status()).id('linux-console-status').fontFamily(this.appearance.fontFamily).margin({ left: 3 })
         .fontSize(Font.small).fontColor(TOOLBAR_INK).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
       Button({ type: ButtonType.Normal }) {
         SymbolGlyph($r('sys.symbol.rectangle_on_rectangle')).fontSize(19).fontColor([TOOLBAR_INK])
       }.id('linux-console-copy').width(44).height(44).padding(0).backgroundColor(TERMINAL_BACKGROUND)
-        .enabled(this.phase === 'connected' || this.phase === 'stopped').accessibilityText(t('复制'))
+        .enabled(this.phase === 'connected' || this.phase === 'stopped').accessibilityText(t('复制选区或当前屏幕'))
         .onClick(() => this.evaluate('window.tinybotTerminal.copy()'))
       PasteButton({ icon: PasteIconStyle.LINES, buttonType: ButtonType.Normal })
         .id('linux-console-paste').width(44).height(44).iconSize(19).iconColor(TOOLBAR_INK)
@@ -459,8 +486,13 @@ export struct LinuxConsolePanel {
             this.specialKey('down', '↓', t('向下键'))
             this.specialKey('up', '↑', t('向上键'))
             this.specialKey('right', '→', t('向右键'))
+            this.specialKey('lineStart', 'Ctrl+A', t('移到行首'))
+            this.specialKey('lineEnd', 'Ctrl+E', t('移到行尾'))
+            this.specialKey('clear', 'Ctrl+L', t('清屏'))
+            this.specialKey('pipe', '|', t('管道符'))
+            this.specialKey('slash', '/', t('斜杠'))
           }.padding({ top: 2, bottom: 3, left: 1, right: 1 }).constraintSize({ minHeight: 44 })
-        }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off).width('100%').align(Alignment.Start)
+        }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Auto).width('100%').align(Alignment.Start)
       } else {
         Column({ space: Space.md }) {
           Text(this.status()).id('linux-console-status').fontSize(Font.small).fontColor($r('app.color.text_secondary'))

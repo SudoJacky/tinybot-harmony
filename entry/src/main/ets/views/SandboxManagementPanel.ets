@@ -16,6 +16,7 @@ import { ProjectFolderAccess } from '../services/ProjectFolderAccess';
 export struct SandboxManagementPanel {
   @StorageProp('tinybot.appearance.style') private appearance: AppearanceStyle = new AppearanceStyle();
   @Prop readOnly: boolean = false;
+  onConsole: () => void = () => {};
   @Prop @Watch('scopeChanged') workspaceId: string = '';
   @Prop projectName: string = '';
   @State private runtime: LinuxRuntimeSnapshot = linuxRuntime.snapshot();
@@ -196,14 +197,19 @@ export struct SandboxManagementPanel {
                 Text(t('内核与镜像 {0} MiB', [(this.assetBytes / 1048576).toFixed(1)])).fontFamily(this.appearance.fontFamily)
                   .fontSize(Font.caption).fontColor($r('app.color.text_secondary'))
               }
-              if (this.runtime.active === 'tool') {
-                Button(t('停止当前任务')).id('linux-runtime-stop').fontFamily(this.appearance.fontFamily)
-                  .attributeModifier(Btn.tonal).enabled(!this.runtime.stopping).onClick(() => linuxRuntime.stop())
-              } else if (!this.runtime.active && this.runtime.memoryInUse === undefined) {
-                Button(t('手动预热')).id('linux-runtime-warm-up').fontFamily(this.appearance.fontFamily)
-                  .attributeModifier(Btn.tonal)
-                  .enabled(!this.locked() && this.runtime.settings.enabled && !this.runtime.fault)
-                  .onClick(() => this.warmUp())
+              Row({ space: Space.sm }) {
+                Button(t('打开终端')).id('linux-runtime-open-console').attributeModifier(Btn.primary)
+                  .enabled(this.runtime.ready && this.runtime.settings.enabled && !this.runtime.fault)
+                  .onClick(this.onConsole)
+                if (this.runtime.active === 'tool') {
+                  Button(t('停止当前任务')).id('linux-runtime-stop').fontFamily(this.appearance.fontFamily)
+                    .attributeModifier(Btn.tonal).enabled(!this.runtime.stopping).onClick(() => linuxRuntime.stop())
+                } else if (!this.runtime.active && this.runtime.memoryInUse === undefined) {
+                  Button(t('手动预热')).id('linux-runtime-warm-up').fontFamily(this.appearance.fontFamily)
+                    .attributeModifier(Btn.tonal)
+                    .enabled(!this.locked() && this.runtime.settings.enabled && !this.runtime.fault)
+                    .onClick(() => this.warmUp())
+                }
               }
             }
           }.width('100%').alignItems(HorizontalAlign.Start).padding(Space.lg)

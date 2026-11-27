@@ -89,7 +89,9 @@ export class LinuxSerial {
 
   private queue(kind: number, bytes: Uint8Array): Promise<void> {
     if (!this.ready || this.stopping || bytes.length === 0) { return Promise.resolve(); }
-    if (this.waitingBytes + bytes.length > INPUT_LIMIT) { return Promise.reject(new Error('Linux console input queue is full')); }
+    if (this.waitingBytes + bytes.length > INPUT_LIMIT && kind === 1) {
+      return Promise.reject(new ToolFailure('LIMIT_EXCEEDED', 'Linux console input queue is full', 'reduce_input'));
+    }
     this.waitingBytes += bytes.length;
     const send = async (): Promise<void> => {
       try {

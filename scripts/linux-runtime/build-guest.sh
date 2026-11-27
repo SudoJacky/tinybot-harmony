@@ -34,8 +34,11 @@ install -m 0644 "$here/guest-console.py" root/linux-console.py
 truncate -s 160M root.ext4
 mke2fs -q -F -t ext4 -d root -E root_owner=0:0 root.ext4
 qemu-img convert -f raw -O qcow2 -c root.ext4 root.qcow2
-curl -fsSL --retry 2 https://github.com/harmoninux/linux-config/releases/download/kernel-20260228/kernel_aarch64 -o kernel
-echo '914e3d790e191c17e7e1a845418c1deaede5bff318eb69754382f6deadd156f5  kernel' | sha256sum -c -
+kernel_sha=914e3d790e191c17e7e1a845418c1deaede5bff318eb69754382f6deadd156f5
+if [[ ! -f "$out/kernel" ]] || ! echo "$kernel_sha  $out/kernel" | sha256sum --check --status; then
+  curl -fsSL --retry 2 https://github.com/harmoninux/linux-config/releases/download/kernel-20260228/kernel_aarch64 -o kernel
+  echo "$kernel_sha  kernel" | sha256sum -c -
+  install -m 0644 kernel "$out/kernel"
+fi
 install -m 0644 root.qcow2 "$out/root-v5-shell.qcow2"
-install -m 0644 kernel "$out/kernel"
 sha256sum "$out/root-v5-shell.qcow2" "$out/kernel"

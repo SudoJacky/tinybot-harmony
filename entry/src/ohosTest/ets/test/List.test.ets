@@ -11,7 +11,7 @@ import { NativeWorkspaceFiles } from '../../../main/ets/services/NativeWorkspace
 import { ToolResultError } from '../../../main/ets/model/ToolFailure';
 import { WorkspaceStore } from '../../../main/ets/model/WorkspaceStore';
 
-interface Result { exitCode: number; stdout: string; stderr: string; }
+interface Result { exitCode: number; stdout: string; stderr: string; truncated: boolean; }
 interface Args { session?: string; language: string; source: string; inputPath?: string; outputPath?: string; }
 
 export default function testsuite() {
@@ -41,6 +41,11 @@ export default function testsuite() {
         expect(failure?.stderr.includes('AssertionError: red test')).assertTrue();
         const coldMs = Date.now() - start;
         await runner.print('Cold Python error and stderr: ' + coldMs + ' ms\n');
+        const large = await run({ session: 'workspace', language: 'shell',
+          source: 'dd if=/dev/zero bs=64k count=512 2>/dev/null && printf workspace-ok >&2' });
+        expect(large.stdout.length).assertEqual(16 * 1024);
+        expect(large.truncated).assertTrue();
+        expect(large.stderr).assertEqual('workspace-ok');
         const createStart = Date.now();
         const fixture = await run({ language: 'python', source:
           'import sqlite3\nc=sqlite3.connect("output")\nc.execute("CREATE TABLE items(n INT)")\nc.executemany("INSERT INTO items VALUES (?)", [(3,), (4,)])\nc.commit()', outputPath: 'items.db' });
@@ -105,6 +110,20 @@ export default function testsuite() {
         const receipt = await linuxRuntime.runTool(context, job, new NativeWorkspaceFiles(context.cacheDir), new Cancellation());
         const bootId = receipt.stdout.trim();
         expect(bootId.length).assertEqual(36);
+        const flood: LinuxJob = { language: 'shell',
+          source: 'printf "live-output-start\\n"; sleep 2; dd if=/dev/zero bs=64k count=512 2>/dev/null && printf done >&2' };
+        let finished = false;
+        const producing = linuxRuntime.runTool(context, flood, new NativeWorkspaceFiles(context.cacheDir), new Cancellation())
+          .finally(() => { finished = true; });
+        const observe = async (): Promise<void> => {
+          await waitFor(() => finished || output.includes('live-output-start'));
+          expect(finished).assertFalse();
+        };
+        const bounded = (await Promise.all([producing, observe()]))[0];
+        expect(bounded.exitCode).assertEqual(0);
+        expect(bounded.stdout.length).assertEqual(16 * 1024);
+        expect(bounded.stderr).assertEqual('done');
+        expect(bounded.truncated).assertTrue();
         await linuxRuntime.input('cat /proc/sys/kernel/random/boot_id\r');
         await waitFor(() => output.includes(bootId));
         stop.cancel();

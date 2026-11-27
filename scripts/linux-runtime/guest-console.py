@@ -129,6 +129,7 @@ def main():
     shell_pid, master = start_shell(serial, window)
     frames, to_shell, to_host = bytearray(), bytearray(), bytearray()
     job = shared = None
+    background = set()
     ready = editing = False
     last_input = 0.0
     sys.path.insert(0, "/")  # Only init's read-only image contains these modules.
@@ -163,15 +164,14 @@ def main():
     def finish_shared(shell_exit=None):
         nonlocal shared
         try:
-            result = shared.result(shell_exit)
+            result = shared.result(output, shell_exit)
             if not result:
                 return
-            for name in ("stdout", "stderr"):
-                output(result[name].encode().replace(b"\n", b"\r\n"))
             flush_disk("/dev/vdb")
             to_host.extend(HEADER.pack(RUN_JOB, 1) + bytes([0]))
         except (ValueError, OSError) as error:
             task_error(error)
+        shared.close(background)
         shared = None
 
     def task_error(error):
@@ -213,8 +213,13 @@ def main():
             to_host[:0] = b"TBC2"
             ready = True
         reads = ([serial] if len(to_shell) < QUEUE else []) + ([master] if len(to_host) < QUEUE else [])
+        if shared is not None:
+            reads.extend(shared.pipes)
+            reads.append(shared.status_fd)
+        reads.extend(background)
         writes = ([serial] if ready and to_host else []) + ([master] if to_shell else [])
-        readable, writable, _ = select.select(reads, writes, [], 0.05 if job or shared or not ready else None)
+        check_exit = job is not None or not ready or (shared is not None and shared.cancelled_at is not None)
+        readable, writable, _ = select.select(reads, writes, [], 0.05 if check_exit else None)
         for fd in writable:
             target = to_host if fd == serial else to_shell
             try:
@@ -226,6 +231,18 @@ def main():
                     raise
                 to_shell.clear()
         for fd in readable:
+            if fd in background:
+                if not os.read(fd, 65536):
+                    os.close(fd)
+                    background.remove(fd)
+                continue
+            if fd not in (serial, master):
+                # Reading the PTY may already have completed and closed this task.
+                if shared is not None and fd in shared.pipes:
+                    shared.drain(fd, output)
+                elif shared is not None and fd == shared.status_fd:
+                    finish_shared()
+                continue
             try:
                 data = os.read(fd, CHUNK)
             except BlockingIOError:
@@ -251,13 +268,11 @@ def main():
                 editing = False
                 to_shell.clear()
                 shell_pid, master = start_shell(serial, window)
-        if shared is not None:
-            if shared.cancelled_at is not None and idle_prompt():
+        if shared is not None and shared.cancelled_at is not None:
+            if idle_prompt():
                 finish_shared(130)
-            elif shared.cancelled_at is not None and time.monotonic() - shared.cancelled_at > 2:
+            elif time.monotonic() - shared.cancelled_at > 2:
                 os.kill(shell_pid, signal.SIGKILL)
-            else:
-                finish_shared()
         if job is not None:
             finished, status = os.waitpid(job, os.WNOHANG)
             if finished:

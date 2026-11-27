@@ -10,9 +10,12 @@ const jobs = [];
 const logged = [];
 const directories = new Set();
 const files = new Map();
+const fileIds = new WeakMap();
+let inode = 0;
 const grants = new Set();
 const requests = [];
 const deviceInfo = { deviceType: 'phone' };
+let installTime = 1;
 const boots = [];
 let serialEvents;
 const power = [];
@@ -78,7 +81,10 @@ function executeGuest(disk) {
 }
 
 function info(file) {
-  return { size: files.get(file)?.length ?? 0, isFile: () => files.has(file), isDirectory: () => directories.has(file),
+  const content = files.get(file);
+  if (content && !fileIds.has(content)) fileIds.set(content, ++inode);
+  return { size: content?.length ?? 0, ino: content ? fileIds.get(content) : 0, mtime: 1,
+    isFile: () => files.has(file), isDirectory: () => directories.has(file),
     isSymbolicLink: () => false };
 }
 
@@ -110,6 +116,8 @@ const native = {
 };
 
 const platform = {
+  '@kit.AbilityKit': { bundleManager: { BundleFlag: { GET_BUNDLE_INFO_DEFAULT: 0 },
+    getBundleInfoForSelf: async () => ({ updateTime: installTime }) } },
   '@kit.ArkData': { preferences: { getPreferencesSync: () => store } },
   '@kit.ArkTS': { util: {
     generateRandomUUID: () => 'test-' + nextId++,
@@ -130,6 +138,8 @@ const platform = {
         return { fd: file };
       },
       close: async () => {},
+      dup: fd => ({ fd }),
+      readText: async file => files.get(file).toString(),
       fsync: async () => {},
       access: async file => files.has(file) || directories.has(file),
       lstat: async file => info(file),
@@ -216,8 +226,16 @@ async function main() {
   const { Cancellation, RunCancelledError } = load(path.join(root, 'services/Cancellation'));
   const { findSettings } = load(path.join(root, 'model/SettingsSearch'));
   const loading = [];
+  let brokenImage = true;
   const context = { cacheDir: '/cache', filesDir: '/entry/files', getApplicationContext: () => ({ filesDir: '/files' }), resourceManager: {
-    getRawFileContent: async name => { loading.push(name); return new Uint8Array(1); }
+    getRawFdSync(name) {
+      loading.push(name);
+      if (brokenImage && name === 'linux/root-v5-shell.qcow2') throw new Error('Image unavailable');
+      const data = Buffer.from(name);
+      files.set('hap/' + name, Buffer.concat([Buffer.from('zip'), data, Buffer.from('end')]));
+      return { fd: 'hap/' + name, offset: 3, length: data.length };
+    },
+    closeRawFdSync() {}
   } };
   const workspace = {
     readJobInput: async () => assert.fail('Disallowed file was read'),
@@ -262,6 +280,11 @@ async function main() {
   assert.equal(linuxRuntime.snapshot().settings.enabled, true);
   assert.equal(logged.at(-1)[2], 'settings_save_failed');
 
+  await assert.rejects(linuxRuntime.warmUp(context), /Image unavailable/);
+  assert.equal(linuxRuntime.snapshot().fault, '');
+  assert.equal(linuxRuntime.snapshot().history[0].outcome, 'failed');
+  assert.equal(boots.length, 0);
+  brokenImage = false;
   await Promise.all([linuxRuntime.warmUp(context), linuxRuntime.warmUp(context),
     catalog.execute(call({}), new Cancellation())]);
   assert.equal(boots.length, 1);
@@ -281,7 +304,9 @@ async function main() {
   await linuxRuntime.warmUp(context);
   assert.equal(linuxRuntime.snapshot().memoryInUse, 256);
   assert.equal(boots.length, 1);
-  assert.deepEqual(loading, ['linux/kernel', 'linux/root-v5-shell.qcow2']);
+  assert.deepEqual(loading, ['linux/kernel', 'linux/root-v5-shell.qcow2', 'linux/root-v5-shell.qcow2']);
+  const image = '/cache/tinybot-linux-assets-v5-shell/root-v5-shell.qcow2';
+  assert.equal(files.get(image).toString(), 'linux/root-v5-shell.qcow2');
 
   const started = new Promise(resolve => { nativeStarted = resolve; });
   const parent = new Cancellation();
@@ -366,6 +391,7 @@ async function main() {
   await Promise.all([attached, restored.prewarmOnStartup(context), restored.prewarmOnStartup(context)]);
   assert.equal(boots.length, 2);
   assert.equal(boots.at(-1).mode, 'tablet');
+  assert.equal(loading.length, 3, 'Restart reused the installed images');
   assert.equal(requests.length, count);
   serialEvents.output(Buffer.from('before'));
   stop.cancel();
@@ -376,11 +402,35 @@ async function main() {
   const reconnected = new Promise(resolve => { replay = resolve; });
   const reattach = restored.runConsole(context, { ...observer, ready: replay }, again);
   await reconnected;
-  assert.deepEqual(output, ['before', 'before', 'after']);
+  assert.deepEqual(output, ['before', 'beforeafter']);
   await restored.runTool(context, { language: 'shell', source: 'true' }, workspace, new Cancellation());
   assert.equal(boots.length, 2);
   again.cancel();
   await reattach;
+  const tiny = Buffer.from('x');
+  for (let n = 0; n < 5000; n++) serialEvents.output(tiny);
+  const history = [];
+  const fragmentView = new Cancellation();
+  setImmediate(() => fragmentView.cancel());
+  await restored.runConsole(context, { ready() {}, failed: assert.fail,
+    output: block => history.push(Buffer.from(block)) }, fragmentView);
+  assert.equal(Buffer.concat(history).toString(), 'beforeafter' + 'x'.repeat(5000));
+  const over = Buffer.alloc(256 * 1024 + 61, 65);
+  over.fill(66, 256 * 1024);
+  serialEvents.output(over);
+  history.length = 0;
+  const wrappedView = new Cancellation();
+  setImmediate(() => wrappedView.cancel());
+  await restored.runConsole(context, { ready() {}, failed: assert.fail,
+    output: block => history.push(Buffer.from(block)) }, wrappedView);
+  assert.deepEqual(Buffer.concat(history), over.subarray(61));
+
+  const { prepareLinuxImages } = load(path.join(root, 'services/LinuxAssets'));
+  files.set(image, Buffer.alloc(0));
+  assert.equal(await prepareLinuxImages(context, new Cancellation()), Buffer.byteLength('linux/root-v5-shell.qcow2'));
+  assert.equal(files.get(image).toString(), 'linux/root-v5-shell.qcow2');
+  installTime++;
+  assert.equal(await prepareLinuxImages(context, new Cancellation()), Buffer.byteLength('linux/kernellinux/root-v5-shell.qcow2'));
   await linuxRuntime.save({ enabled: false });
   assert.equal(catalog.definitions().length, 0);
   await assert.rejects(linuxRuntime.runConsole(context, {}, new Cancellation()), { code: 'TOOL_UNAVAILABLE' });

@@ -488,14 +488,20 @@ header.phoneHeader(); assert.deepEqual(headerControls, ['open-history', 'chat-mo
 console.log('PASS empty phone header shows history and browser, then switches to conversation actions');
 
 async function testUtilityMenu() {
-  const MenuPage = probe('pages/Index', 'Index', ['openUtilityMenu'], { t: value => value, $r: value => value });
+  const MenuPage = probe('pages/Index', 'Index', ['openUtilityMenu', 'openLinuxConsole'], {
+    t: value => value, $r: value => value, LaunchMode: { POP_TO_SINGLETON: 'singleton' }
+  });
   const opened = [];
   const routes = [];
   let choice = -1;
   const page = Object.assign(new MenuPage(), {
     app: { ready: true }, foreground: true,
-    detailOpen: () => true, setDetailPane: open => opened.push(open), openBrowser: () => opened.push('browser'),
-    paths: { getAllPathName: () => routes, pushPath: ({ name }) => routes.push(name) },
+    detailOpen: () => !opened.includes(false), setDetailPane: open => opened.push(open), openBrowser: () => opened.push('browser'),
+    paths: { pushPath: ({ name }, options) => {
+      assert.equal(options.launchMode, 'singleton');
+      if (routes.includes(name)) routes.splice(routes.indexOf(name) + 1);
+      else routes.push(name);
+    } },
     getUIContext: () => ({ getPromptAction: () => ({ showActionMenu: async ({ buttons }) => {
       assert.equal(buttons.map(button => button.text).join(', '), '应用内浏览器, Linux 终端');
       return { index: choice };

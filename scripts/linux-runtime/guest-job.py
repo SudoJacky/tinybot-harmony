@@ -1,13 +1,15 @@
 """Run one unprivileged Linux job and stream its optional directory snapshots."""
 import base64
+import fcntl
 import json
 import os
 import resource
+import select
 import signal
 import stat
 import struct
 import subprocess
-import tempfile
+import termios
 
 HALF = 2 * 1024 * 1024
 TREE_OFFSET = 2 * HALF
@@ -17,6 +19,28 @@ CHUNK = 1024 * 1024
 GUEST_USER = 65534
 HEADER = struct.Struct("<4sI")
 ENTRY = struct.Struct("<IBQ")
+
+
+class CapturedOutput:
+    def __init__(self):
+        self.streams = {"stdout": bytearray(), "stderr": bytearray()}
+        self.truncated = False
+
+    def append(self, name, data):
+        capture = self.streams[name]
+        sample = data[:LOG_LIMIT - len(capture)]
+        capture.extend(sample)
+        self.truncated |= len(sample) < len(data)
+        return sample
+
+    def receipt(self, code):
+        result = {name: data.decode("utf-8", "replace") for name, data in self.streams.items()}
+        result.update(exitCode=code, truncated=self.truncated)
+        return result
+
+
+def pending_bytes(fd):
+    return struct.unpack("i", fcntl.ioctl(fd, termios.FIONREAD, bytes(4)))[0]
 
 
 def safe_parts(path):
@@ -142,6 +166,41 @@ def drop_privileges():
     resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
 
 
+def run_captured(program, env):
+    capture = CapturedOutput()
+    with subprocess.Popen(program, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          env=env, preexec_fn=drop_privileges, start_new_session=True) as process:
+        pipes = {process.stdout.fileno(): "stdout", process.stderr.fileno(): "stderr"}
+        try:
+            done = os.pidfd_open(process.pid)
+            try:
+                while True:
+                    ready, _, _ = select.select([done, *pipes], [], [])
+                    if done in ready:
+                        break
+                    for fd in ready:
+                        data = os.read(fd, 65536)
+                        if data:
+                            capture.append(pipes[fd], data)
+                        else:
+                            del pipes[fd]
+            finally:
+                os.close(done)
+        finally:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        # A detached writer must not hold the receipt open after the command exits.
+        for fd, name in pipes.items():
+            remaining = pending_bytes(fd)
+            while remaining:
+                data = os.read(fd, remaining)
+                capture.append(name, data)
+                remaining -= len(data)
+        return capture.receipt(process.wait())
+
+
 def run_job(request, disk):
     program = {"shell": ["/bin/sh"], "python": ["/usr/bin/python3", "-B"]}[request["language"]]
     project = request.get("projectBytes")
@@ -166,20 +225,8 @@ def run_job(request, disk):
     if "input" in request:
         with open("input", "xb") as target:
             target.write(base64.b64decode(request["input"], validate=True))
-    with tempfile.TemporaryFile(dir="/work") as stdout, tempfile.TemporaryFile(dir="/work") as stderr:
-        with subprocess.Popen(program + ["task"], stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
-                              env=env, preexec_fn=drop_privileges, start_new_session=True) as process:
-            exit_code = process.wait()
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        receipt = {"exitCode": exit_code, "truncated": False}
-        for name, stream in [("stdout", stdout), ("stderr", stderr)]:
-            stream.seek(0)
-            data = stream.read(LOG_LIMIT + 1)
-            receipt[name] = data[:LOG_LIMIT].decode("utf-8", "replace")
-            receipt["truncated"] |= len(data) > LOG_LIMIT
+    receipt = run_captured(program + ["task"], env)
+    exit_code = receipt["exitCode"]
     if exit_code == 0 and request.get("collect"):
         fd = os.open("output", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as output:

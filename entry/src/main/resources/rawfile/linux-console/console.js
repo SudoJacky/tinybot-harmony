@@ -2,6 +2,7 @@
   'use strict';
 
   const surface = document.getElementById('terminal');
+  const latest = document.getElementById('latest');
   const terminal = new window.Terminal({
     theme: {
       background: '#1c1e20',
@@ -38,14 +39,26 @@
 
   let layoutFrame = 0;
   const host = () => window.tinybotConsoleHost;
-  const reportSize = () => host().consoleSize(terminal.cols, terminal.rows);
+  let reportedCols = 0, reportedRows = 0;
+  function updateScrollButton() {
+    const buffer = terminal.buffer.active;
+    latest.hidden = buffer.viewportY >= buffer.baseY;
+  }
+  terminal.onScroll(updateScrollButton);
+  latest.addEventListener('pointerdown', event => event.preventDefault());
+  latest.addEventListener('click', () => terminal.scrollToBottom());
   function scheduleFit() {
     if (layoutFrame) return;
     layoutFrame = requestAnimationFrame(() => {
       layoutFrame = 0;
       if (surface.clientWidth > 0 && surface.clientHeight > 0) {
         fit.fit();
-        reportSize();
+        if (terminal.cols !== reportedCols || terminal.rows !== reportedRows) {
+          reportedCols = terminal.cols;
+          reportedRows = terminal.rows;
+          host().consoleSize(reportedCols, reportedRows);
+        }
+        updateScrollButton();
       }
     });
   }
@@ -58,10 +71,12 @@
   terminal.onData((text) => host().consoleInput(text));
 
   window.tinybotTerminal = {
-    configure(label, language) {
+    configure(label, language, latestLabel) {
       document.documentElement.lang = language;
       surface.setAttribute('aria-label', label);
       terminal.textarea?.setAttribute('aria-label', label);
+      latest.setAttribute('aria-label', latestLabel);
+      latest.title = latestLabel;
       scheduleFit();
     },
     setAppearance(fontSize, cursorStyle) {
@@ -89,7 +104,8 @@
       scheduleFit();
     },
     key(name) {
-      const keys = { esc: '\x1b', tab: '\t', interrupt: '\x03' };
+      const keys = { esc: '\x1b', tab: '\t', interrupt: '\x03', lineStart: '\x01',
+        lineEnd: '\x05', clear: '\x0c', pipe: '|', slash: '/' };
       const arrows = { up: 'A', down: 'B', right: 'C', left: 'D' };
       const prefix = terminal.modes.applicationCursorKeysMode ? '\x1bO' : '\x1b[';
       const data = keys[name] ?? (arrows[name] ? prefix + arrows[name] : '');
@@ -99,7 +115,22 @@
       }
     },
     copy() {
-      host().consoleCopy(terminal.getSelection());
+      const nativeSelection = window.getSelection();
+      const selected = terminal.getSelection() || (surface.contains(nativeSelection?.anchorNode)
+        ? nativeSelection.toString() : '');
+      if (selected) { host().consoleCopy(selected, false); return; }
+      const buffer = terminal.buffer.active;
+      const end = Math.min(buffer.length, buffer.viewportY + terminal.rows);
+      const lines = [];
+      for (let row = buffer.viewportY; row < end; row++) {
+        const line = buffer.getLine(row);
+        const wraps = row + 1 < end && buffer.getLine(row + 1)?.isWrapped;
+        const text = line.translateToString(!wraps);
+        if (line.isWrapped && lines.length) lines[lines.length - 1] += text;
+        else lines.push(text);
+      }
+      while (lines.length && !lines[lines.length - 1]) lines.pop();
+      host().consoleCopy(lines.join('\n'), true);
     },
     paste(text) {
       if (terminal.options.disableStdin) return;

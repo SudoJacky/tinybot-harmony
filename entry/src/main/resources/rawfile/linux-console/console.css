@@ -25,6 +25,22 @@ body {
   scrollbar-color: #485467 transparent;
 }
 
+#latest {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #64736d;
+  border-radius: 50%;
+  background: #303d36;
+  color: #e7f5e9;
+  font: 22px/1 system-ui, sans-serif;
+  touch-action: manipulation;
+}
+
+#latest:focus-visible { outline: 2px solid #a5c9ff; }
+
 @media (min-width: 700px) {
   body { padding: 10px 16px; }
 }

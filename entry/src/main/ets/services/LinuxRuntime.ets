@@ -9,7 +9,7 @@ import { t } from '../model/I18n';
 import { ToolFailure, ToolResultError } from '../model/ToolFailure';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { LinuxControl } from './LinuxControl';
-import { writeBytes } from './FileBytes';
+import { linuxImageSize, prepareLinuxImages } from './LinuxAssets';
 import { createLinuxDisks, LINUX_TREE_OFFSET, readLinuxResponse, resetLinuxDisk, writeLinuxRequest } from './LinuxExchange';
 import { LinuxSerial, LinuxSerialEvents } from './LinuxSerial';
 import { LinuxWorkspace, LinuxWorkspaceScope } from './LinuxWorkspace';
@@ -17,8 +17,6 @@ import { FileJobWorkspace } from './WorkspaceFiles';
 
 const SETTINGS_KEY: string = 'settings';
 const FILE_LIMIT: number = 1024 * 1024;
-const GUEST_ASSETS: string[] = ['kernel', 'root-v5-shell.qcow2'];
-const ASSET_CACHE: string = '/tinybot-linux-assets-v5-shell';
 const EMBEDDED_CACHE: string = '/tinybot-linux-embedded-v3';
 export const LINUX_TIMEOUTS: number[] = [30, 60, 120];
 export const LINUX_MEMORY: number[] = [192, 256, 384];
@@ -107,7 +105,8 @@ class LinuxRuntime {
   private fault: string = '';
   private startupResult?: (error?: Error) => void;
   private terminals: Set<LinuxSerialEvents> = new Set<LinuxSerialEvents>();
-  private transcript: Uint8Array[] = [];
+  private transcript?: Uint8Array;
+  private transcriptEnd: number = 0;
   private transcriptBytes: number = 0;
   private listeners: Set<() => void> = new Set<() => void>();
   private control: LinuxControl = new LinuxControl((error) => this.fail(error));
@@ -230,7 +229,12 @@ class LinuxRuntime {
     if (!this.toolEnabled || this.saving) {
       return Promise.reject(new ToolFailure('TOOL_UNAVAILABLE', this.fault || t('Linux 沙盒不可用或已停用。'), 'inspect_error'));
     }
-    if (!this.boot) { this.boot = this.bootGuest(context); }
+    if (!this.boot) {
+      this.boot = this.bootGuest(context).catch((error: Error) => {
+        if (!this.fault) { this.boot = undefined; }
+        throw error;
+      });
+    }
     return this.boot;
   }
 
@@ -251,14 +255,20 @@ class LinuxRuntime {
     this.starting = true;
     let childId: string = '';
     let timer: number = -1;
+    let engineStarted = false;
+    let failure = '';
     try {
       this.publish();
       this.validateMemory(memory);
       const startup = new Cancellation();
-      await this.stageAssets(context, startup);
+      const copied = await prepareLinuxImages(context, startup);
+      this.assetsReady = true;
+      Diagnostics.log('info', 'linux-runtime', 'images_ready', { bytes: copied, elapsedMs: Date.now() - started });
+      this.publish();
       if (await fs.access(dir)) { await fs.rmdir(dir); }
       await fs.mkdir(dir);
       await createLinuxDisks(dir, native.linuxStorageBytes(context.cacheDir));
+      engineStarted = true;
       if (this.separateProcess) {
         childId = util.generateRandomUUID();
         native.startLinuxChild(childId, dir, memory).then(() => {
@@ -276,27 +286,34 @@ class LinuxRuntime {
       this.memoryInUse = memory;
       Diagnostics.log('info', 'linux-runtime', 'guest_ready', { elapsedMs: Date.now() - started });
     } catch (error) {
-      this.fail(error as Error);
-      if (childId) { native.cancelLinux(childId); }
-      await this.serial.close();
+      failure = (error as Error).message || String(error);
+      if (engineStarted) {
+        this.fail(error as Error);
+        if (childId) { native.cancelLinux(childId); }
+        await this.serial.close();
+      } else {
+        Diagnostics.log('warn', 'linux-runtime', 'prepare_failed', {}, error as Error);
+      }
       throw error as Error;
     } finally {
       clearTimeout(timer);
       this.startupResult = undefined;
       this.starting = false;
       const status: LinuxJobStatus = { kind: 'warm-up', startedAt: started, elapsedMs: Date.now() - started,
-        outcome: this.fault ? 'failed' : 'complete', error: this.fault };
+        outcome: failure ? 'failed' : 'complete', error: failure };
       this.history = [status].concat(this.history.slice(0, 11));
       this.publish();
     }
   }
 
   private recordOutput(bytes: Uint8Array): void {
-    this.transcript.push(bytes);
-    this.transcriptBytes += bytes.length;
-    while (this.transcriptBytes > 256 * 1024 || this.transcript.length > 4096) {
-      this.transcriptBytes -= this.transcript.shift()!.length;
-    }
+    const buffer = this.transcript ?? (this.transcript = new Uint8Array(256 * 1024));
+    const tail = bytes.subarray(Math.max(0, bytes.length - buffer.length));
+    const first = Math.min(tail.length, buffer.length - this.transcriptEnd);
+    buffer.set(tail.subarray(0, first), this.transcriptEnd);
+    buffer.set(tail.subarray(first), 0);
+    this.transcriptEnd = (this.transcriptEnd + tail.length) % buffer.length;
+    this.transcriptBytes = Math.min(buffer.length, this.transcriptBytes + tail.length);
     this.terminals.forEach((view) => view.output(bytes));
   }
 
@@ -307,7 +324,14 @@ class LinuxRuntime {
     this.terminals.add(events);
     try {
       events.ready();
-      this.transcript.forEach((bytes) => events.output(bytes, true));
+      const buffer = this.transcript;
+      if (buffer && this.transcriptBytes) {
+        const start = (this.transcriptEnd + buffer.length - this.transcriptBytes) % buffer.length;
+        const first = Math.min(this.transcriptBytes, buffer.length - start);
+        // The view may render asynchronously. Copy before live output reuses the ring.
+        events.output(buffer.slice(start, start + first), true);
+        if (first < this.transcriptBytes) { events.output(buffer.slice(0, this.transcriptEnd), true); }
+      }
       await new Promise<void>((resolve) => signal.onCancel(resolve));
     } finally { this.terminals.delete(events); }
   }
@@ -316,14 +340,7 @@ class LinuxRuntime {
   resize(columns: number, rows: number): Promise<void> { return this.serial.resize(columns, rows); }
 
   async imageSize(context: common.Context): Promise<number> {
-    let total = 0;
-    for (const name of GUEST_ASSETS) {
-      const path = 'linux/' + name;
-      const file = await context.resourceManager.getRawFd(path);
-      try { total += file.length; }
-      finally { await context.resourceManager.closeRawFd(path); }
-    }
-    return total;
+    return linuxImageSize(context);
   }
 
   runTool(context: common.Context, job: LinuxJob, files: FileJobWorkspace, parent: Cancellation,
@@ -378,19 +395,6 @@ class LinuxRuntime {
       this.signal = undefined;
       this.publish();
     }
-  }
-
-  private async stageAssets(context: common.Context, signal: Cancellation): Promise<void> {
-    const dir = context.cacheDir + ASSET_CACHE;
-    if (this.assetsReady && await fs.access(dir + '/' + GUEST_ASSETS[0]) && await fs.access(dir + '/' + GUEST_ASSETS[1])) { return; }
-    this.assetsReady = false;
-    if (!await fs.access(dir)) { await fs.mkdir(dir); }
-    for (const name of GUEST_ASSETS) {
-      signal.check();
-      const bytes = await context.resourceManager.getRawFileContent('linux/' + name);
-      await writeBytes(dir + '/' + name, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length));
-    }
-    this.assetsReady = true;
   }
 
   private async execute(context: common.Context, job: LinuxJob, signal: Cancellation, files?: FileJobWorkspace,

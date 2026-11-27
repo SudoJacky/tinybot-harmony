@@ -1277,10 +1277,7 @@ struct Index {
       ] });
       if (!this.foreground) { return; }
       if (result.index === 0) { this.openBrowser(); }
-      if (result.index === 1 && !this.paths.getAllPathName().includes('linux-console')) {
-        if (this.detailOpen()) { this.setDetailPane(false); }
-        this.paths.pushPath({ name: 'linux-console' });
-      }
+      if (result.index === 1) { this.openLinuxConsole(); }
     } catch (error) {
       const failure = error as BusinessError;
       if (!failure.message.toLowerCase().includes('cancel')) {
@@ -1288,6 +1285,11 @@ struct Index {
         this.getUIContext().getPromptAction().showToast({ systemMaterial: this.appearance.surface, message: t('无法打开工具列表。') });
       }
     } finally { this.toolMenuOpen = false; }
+  }
+
+  private openLinuxConsole(): void {
+    if (this.detailOpen()) { this.setDetailPane(false); }
+    this.paths.pushPath({ name: 'linux-console' }, { launchMode: LaunchMode.POP_TO_SINGLETON });
   }
 
   private openBrowser(): void {
@@ -1826,7 +1828,7 @@ struct Index {
         .backgroundColor($r('app.color.page_background'))
     } else if (name === 'sandbox-management') {
       NavDestination() {
-        SandboxManagementPanel({ readOnly: this.app.productivity.options?.readOnly === true,
+        SandboxManagementPanel({ readOnly: this.app.productivity.options?.readOnly === true, onConsole: () => this.openLinuxConsole(),
           workspaceId: this.app.ready ? this.app.activeWorkspaceId : '', projectName: this.app.activeProject?.name || '' })
       }
         .title(t('沙盒管理'), { systemMaterial: this.appearance.control, barStyle: BarStyle.STANDARD, backgroundColor: $r('app.color.page_background') })
