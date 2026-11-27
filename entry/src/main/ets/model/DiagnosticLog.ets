@@ -83,6 +83,7 @@ EVENTS.mermaid = ['startup_timeout', 'render_timeout', 'script_failed', 'diagram
   'snapshot_failed', 'snapshot_release_failed'];
 EVENTS.preview = ['failed', 'captured', 'thumbnail_failed', 'surface_moved', 'compare_reference_failed'];
 EVENTS.sandbox = ['execution_failed', 'orchestration_failed'];
+EVENTS['linux-console'] = ['session_failed', 'clipboard_failed', 'menu_failed'];
 EVENTS['linux-runtime'] = ['settings_load_failed', 'settings_save_failed', 'job_failed', 'startup_prewarm_failed'];
 EVENTS.tool = ['failed', 'partial'];
 EVENTS.workspace = ['mutation_failed', 'preview_failed', 'folder_support_failed', 'folder_picker_support_failed', 'folder_persist_failed', 'folder_activate_failed', 'folder_revoke_failed', 'folder_startup_failed'];

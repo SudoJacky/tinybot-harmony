@@ -10,15 +10,16 @@ import { ToolFailure, ToolResultError } from '../model/ToolFailure';
 import { Cancellation, RunCancelledError } from './Cancellation';
 import { EmbeddedLinux } from './EmbeddedLinux';
 import { writeBytes } from './FileBytes';
-import { createLinuxDisks, LINUX_TREE_OFFSET, readLinuxResponse, resetLinuxDisk, writeLinuxRequest } from './LinuxExchange';
+import { createLinuxDisks, LINUX_TREE_OFFSET, readLinuxResponse, resetLinuxDisk, writeLinuxBytes, writeLinuxRequest } from './LinuxExchange';
+import { LinuxSerial } from './LinuxSerial';
 import { LinuxWorkspace, LinuxWorkspaceScope } from './LinuxWorkspace';
 import { FileJobWorkspace } from './WorkspaceFiles';
 
 const SETTINGS_KEY: string = 'settings';
 const FILE_LIMIT: number = 1024 * 1024;
 const SELF_TEST_OUTPUT: string = 'tinybot-linux-ok';
-const GUEST_ASSETS: string[] = ['kernel', 'root-v3.qcow2'];
-const ASSET_CACHE: string = '/tinybot-linux-assets-v3';
+const GUEST_ASSETS: string[] = ['kernel', 'root-v3-console.qcow2'];
+const ASSET_CACHE: string = '/tinybot-linux-assets-v3-console';
 const EMBEDDED_CACHE: string = '/tinybot-linux-embedded-v3';
 export const LINUX_TIMEOUTS: number[] = [30, 60, 120];
 export const LINUX_MEMORY: number[] = [192, 256, 384];
@@ -59,7 +60,7 @@ interface GuestResponse {
   bootMs: number; projectBytes?: number;
 }
 interface LinuxReceipt { exitCode: number; stdout: string; stderr: string; truncated: boolean; outputPath?: string; bytes?: number; }
-type LinuxJobKind = 'tool' | 'self-test' | 'warm-up';
+type LinuxJobKind = 'tool' | 'self-test' | 'warm-up' | 'console';
 type LinuxJobOutcome = 'complete' | 'failed' | 'cancelled';
 
 export interface LinuxJobStatus {
@@ -235,6 +236,63 @@ class LinuxRuntime {
 
   private async run(context: common.Context, kind: LinuxJobKind, job: LinuxJob, parent?: Cancellation,
     files?: FileJobWorkspace, scope?: LinuxWorkspaceScope): Promise<LinuxReceipt> {
+    return this.withRuntime<LinuxReceipt>(kind, parent, async (signal) => {
+      if (job.inputPath !== undefined && (!this.settings.allowInput || !files)) {
+        throw new ToolFailure('PERMISSION_DENIED', t('Linux 沙盒未获准从工作区导入文件。'), 'check_permissions');
+      }
+      if (job.outputPath !== undefined && (!this.settings.allowOutput || !files)) {
+        throw new ToolFailure('PERMISSION_DENIED', t('Linux 沙盒未获准向工作区导出文件。'), 'check_permissions');
+      }
+      const receipt = await this.execute(context, job, signal, files, scope);
+      if (kind !== 'tool' && receipt.stdout.trim() !== SELF_TEST_OUTPUT) {
+        throw new Error(t('Linux 自检返回了意外结果。'));
+      }
+      return receipt;
+    });
+  }
+
+  async runConsole(context: common.Context, serial: LinuxSerial, parent: Cancellation): Promise<void> {
+    await this.withRuntime<void>('console', parent, async (signal) => {
+      await this.withDisks<void>(context, signal, async (id, dir, fd) => {
+        await writeLinuxBytes(fd, new Uint8Array([84, 66, 67, 49]).buffer as ArrayBuffer, 0);
+        await fs.fsync(fd);
+        signal.check();
+        try {
+          if (this.separateProcess) {
+            await this.runConsoleChild(dir, id, serial, signal);
+          } else {
+            await this.startEmbedded(dir);
+            await serial.connect(dir + '/tty', signal);
+            await this.phoneVm.run(signal, 0);
+          }
+        } finally { await serial.close(); }
+      });
+    });
+  }
+
+  private async runConsoleChild(dir: string, id: string, serial: LinuxSerial, cancellation: Cancellation): Promise<void> {
+    let exited = false;
+    let failure: Error | undefined;
+    const pending = native.startLinuxConsole(id, dir, this.settings.timeoutSeconds, this.settings.memoryMiB).then((_diagnostics: string) => { exited = true; }, (error: Error) => {
+      failure = error;
+      exited = true;
+    });
+    const unsubscribe = cancellation.onCancel(() => { native.cancelLinux(id); });
+    try {
+      try { await serial.connect(dir + '/tty', cancellation, () => exited); }
+      catch (error) { throw failure ?? error as Error; }
+      await pending;
+      cancellation.check();
+      if (failure) { throw failure; }
+    } finally {
+      unsubscribe();
+      if (!exited) { native.cancelLinux(id); }
+      await pending;
+    }
+  }
+
+  private async withRuntime<T>(kind: LinuxJobKind, parent: Cancellation | undefined,
+    operation: (signal: Cancellation) => Promise<T>): Promise<T> {
     parent?.check();
     if (!this.available || !this.store || !this.settings.enabled) {
       throw new ToolFailure('TOOL_UNAVAILABLE', t('Linux 沙盒不可用或已停用。'), 'check_available_tools');
@@ -242,12 +300,6 @@ class LinuxRuntime {
     if (this.phoneVm.failure) { throw new ToolFailure('EXECUTION_FAILED', this.phoneVm.failure, 'inspect_error'); }
     if (this.active || this.saving) { throw new ToolFailure('BUSY', t('请等待当前沙盒操作结束。'), 'wait_then_check'); }
     this.validateMemory(this.memoryInUse ?? this.settings.memoryMiB);
-    if (job.inputPath !== undefined && (!this.settings.allowInput || !files)) {
-      throw new ToolFailure('PERMISSION_DENIED', t('Linux 沙盒未获准从工作区导入文件。'), 'check_permissions');
-    }
-    if (job.outputPath !== undefined && (!this.settings.allowOutput || !files)) {
-      throw new ToolFailure('PERMISSION_DENIED', t('Linux 沙盒未获准向工作区导出文件。'), 'check_permissions');
-    }
     const signal = new Cancellation();
     const stopUpdates = signal.onCancel(() => this.publish());
     const disconnect = parent?.onCancel(() => signal.cancel());
@@ -259,18 +311,14 @@ class LinuxRuntime {
     let message: string = '';
     try {
       this.publish();
-      const receipt = await this.execute(context, job, signal, files, scope);
-      if (kind !== 'tool' && receipt.stdout.trim() !== SELF_TEST_OUTPUT) {
-        throw new Error(t('Linux 自检返回了意外结果。'));
-      }
-      return receipt;
+      return await operation(signal);
     } catch (error) {
       const failure = error as Error;
       outcome = failure instanceof RunCancelledError ? 'cancelled' : 'failed';
       if (outcome === 'failed') {
         message = failure.message.slice(0, 500);
         Diagnostics.log('warn', 'linux-runtime', 'job_failed', { elapsedMs: Date.now() - started,
-          isolated: this.separateProcess, selfTest: kind !== 'tool', timeoutSeconds: this.settings.timeoutSeconds }, failure);
+          isolated: this.separateProcess, selfTest: kind === 'self-test' || kind === 'warm-up', timeoutSeconds: this.settings.timeoutSeconds }, failure);
       }
       throw failure;
     } finally {
@@ -298,6 +346,13 @@ class LinuxRuntime {
     this.assetsReady = true;
   }
 
+  private async startEmbedded(dir: string): Promise<void> {
+    if (!this.phoneVm.initialized) {
+      await this.phoneVm.start(dir, this.settings.memoryMiB);
+      this.memoryInUse = this.settings.memoryMiB;
+    }
+  }
+
   private async runGuest(id: string, dir: string, fd: number, signal: Cancellation): Promise<string> {
     let diagnostics = '';
     if (this.separateProcess) {
@@ -305,10 +360,7 @@ class LinuxRuntime {
       const unsubscribe = signal.onCancel(() => { native.cancelLinux(id); });
       try { diagnostics = await pending; } finally { unsubscribe(); signal.check(); }
     } else {
-      if (!this.phoneVm.initialized) {
-        await this.phoneVm.start(dir, this.settings.memoryMiB);
-        this.memoryInUse = this.settings.memoryMiB;
-      }
+      await this.startEmbedded(dir);
       await this.phoneVm.run(signal, this.settings.timeoutSeconds);
     }
     signal.check();
@@ -323,6 +375,33 @@ class LinuxRuntime {
       request.input = bytes.length > 0 ? new util.Base64Helper().encodeToStringSync(bytes) : '';
     }
     const workspace = scope ? new LinuxWorkspace(context, scope) : undefined;
+    return this.withDisks<LinuxReceipt>(context, signal, async (id, dir, fd) => {
+      try {
+        if (scope && workspace && this.settings.allowInput) {
+          const config = await workspace.config();
+          if (scope.project && config.persistent && this.settings.allowOutput) {
+            request.projectBytes = await workspace.packProject(fd, signal);
+          }
+          if (config.mounts.length > 0) {
+            request.mountBytes = await workspace.packMounts(config.mounts, fd, LINUX_TREE_OFFSET + (request.projectBytes ?? 0), signal);
+          }
+        }
+        signal.check();
+        await writeLinuxRequest(fd, JSON.stringify(request));
+        signal.check();
+        const json = await this.runGuest(id, dir, fd, signal);
+        return await this.finishJob(json, request, job, signal, fd, files, workspace);
+      } finally {
+        if (!this.separateProcess && !this.phoneVm.failure && (request.projectBytes !== undefined || request.mountBytes !== undefined)) {
+          const scratch = await fs.open(dir + '/workspace', fs.OpenMode.READ_WRITE);
+          try { await resetLinuxDisk(scratch.fd); } finally { await fs.close(scratch); }
+        }
+      }
+    });
+  }
+
+  private async withDisks<T>(context: common.Context, signal: Cancellation,
+    operation: (id: string, dir: string, fd: number) => Promise<T>): Promise<T> {
     const separate = this.separateProcess;
     const id = util.generateRandomUUID();
     const dir = context.cacheDir + (separate ? '/linux-' + id : EMBEDDED_CACHE);
@@ -335,28 +414,11 @@ class LinuxRuntime {
       if (separate || !this.phoneVm.initialized) { await createLinuxDisks(dir, native.linuxStorageBytes(context.cacheDir)); }
       const disk = await fs.open(dir + '/exchange', fs.OpenMode.READ_WRITE);
       try {
-        if (scope && workspace && this.settings.allowInput) {
-          const config = await workspace.config();
-          if (scope.project && config.persistent && this.settings.allowOutput) {
-            request.projectBytes = await workspace.packProject(disk.fd, signal);
-          }
-          if (config.mounts.length > 0) {
-            request.mountBytes = await workspace.packMounts(config.mounts, disk.fd, LINUX_TREE_OFFSET + (request.projectBytes ?? 0), signal);
-          }
-        }
-        signal.check();
-        await writeLinuxRequest(disk.fd, JSON.stringify(request));
-        signal.check();
-        const json = await this.runGuest(id, dir, disk.fd, signal);
-        return await this.finishJob(json, request, job, signal, disk.fd, files, workspace);
+        return await operation(id, dir, disk.fd);
       } finally {
         try {
           if (!separate && !this.phoneVm.failure) {
             await resetLinuxDisk(disk.fd);
-            if (request.projectBytes !== undefined || request.mountBytes !== undefined) {
-              const scratch = await fs.open(dir + '/workspace', fs.OpenMode.READ_WRITE);
-              try { await resetLinuxDisk(scratch.fd); } finally { await fs.close(scratch); }
-            }
           }
         } finally { await fs.close(disk); }
       }

@@ -22,6 +22,7 @@ struct Job {
     int32_t timeoutSeconds = 0;
     int32_t memoryMiB = 0;
     int parent = -1, child = -1;
+    bool interactive = false;
     napi_async_work work = nullptr;
     napi_deferred result = nullptr;
     ~Job() { if (parent >= 0) close(parent); if (child >= 0) close(child); }
@@ -68,7 +69,8 @@ void Execute(napi_env, void *data)
     auto parameters = std::to_string(job.memoryMiB) + "\n" + job.dir;
     NativeChildProcess_Args args{parameters.data(), {&control}};
     int32_t pid = 0;
-    int rc = OH_Ability_StartNativeChildProcess("libtinybot_linux_child.so:RunLinuxGuest", args, {}, &pid);
+    const auto *entry = job.interactive ? "libtinybot_linux_child.so:RunLinuxConsole" : "libtinybot_linux_child.so:RunLinuxGuest";
+    int rc = OH_Ability_StartNativeChildProcess(entry, args, {}, &pid);
     close(job.child);
     job.child = -1;
     if (rc != NCP_NO_ERROR) { job.error = "Starting native Linux child failed: " + std::to_string(rc); return; }
@@ -76,8 +78,8 @@ void Execute(napi_env, void *data)
     using Clock = std::chrono::steady_clock;
     auto deadline = Clock::now() + std::chrono::seconds(job.timeoutSeconds);
     while (true) {
-        auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
-        if (remaining <= 0) {
+        auto remaining = job.interactive ? -1 : std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
+        if (!job.interactive && remaining <= 0) {
             if (!job.error.empty()) return;
             job.error = "Linux job exceeded " + std::to_string(job.timeoutSeconds) + " seconds";
             shutdown(job.parent, SHUT_WR);
@@ -105,6 +107,10 @@ void Complete(napi_env env, napi_status status, void *data)
     { std::lock_guard<std::mutex> lock(gate); active = nullptr; }
     napi_value value;
     if (status != napi_ok && job->error.empty()) job->error = "Linux worker did not complete";
+    if (job->interactive && job->error.empty() &&
+        (job->diagnostics.find("QEMU exit ") != std::string::npos || job->diagnostics.find("Loading TCI:") != std::string::npos)) {
+        job->error = "Linux console failed";
+    }
     if (!job->error.empty()) {
         const auto message = job->error + " " + job->diagnostics;
         napi_create_string_utf8(env, message.c_str(), message.size(), &value);
@@ -118,11 +124,12 @@ void Complete(napi_env env, napi_status status, void *data)
     napi_delete_async_work(env, job->work);
 }
 
-napi_value Start(napi_env env, napi_callback_info info)
+napi_value StartJob(napi_env env, napi_callback_info info, bool interactive)
 {
     size_t argc = 4;
     napi_value argv[4], promise, label;
     auto job = std::make_unique<Job>();
+    job->interactive = interactive;
     double timeoutSeconds = 0;
     if (napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr) != napi_ok || argc != 4 ||
         !StringArg(env, argv[0], job->id) || !StringArg(env, argv[1], job->dir) ||
@@ -150,6 +157,9 @@ napi_value Start(napi_env env, napi_callback_info info)
     active = job.release();
     return promise;
 }
+
+napi_value Start(napi_env env, napi_callback_info info) { return StartJob(env, info, false); }
+napi_value StartConsole(napi_env env, napi_callback_info info) { return StartJob(env, info, true); }
 
 // Phone applications can embed one VM. QMP resets the guest between jobs.
 std::atomic<bool> embeddedStarted{false};
@@ -193,10 +203,11 @@ void InstallLinux(napi_env env, napi_value exports)
 {
     napi_property_descriptor methods[] = {
         {"startLinux", nullptr, Start, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"startLinuxConsole", nullptr, StartConsole, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"cancelLinux", nullptr, Cancel, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"startEmbeddedLinux", nullptr, StartEmbedded, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"linuxMemoryLimit", nullptr, MemoryLimit, nullptr, nullptr, nullptr, napi_default, nullptr}
     };
-    napi_define_properties(env, exports, 4, methods);
+    napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
     InstallLinuxFiles(env, exports);
 }

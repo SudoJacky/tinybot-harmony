@@ -2,5 +2,13 @@
 set -eu
 if [ ! -c /dev/null ]; then /bin/busybox mount -t devtmpfs devtmpfs /dev; fi
 /bin/busybox mount -t proc proc /proc
-/usr/bin/python3 -I -B /linux-job.py
+if [ "$(/bin/busybox head -c 4 /dev/vdb)" = 'TBC1' ]; then
+  /bin/busybox mount -t tmpfs -o size=24m,nosuid,nodev tmpfs /work
+  /bin/busybox chmod 1777 /work
+  /bin/busybox mkdir -p /dev/pts
+  /bin/busybox mount -t devpts -o mode=620,ptmxmode=666 devpts /dev/pts
+  /usr/bin/python3 -I -B /linux-console.py
+else
+  /usr/bin/python3 -I -B /linux-job.py
+fi
 /bin/busybox poweroff -f

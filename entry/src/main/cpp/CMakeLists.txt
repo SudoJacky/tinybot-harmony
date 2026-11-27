@@ -24,7 +24,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "OHOS")
     file(GLOB linux_engine CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/../../../libs/${OHOS_ARCH}/libqemu-system-aarch64-tci.so")
     if(linux_engine)
-        if(NOT EXISTS "${linux_assets}/kernel" OR NOT EXISTS "${linux_assets}/root-v3.qcow2")
+        if(NOT EXISTS "${linux_assets}/kernel" OR NOT EXISTS "${linux_assets}/root-v3-console.qcow2")
             message(FATAL_ERROR "Prepare the Linux guest with scripts/linux-runtime/build-guest.sh")
         endif()
         target_sources(tinybot_sandbox PRIVATE napi_linux.cpp napi_linux_files.cpp)

@@ -39,7 +39,7 @@ export class EmbeddedLinux {
     while (!ready()) {
       cancel?.check();
       if (this.fault) { throw new Error(this.fault); }
-      if (Date.now() >= deadline) { throw new Error('Linux timed out waiting for ' + action); }
+      if (timeout > 0 && Date.now() >= deadline) { throw new Error('Linux timed out waiting for ' + action); }
       await pause();
     }
   }

@@ -128,6 +128,7 @@ export struct SandboxManagementPanel {
     if (this.runtime.stopping) { return t('正在停止任务'); }
     if (this.runtime.active === 'warm-up') { return t('正在预热'); }
     if (this.runtime.active === 'self-test') { return t('正在运行自检'); }
+    if (this.runtime.active === 'console') { return t('Linux 控制台'); }
     if (this.runtime.active) { return t('运行中'); }
     if (this.runtime.fault) { return t('需要重启应用'); }
     if (!this.runtime.settings.enabled) { return t('已停用'); }
@@ -138,7 +139,8 @@ export struct SandboxManagementPanel {
 
   private jobLabel(job: LinuxJobStatus): string {
     const outcome = job.outcome === 'complete' ? t('已完成') : job.outcome === 'cancelled' ? t('已停止') : t('失败');
-    const label = job.kind === 'self-test' ? t('运行自检') : job.kind === 'warm-up' ? t('预热') : t('沙盒任务');
+    const label = job.kind === 'self-test' ? t('运行自检') : job.kind === 'warm-up' ? t('预热') :
+      job.kind === 'console' ? t('Linux 控制台') : t('沙盒任务');
     return label + ' · ' + outcome + ' · ' + t('{0} 秒', [(job.elapsedMs / 1000).toFixed(1)]);
   }
 

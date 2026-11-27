@@ -8,8 +8,8 @@
 #include <string>
 #include <thread>
 
-// AppSpawn starts a fresh process for each VM. Only this signed TCI engine is loaded.
-extern "C" __attribute__((visibility("default"))) void RunLinuxGuest(NativeChildProcess_Args args)
+namespace {
+void Run(NativeChildProcess_Args args, bool interactive)
 {
     int channel = -1;
     for (auto *item = args.fdList.head; item != nullptr; item = item->next) {
@@ -30,10 +30,22 @@ extern "C" __attribute__((visibility("default"))) void RunLinuxGuest(NativeChild
 
     if (dup2(channel, STDERR_FILENO) < 0) return;
     try {
-        int status = RunLinuxEngine(LoadLinuxEngine(), directory, memory, false);
+        int status = RunLinuxEngine(LoadLinuxEngine(), directory, memory, false, interactive);
         if (status) dprintf(channel, "QEMU exit %d", status);
         _exit(status);
     } catch (const std::exception &error) {
         dprintf(channel, "Loading TCI: %s", error.what());
     }
+}
+}
+
+// AppSpawn starts a fresh process for each VM.
+extern "C" __attribute__((visibility("default"))) void RunLinuxGuest(NativeChildProcess_Args args)
+{
+    Run(args, false);
+}
+
+extern "C" __attribute__((visibility("default"))) void RunLinuxConsole(NativeChildProcess_Args args)
+{
+    Run(args, true);
 }

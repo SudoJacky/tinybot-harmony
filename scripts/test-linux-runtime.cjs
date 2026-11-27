@@ -99,6 +99,11 @@ const native = {
     executeGuest(disk);
     return '';
   },
+  startLinuxConsole(id, dir, timeoutSeconds, memoryMiB) {
+    assert.equal(files.get(dir + '/exchange').toString('ascii', 0, 4), 'TBC1');
+    jobs.push({ mode: 'console-child', id, timeoutSeconds, memoryMiB });
+    return new Promise(resolve => { finishNativeJob = resolve; });
+  },
   cancelLinux(id) {
     assert.equal(id, jobs.at(-1).id);
     cancelledJobId = id;
@@ -188,6 +193,11 @@ const platform = {
     }
     async run(signal, timeoutSeconds) {
       signal.check();
+      if (timeoutSeconds === 0) {
+        assert.equal(files.get(this.dir + '/exchange').toString('ascii', 0, 4), 'TBC1');
+        await new Promise(resolve => signal.onCancel(resolve));
+        signal.check();
+      }
       jobs.push({ mode: 'embedded', timeoutSeconds, memoryMiB: this.memoryMiB });
       executeGuest(files.get(this.dir + '/exchange'));
     }
@@ -290,7 +300,7 @@ async function main() {
   await linuxRuntime.selfTest(context);
   assert.equal(linuxRuntime.snapshot().memoryInUse, 256);
   assert.equal(jobs.at(-1).memoryMiB, 256);
-  assert.deepEqual(loading, ['linux/kernel', 'linux/root-v3.qcow2']);
+  assert.deepEqual(loading, ['linux/kernel', 'linux/root-v3-console.qcow2']);
 
   deviceInfo.deviceType = 'tablet';
   const started = new Promise(resolve => { nativeStarted = resolve; });
@@ -372,8 +382,26 @@ async function main() {
   assert.equal(restored.snapshot().history[0].kind, 'warm-up');
   assert.deepEqual(requests.at(-1).mounts, undefined);
 
+  for (const mode of ['phone', 'tablet']) {
+    deviceInfo.deviceType = mode;
+    const stop = new Cancellation();
+    let notify, closed = false;
+    const connected = new Promise(resolve => { notify = resolve; });
+    const serial = { async connect() { notify(); }, async close() { closed = true; } };
+    const pendingConsole = linuxRuntime.runConsole(context, serial, stop);
+    await connected;
+    assert.equal(linuxRuntime.snapshot().active, 'console');
+    await assert.rejects(linuxRuntime.selfTest(context), { code: 'BUSY' });
+    stop.cancel();
+    await assert.rejects(pendingConsole, RunCancelledError);
+    assert.equal(closed, true);
+    assert.equal(linuxRuntime.snapshot().history[0].outcome, 'cancelled');
+    await linuxRuntime.selfTest(context);
+  }
+
   await linuxRuntime.save({ enabled: false });
   assert.equal(catalog.definitions().length, 0);
+  await assert.rejects(linuxRuntime.runConsole(context, {}, new Cancellation()), { code: 'TOOL_UNAVAILABLE' });
   await assert.rejects(tools.execute(call({}), new Cancellation()), { code: 'TOOL_UNAVAILABLE' });
   await assert.rejects(linuxRuntime.selfTest(context), { code: 'TOOL_UNAVAILABLE' });
   console.log('PASS Linux streaming exchange, large directory trees, project migration and rollback, custom memory, permissions and cancellation');

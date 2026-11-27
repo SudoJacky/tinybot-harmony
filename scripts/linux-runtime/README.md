@@ -13,7 +13,7 @@ bash scripts/linux-runtime/build-engine.sh x86_64
 sudo bash scripts/linux-runtime/build-guest.sh
 ```
 
-The second engine is for x86-64 emulators. The scripts stage the libraries under `entry/libs/<ABI>/` and the kernel and `root-v3.qcow2` under `entry/src/main/resources/rawfile/linux/`. Rebuild the guest image when upgrading from the earlier exchange protocol. Build the entry HAP with the project's normal DevEco SDK and local signing configuration. A clean checkout builds the existing QuickJS tool without those assets. The engine build cache defaults to `~/tinybot-tci-build` and can be moved with `TCI_BUILD_DIR`.
+The second engine is for x86-64 emulators. The scripts stage the libraries under `entry/libs/<ABI>/` and the kernel and `root-v3-console.qcow2` under `entry/src/main/resources/rawfile/linux/`. Rebuild the guest image when upgrading from the earlier exchange protocol. Build the entry HAP with the project's normal DevEco SDK and local signing configuration. A clean checkout builds the existing QuickJS tool without those assets. The engine build cache defaults to `~/tinybot-tci-build` and can be moved with `TCI_BUILD_DIR`.
 
 The engine script pins the [HiSH QEMU fork](https://github.com/harmoninux/qemu/tree/50ce7096eb6b338bee88a0960c543f93f1b16959) and checks its TCI build flag. The guest script verifies the [HiSH kernel release](https://github.com/harmoninux/linux-config/releases/tag/kernel-20260228) and installs signed packages from Alpine v3.22. Patch versions can change within that repository. For redistribution, retain the matching sources, build configuration and license notices for the kernel, emulator and packages.
 
@@ -31,9 +31,11 @@ In Settings → Tools and permissions → Sandbox management, choose a 30, 60 or
 
 Enable the persistent directory for the active project to save regular files and directories in `/work/project` after successful jobs. Use the system folder picker to attach local folders to the active project or conversation. Each job receives fresh read-only snapshots under `/work/mounts/<name>`. Directory data is streamed through sparse disks, so available device storage determines capacity. The workspace import and export permissions also apply to these features.
 
+The browser launcher also opens the Linux Console. It runs an interactive, unprivileged shell for the foreground session. Its working directory lives in the guest and is cleared at session end. The console and `run_linux` take turns using the runtime. Close the console, run `exit`, or tap Stop to release the runtime.
+
 For on-device tests, configure a separate test bundle name, use a signing profile for that name, and install the `default` and `ohosTest` HAPs with test data. Removing a test module from an installation that holds real conversations can invalidate the application's HUKS keys and leave its encrypted database unreadable. Use only the signed `default` HAP for an in-place upgrade of a user's installation and verify that an existing conversation opens afterwards. See the [device test and release checklist](../../docs/dev/release.md).
 
-The device suite exercises a Python exception, a binary SQLite round trip, cancellation of a job with a background process, and execution of a subsequent job. Replace `TEST_BUNDLE` with the separate test bundle name and `DEVICE` with its HDC identifier.
+The device suite exercises a Python exception, a binary SQLite round trip, cancellation of a job with a background process, and execution of a subsequent job. It also checks that an interactive shell preserves its working directory, receives terminal dimensions and interrupts a running command. Replace `TEST_BUNDLE` with the separate test bundle name and `DEVICE` with its HDC identifier.
 
 ```sh
 hdc -t DEVICE shell aa test -b TEST_BUNDLE -m entry_test -s unittest OpenHarmonyTestRunner -s timeout 240000 -w 240
