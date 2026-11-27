@@ -47,6 +47,7 @@ export struct SettingsPanel {
   onUserDocument: () => void = () => {};
   onUsage: () => void = () => {};
   onStorage: () => void = () => {};
+  onSandbox: () => void = () => {};
   onModels: () => void = () => {};
   onImageGeneration: () => void = () => {};
   onSearch: () => void = () => {};
@@ -266,6 +267,8 @@ export struct SettingsPanel {
             RowDivider()
             NavRow({ title: t('知识库'), icon: $r('sys.symbol.doc_text'), subtitle: t('为助手连接可检索的资料源'),
               compId: 'open-knowledge-base-settings', onTap: this.onKnowledgeBases })
+            RowDivider()
+            NavRow({ title: t('沙盒管理'), icon: $r('sys.symbol.lock'), compId: 'open-sandbox-management', onTap: this.onSandbox })
             RowDivider()
             SwitchRow({ title: t('应用内浏览器'), icon: $r('sys.symbol.worldclock'), compId: 'browser-enabled', isOn: this.browser.policy === 'enabled',
               highlighted: this.searchTarget === 'browser-enabled',

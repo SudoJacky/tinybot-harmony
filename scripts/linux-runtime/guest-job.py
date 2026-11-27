@@ -1,46 +1,186 @@
-"""PID 1's helper. One read-only guest and one fixed-size exchange disk per job."""
+"""Run one unprivileged Linux job and stream its optional directory snapshots."""
 import base64
 import json
 import os
 import resource
+import signal
 import stat
 import struct
 import subprocess
 import tempfile
 
 HALF = 2 * 1024 * 1024
+TREE_OFFSET = 2 * HALF
 FILE_LIMIT = 1024 * 1024
 LOG_LIMIT = 16 * 1024
+CHUNK = 1024 * 1024
+GUEST_USER = 65534
 HEADER = struct.Struct("<4sI")
+ENTRY = struct.Struct("<IBQ")
+
+
+def safe_parts(path):
+    parts = path.split("/")
+    if (len(path.encode()) >= 4096 or
+            any(not part or part in (".", "..") or "\\" in part or
+                any(ord(char) < 32 or ord(char) == 127 for char in part) for part in parts)):
+        raise ValueError("invalid sandbox directory path")
+    return parts
+
+
+def read_exact(stream, size):
+    data = bytearray()
+    while len(data) < size:
+        chunk = stream.read(size - len(data))
+        if not chunk:
+            raise ValueError("truncated Linux directory stream")
+        data.extend(chunk)
+    return data
+
+
+def write_all(stream, data):
+    pending = memoryview(data)
+    while pending:
+        written = stream.write(pending)
+        if not written:
+            raise OSError("incomplete Linux directory stream")
+        pending = pending[written:]
+
+
+def copy_exact(source, destination, size):
+    while size > 0:
+        data = source.read(min(CHUNK, size))
+        if not data:
+            raise ValueError("truncated Linux file")
+        write_all(destination, data)
+        size -= len(data)
+
+
+def restore_tree(stream, size, root, writable):
+    def owned(path, mode):
+        os.chmod(path, mode)
+        if writable:
+            os.chown(path, GUEST_USER, GUEST_USER)
+
+    os.mkdir(root)
+    owned(root, 0o700 if writable else 0o555)
+    remaining = size
+    while remaining:
+        if remaining < ENTRY.size:
+            raise ValueError("invalid Linux directory record")
+        path_size, kind, file_size = ENTRY.unpack(read_exact(stream, ENTRY.size))
+        remaining -= ENTRY.size
+        if not 0 < path_size < 4096 or path_size + file_size > remaining:
+            raise ValueError("invalid Linux directory record size")
+        path = os.path.join(root, *safe_parts(read_exact(stream, path_size).decode("utf-8")))
+        if kind == 0 and file_size == 0:
+            os.mkdir(path)
+            owned(path, 0o700 if writable else 0o555)
+        elif kind == 1:
+            with open(path, "xb", buffering=0) as file:
+                copy_exact(stream, file, file_size)
+            owned(path, 0o600 if writable else 0o444)
+        else:
+            raise ValueError("invalid Linux directory entry type")
+        remaining -= path_size + file_size
+
+
+def collect_tree(root, stream):
+    def record(path, kind, size):
+        safe_parts(path)
+        encoded = path.encode("utf-8")
+        write_all(stream, ENTRY.pack(len(encoded), kind, size))
+        write_all(stream, encoded)
+
+    def walk(parent, prefix):
+        with os.scandir(parent) as children:
+            for child in children:
+                path = prefix + child.name
+                if child.is_dir(follow_symlinks=False):
+                    fd = os.open(child.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                    try:
+                        record(path, 0, 0)
+                        walk(fd, path + "/")
+                    finally:
+                        os.close(fd)
+                elif child.is_file(follow_symlinks=False):
+                    fd = os.open(child.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+                    with os.fdopen(fd, "rb", buffering=0) as file:
+                        info = os.fstat(fd)
+                        if not stat.S_ISREG(info.st_mode):
+                            raise ValueError("project directory contains a non-regular file")
+                        record(path, 1, info.st_size)
+                        copy_exact(file, stream, info.st_size)
+                        if file.read(1):
+                            raise ValueError("a project file changed while being read")
+                else:
+                    raise ValueError("project directory accepts regular files and directories only")
+
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        start = stream.tell()
+        walk(fd, "")
+        return stream.tell() - start
+    finally:
+        os.close(fd)
+
+
+def prepare_workspace(on_disk):
+    if on_disk:
+        subprocess.run(["/sbin/mke2fs", "-t", "ext4", "-q", "-F", "-m", "0",
+                        "-O", "^has_journal", "-E", "lazy_itable_init=1,nodiscard", "/dev/vdc"], check=True)
+        subprocess.run(["/bin/busybox", "mount", "-t", "ext4", "-o", "nosuid,nodev", "/dev/vdc", "/work"], check=True)
+    else:
+        subprocess.run(["/bin/busybox", "mount", "-t", "tmpfs", "-o", "size=24m,nosuid,nodev", "tmpfs", "/work"], check=True)
+    os.chmod("/work", 0o1777)
 
 
 def drop_privileges():
     os.setgroups([])
-    os.setgid(65534)
-    os.setuid(65534)
-    resource.setrlimit(resource.RLIMIT_FSIZE, (4 * FILE_LIMIT, 4 * FILE_LIMIT))
+    os.setgid(GUEST_USER)
+    os.setuid(GUEST_USER)
     resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
 
 
-def run_job(request):
+def run_job(request, disk):
     program = {"shell": ["/bin/sh"], "python": ["/usr/bin/python3", "-B"]}[request["language"]]
+    project = request.get("projectBytes")
+    mounts = request.get("mountBytes")
+    for length in (project, mounts):
+        if length is not None and (type(length) is not int or length < 0):
+            raise ValueError("invalid Linux directory stream length")
+    if TREE_OFFSET + (project or 0) + (mounts or 0) > disk.seek(0, os.SEEK_END):
+        raise ValueError("Linux directory stream exceeds the exchange disk")
+    prepare_workspace(project is not None or mounts is not None)
     os.chdir("/work")
+    env = {"PATH": "/usr/bin:/bin", "HOME": "/work", "TMPDIR": "/work", "LANG": "C.UTF-8"}
+    disk.seek(TREE_OFFSET)
+    if project is not None:
+        restore_tree(disk, project, "project", writable=True)
+        env["TINYBOT_PROJECT_DIR"] = "/work/project"
+    if mounts is not None:
+        restore_tree(disk, mounts, "mounts", writable=False)
+        env["TINYBOT_MOUNTS_DIR"] = "/work/mounts"
     with open("task", "x", encoding="utf-8") as script:
         script.write(request["source"])
     if "input" in request:
         with open("input", "xb") as target:
             target.write(base64.b64decode(request["input"], validate=True))
     with tempfile.TemporaryFile(dir="/work") as stdout, tempfile.TemporaryFile(dir="/work") as stderr:
-        result = subprocess.run(program + ["task"], stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
-                                env={"PATH": "/usr/bin:/bin", "HOME": "/work", "TMPDIR": "/work",
-                                     "LANG": "C.UTF-8"}, preexec_fn=drop_privileges)
-        receipt = {"exitCode": result.returncode, "truncated": False}
+        with subprocess.Popen(program + ["task"], stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+                              env=env, preexec_fn=drop_privileges, start_new_session=True) as process:
+            exit_code = process.wait()
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        receipt = {"exitCode": exit_code, "truncated": False}
         for name, stream in [("stdout", stdout), ("stderr", stderr)]:
             stream.seek(0)
             data = stream.read(LOG_LIMIT + 1)
             receipt[name] = data[:LOG_LIMIT].decode("utf-8", "replace")
             receipt["truncated"] |= len(data) > LOG_LIMIT
-    if result.returncode == 0 and request.get("collect"):
+    if exit_code == 0 and request.get("collect"):
         fd = os.open("output", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, "rb") as output:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -49,23 +189,31 @@ def run_job(request):
             if len(data) > FILE_LIMIT:
                 raise ValueError("output exceeds 1 MiB")
             receipt["artifact"] = base64.b64encode(data).decode("ascii")
+    if exit_code == 0 and project is not None:
+        disk.seek(TREE_OFFSET)
+        receipt["projectBytes"] = collect_tree("project", disk)
     return receipt
 
 
 def main():
     with open("/dev/vdb", "r+b", buffering=0) as disk:
         try:
-            magic, size = HEADER.unpack(disk.read(HEADER.size))
-            if magic != b"TBJ1" or not 0 < size <= HALF - HEADER.size:
+            magic, size = HEADER.unpack(read_exact(disk, HEADER.size))
+            if magic != b"TBJ3" or not 0 < size <= HALF - HEADER.size:
                 raise ValueError("invalid request frame")
-            result = run_job(json.loads(disk.read(size)))
+            with open("/proc/uptime", encoding="ascii") as uptime:
+                boot_ms = int(float(uptime.read().split()[0]) * 1000)
+            result = run_job(json.loads(read_exact(disk, size)), disk)
+            result["bootMs"] = boot_ms
         except Exception as error:
             result = {"error": str(error)}
         data = json.dumps(result, ensure_ascii=False).encode()
         if len(data) > HALF - HEADER.size:
             raise ValueError("response exceeds exchange disk")
+        # Report success only after the project stream reaches the exchange disk.
+        os.fsync(disk.fileno())
         disk.seek(HALF)
-        disk.write(HEADER.pack(b"TBR1", len(data)) + data)
+        write_all(disk, HEADER.pack(b"TBR3", len(data)) + data)
         os.fsync(disk.fileno())
 
 

@@ -36,7 +36,7 @@ export function uniqueSharedFolderName(base: string, existing: SharedFolder[], e
   for (const item of existing) { if (item.id !== excludeId) { names.add(item.name.toLocaleLowerCase()); } }
   const name = sharedFolderName(base);
   if (!names.has(name.toLocaleLowerCase())) { return name; }
-  for (let index = 2; index < 1000; index++) {
+  for (let index = 2; index <= names.size + 2; index++) {
     const suffix = ' (' + index + ')';
     const stem = name.length + suffix.length > 80 ? name.slice(0, 80 - suffix.length) : name;
     const candidate = stem + suffix;
@@ -45,9 +45,9 @@ export function uniqueSharedFolderName(base: string, existing: SharedFolder[], e
   throw new Error(t('共享文件夹名称重复。'));
 }
 
-export function validateSharedFolders(folders: SharedFolder[] | undefined): void {
+export function validateSharedFolders(folders: SharedFolder[] | undefined, limit: number = MAX_PROJECT_SHARED_FOLDERS): void {
   if (folders === undefined) { return; }
-  if (!Array.isArray(folders) || folders.length > MAX_PROJECT_SHARED_FOLDERS) { throw new Error(t('共享文件夹数据无效。')); }
+  if (!Array.isArray(folders) || folders.length > limit) { throw new Error(t('共享文件夹数据无效。')); }
   const ids = new Set<string>();
   const names = new Set<string>();
   const uris = new Set<string>();
