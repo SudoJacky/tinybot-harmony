@@ -424,21 +424,12 @@ export struct LinuxConsolePanel {
 
   @Builder
   sessionButton(stop: boolean) {
-    Button({ type: ButtonType.Normal }) {
-      Row({ space: 6 }) {
-        if (stop) {
-          Rect().width(9).height(9).radius(2).fill(this.appearance.onAccentContainer)
-        } else {
-          SymbolGlyph($r('sys.symbol.play_fill')).fontSize(12).fontColor([this.appearance.onAccentContainer])
-        }
-        Text(stop ? t('断开连接') : t('连接终端')).fontSize(Font.small).fontWeight(FontWeight.Medium)
-          .fontColor(this.appearance.onAccentContainer).fontFamily(this.appearance.fontFamily)
-      }
-    }.id(stop ? 'linux-console-stop' : 'linux-console-start').height(44).padding({ left: 14, right: 14 })
-      .backgroundColor(this.appearance.accentContainer).borderRadius(12)
-      .accessibilityText(stop ? t('断开连接') : t('连接终端'))
-      .enabled(stop ? this.phase !== 'stopping' : this.pageReady && this.active && !this.running)
-      .onClick(() => { if (stop) { this.autoStart = false; this.stop(); } else { this.start(); } })
+    IconButton({ icon: $r('sys.symbol.power'), iconSize: 22,
+      fill: this.phase === 'connected' ? this.appearance.accentContainer : $r('app.color.surface_variant'),
+      tint: this.phase === 'connected' ? this.appearance.onAccentContainer : $r('app.color.text_secondary'),
+      label: stop ? t('断开连接') : t('连接终端'), compId: stop ? 'linux-console-stop' : 'linux-console-start',
+      disabled: stop ? this.phase === 'stopping' : !this.pageReady || !this.active || this.running,
+      onTap: () => { if (stop) { this.autoStart = false; this.stop(); } else { this.start(); } } })
   }
 
   @Builder
