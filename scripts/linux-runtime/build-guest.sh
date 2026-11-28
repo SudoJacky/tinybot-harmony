@@ -5,6 +5,10 @@ if (( EUID != 0 )); then
   echo 'Build the guest as root in a Linux build container or with sudo to preserve APK file ownership.' >&2
   exit 1
 fi
+guest_emulator=$(command -v qemu-aarch64-static) || {
+  echo 'Install qemu-user-static to compile the guest Python helpers.' >&2
+  exit 1
+}
 here=$(cd "$(dirname "$0")" && pwd)
 out="$here/../../entry/src/main/resources/rawfile/linux"
 b=$(mktemp -d)
@@ -28,9 +32,21 @@ while IFS= read -r applet; do
   if [[ ! -e "root/$applet" && ! -L "root/$applet" ]]; then ln -s /bin/busybox "root/$applet"; fi
 done < root/etc/busybox-paths.d/busybox
 install -m 0755 "$here/guest-init" root/linux-init
+install -m 0644 "$here/guest-protocol.py" root/linux_protocol.py
 install -m 0644 "$here/guest-job.py" root/linux_job.py
 install -m 0644 "$here/guest-shell-task.py" root/linux_shell_task.py
 install -m 0644 "$here/guest-console.py" root/linux-console.py
+# Compile with the packaged interpreter so the bytecode matches the guest ABI.
+# Invoke the static emulator explicitly; the builder needs no binfmt registration.
+install -m 0755 "$guest_emulator" root/build-python
+# The verified Alpine sources live on a read-only volume. Timestamp-based
+# bytecode still checks their size and mtime without rereading and hashing the
+# entire source of each standard library module at every interpreter start.
+chroot root /build-python /usr/bin/python3 -I -S -m compileall -q -f --invalidation-mode timestamp /usr/lib
+chroot root /build-python /usr/bin/python3 -I -S -m py_compile \
+  /linux-console.py /linux_job.py /linux_shell_task.py /linux_protocol.py
+mv root/__pycache__/linux-console.*.pyc root/linux-console.pyc
+rm root/build-python
 truncate -s 160M root.ext4
 mke2fs -q -F -t ext4 -d root -E root_owner=0:0 root.ext4
 qemu-img convert -f raw -O qcow2 -c root.ext4 root.qcow2

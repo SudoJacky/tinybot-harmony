@@ -7,4 +7,4 @@ if [ ! -c /dev/null ]; then /bin/busybox mount -t devtmpfs devtmpfs /dev; fi
 /bin/busybox mkdir -p /run/tinybot /dev/pts
 /bin/busybox mount -t devpts -o mode=620,ptmxmode=666 devpts /dev/pts
 /bin/busybox chmod 600 /dev/ttyAMA0 /dev/vdb /dev/vdc
-exec /usr/bin/python3 -I -B /linux-console.py
+exec /usr/bin/python3 -I -S -B /linux-console.pyc

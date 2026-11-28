@@ -2,11 +2,7 @@
 import errno
 import fcntl
 import os
-import pty
-import re
 import select
-import signal
-import socket
 import struct
 import sys
 import time
@@ -46,14 +42,16 @@ def handle_frames(pending, input_data, resize, control):
         del pending[:end]
 
 
-def shell(serial, mapping):
+def shell(serial, mapped):
     os.close(serial)
     os.setgroups([])
     os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNS)
-    mapping.sendall(b"N")
-    if mapping.recv(1) != b"M":
+    # The PTY is still private here. Tell init the namespaces exist before
+    # it writes their maps, and wait for explicit acknowledgement.
+    os.write(1, b"N")
+    if os.read(mapped, 1) != b"M":
         raise RuntimeError("Sandbox shell ID mapping failed")
-    mapping.close()
+    os.close(mapped)
     os.setresgid(0, 0, 0)
     os.setresuid(0, 0, 0)
     os.chdir("/work")
@@ -65,33 +63,43 @@ def shell(serial, mapping):
 
 
 def start_shell(serial, window):
-    parent, child = socket.socketpair()
-    with parent, child:
-        pid, master = pty.fork()
-        if pid == 0:
-            parent.close()
-            try:
-                shell(serial, child)
-            finally:
-                os._exit(127)
-        child.close()
+    mapped, ack = os.pipe()
+    try:
+        pid, master = os.forkpty()
+    except OSError:
+        os.close(mapped)
+        os.close(ack)
+        raise
+    if pid == 0:
+        os.close(ack)
         try:
-            if parent.recv(1) != b"N":
-                raise RuntimeError("Shell exited before creating its namespaces")
-            # Inner root owns /work and the capture files as VM ID 65533.
-            # Other shell IDs use a range disjoint from init and workspace jobs.
-            for name in ("uid_map", "gid_map"):
-                with open(f"/proc/{pid}/{name}", "w", encoding="ascii") as mapping:
-                    mapping.write("0 65533 1\n1 100000 65535\n")
-            parent.sendall(b"M")
-            os.set_blocking(master, False)
-            fcntl.ioctl(master, termios.TIOCSWINSZ, window)
-        except Exception:
-            parent.close()
-            os.close(master)
-            os.waitpid(pid, 0)
-            raise
+            shell(serial, mapped)
+        finally:
+            os._exit(127)
+    os.close(mapped)
+    try:
+        if os.read(master, 1) != b"N":
+            raise RuntimeError("Shell exited before creating its namespaces")
+        # Inner root owns /work and the capture files as VM ID 65533.
+        # Other shell IDs use a range disjoint from init and workspace jobs.
+        for name in ("uid_map", "gid_map"):
+            with open(f"/proc/{pid}/{name}", "w", encoding="ascii") as mapping:
+                mapping.write("0 65533 1\n1 100000 65535\n")
+        fcntl.ioctl(master, termios.TIOCSWINSZ, window)
+        os.set_blocking(master, False)
+        os.write(ack, b"M")
+    except BaseException:
+        os.close(master)
+        os.close(ack)  # Release a child still waiting for its mapping.
+        os.waitpid(pid, 0)
+        raise
+    os.close(ack)
     return pid, master
+
+
+def kill_process(pid):
+    import signal
+    os.kill(pid, signal.SIGKILL)
 
 
 def start_job():
@@ -109,10 +117,24 @@ def start_job():
         if pid == 0:
             try:
                 os.unshare(os.CLONE_NEWNS)
-                os.execv("/usr/bin/python3", ["python3", "-I", "-B", "/linux_job.py"])
+                # This single-threaded supervisor already has an initialized
+                # interpreter. Give the worker the same clean descriptor table
+                # it would inherit across exec, then load only its own job code.
+                os.closerange(3, os.sysconf("SC_OPEN_MAX"))
+                from linux_job import main as run_job
+                run_job()
+                os._exit(0)
+            except BaseException:
+                sys.excepthook(*sys.exc_info())
             finally:
                 os._exit(125)
-        return pid
+        try:
+            return pid, os.pidfd_open(pid)
+        except OSError:
+            # A worker without a completion notification must not outlive this request.
+            kill_process(pid)
+            os.waitpid(pid, 0)
+            raise
     finally:
         os.close(original)
 
@@ -122,13 +144,28 @@ def flush_disk(path):
         fcntl.ioctl(disk, 0x1261)  # BLKFLSBUF, drop block cache before host access
 
 
+def last_input_key(data):
+    # Only the final editing key matters. Skip any complete cursor reports
+    # following it without changing the bytes forwarded to the PTY.
+    end = len(data)
+    while end and data[end - 1] == ord("R"):
+        start = data.rfind(b"\x1b[", 0, end)
+        if start < 0:
+            break
+        row, _, col = data[start + 2:end - 1].partition(b";")
+        if not row.isdigit() or not col.isdigit():
+            break
+        end = start
+    return data[end - 1] if end else None
+
+
 def main():
     serial = os.open("/dev/ttyAMA0", os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     tty.setraw(serial)
     window = WINDOW.pack(24, 80, 0, 0)
     shell_pid, master = start_shell(serial, window)
     frames, to_shell, to_host = bytearray(), bytearray(), bytearray()
-    job = shared = None
+    job = job_done = shared = None
     background = set()
     ready = editing = False
     last_input = 0.0
@@ -146,9 +183,9 @@ def main():
             return
         # ash asks for the cursor position at each prompt. A terminal's CSI
         # row;col R reply does not edit the current input line.
-        keys = re.sub(rb"\x1b\[\d+;\d+R", b"", data)
-        if keys:
-            editing = keys[-1] not in (3, 4, 10, 13)
+        key = last_input_key(data)
+        if key is not None:
+            editing = key not in (3, 4, 10, 13)
             last_input = time.monotonic()
         to_shell.extend(data)
 
@@ -175,17 +212,17 @@ def main():
         shared = None
 
     def task_error(error):
-        from linux_job import store_result
+        from linux_protocol import store_result
         with open("/dev/vdb", "r+b", buffering=0) as disk:
             store_result(disk, {"error": str(error)})
         flush_disk("/dev/vdb")
         to_host.extend(HEADER.pack(RUN_JOB, 1) + bytes([0]))
 
     def control(kind):
-        nonlocal job, shared
+        nonlocal job, job_done, shared
         if kind == CANCEL_JOB:
             if job is not None:
-                os.kill(job, signal.SIGKILL)
+                kill_process(job)
             elif shared is not None:
                 shared.stop(shell_pid)
             return
@@ -194,7 +231,7 @@ def main():
         flush_disk("/dev/vdb")
         if kind == RUN_JOB:
             try:
-                job = start_job()
+                job, job_done = start_job()
             except OSError as error:
                 task_error(error)
         elif not idle_prompt() or time.monotonic() - last_input < 0.12:
@@ -216,9 +253,11 @@ def main():
         if shared is not None:
             reads.extend(shared.pipes)
             reads.append(shared.status_fd)
+        if job_done is not None:
+            reads.append(job_done)
         reads.extend(background)
         writes = ([serial] if ready and to_host else []) + ([master] if to_shell else [])
-        check_exit = job is not None or not ready or (shared is not None and shared.cancelled_at is not None)
+        check_exit = not ready or (shared is not None and shared.cancelled_at is not None)
         readable, writable, _ = select.select(reads, writes, [], 0.05 if check_exit else None)
         for fd in writable:
             target = to_host if fd == serial else to_shell
@@ -231,6 +270,14 @@ def main():
                     raise
                 to_shell.clear()
         for fd in readable:
+            if fd == job_done:
+                _, status = os.waitpid(job, 0)
+                os.close(job_done)
+                job = job_done = None
+                flush_disk("/dev/vdc")
+                flush_disk("/dev/vdb")
+                to_host.extend(HEADER.pack(RUN_JOB, 1) + bytes([0 if status == 0 else 1]))
+                continue
             if fd in background:
                 if not os.read(fd, 65536):
                     os.close(fd)
@@ -272,14 +319,7 @@ def main():
             if idle_prompt():
                 finish_shared(130)
             elif time.monotonic() - shared.cancelled_at > 2:
-                os.kill(shell_pid, signal.SIGKILL)
-        if job is not None:
-            finished, status = os.waitpid(job, os.WNOHANG)
-            if finished:
-                flush_disk("/dev/vdc")
-                flush_disk("/dev/vdb")
-                to_host.extend(HEADER.pack(RUN_JOB, 1) + bytes([0 if status == 0 else 1]))
-                job = None
+                kill_process(shell_pid)
         # As init, also reap orphaned interactive subprocesses.
         while True:
             child = os.waitid(os.P_ALL, 0, os.WEXITED | os.WNOHANG | os.WNOWAIT)

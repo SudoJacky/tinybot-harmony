@@ -4,7 +4,7 @@
 
 ## Build the optional assets
 
-Use an x86-64 Linux build host or WSL. The engine build uses the HarmonyOS native SDK sysroot and libraries with the host's Clang, LLD, LLVM utilities, GCC, make, pkg-config, Python, Meson and Ninja. The guest build requires curl, tar, e2fsprogs and qemu-img. Run the guest step as root in a build container or via sudo so apk can restore package ownership. Allow access to the upstream source archives and Alpine package mirror.
+Use an x86-64 Linux build host or WSL. The engine build uses the HarmonyOS native SDK sysroot and libraries with the host's Clang, LLD, LLVM utilities, GCC, make, pkg-config, Python, Meson and Ninja. The guest build requires curl, tar, e2fsprogs, qemu-img and `qemu-aarch64-static` from `qemu-user-static`. It uses the guest’s own Python to compile bytecode before packaging. Run the guest step as root in a build container or via sudo so apk can restore package ownership. Allow access to the upstream source archives and Alpine package mirror.
 
 ```sh
 export OHOS_NDK=/path/to/openharmony/native
@@ -18,6 +18,8 @@ The second engine is for x86-64 emulators. The scripts stage the libraries under
 The engine script pins the [HiSH QEMU fork](https://github.com/harmoninux/qemu/tree/50ce7096eb6b338bee88a0960c543f93f1b16959) and checks its TCI build flag. The guest script verifies the [HiSH kernel release](https://github.com/harmoninux/linux-config/releases/tag/kernel-20260228) and installs signed packages from Alpine v3.22. Patch versions can change within that repository. For redistribution, retain the matching sources, build configuration and license notices for the kernel, emulator and packages.
 
 ## Run and verify
+
+On the Linux build host, run `python3 scripts/linux-runtime/test-guest-console.py` to check how mixed keystrokes and cursor position reports affect pending terminal input.
 
 In a chat with code calculation enabled, ask Tinybot to use `run_linux` to query a SQLite database from its private workspace. To run the example below, set `language` to `shell`, `inputPath` to `items.db`, and `outputPath` to `summary.csv`.
 

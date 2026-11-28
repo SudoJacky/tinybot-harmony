@@ -1,7 +1,5 @@
 """Run one unprivileged Linux job and stream its optional directory snapshots."""
-import base64
-import fcntl
-import json
+import binascii
 import os
 import resource
 import select
@@ -9,38 +7,18 @@ import signal
 import stat
 import struct
 import subprocess
-import termios
+import sys
 
-HALF = 2 * 1024 * 1024
+if __name__ == "__main__":
+    sys.path.insert(0, "/")  # Allow direct isolated invocation on the guest.
+
+from linux_protocol import CapturedOutput, HALF, load_request, pending_bytes, read_exact, store_result, write_all
+
 TREE_OFFSET = 2 * HALF
 FILE_LIMIT = 1024 * 1024
-LOG_LIMIT = 16 * 1024
 CHUNK = 1024 * 1024
 GUEST_USER = 65534
-HEADER = struct.Struct("<4sI")
 ENTRY = struct.Struct("<IBQ")
-
-
-class CapturedOutput:
-    def __init__(self):
-        self.streams = {"stdout": bytearray(), "stderr": bytearray()}
-        self.truncated = False
-
-    def append(self, name, data):
-        capture = self.streams[name]
-        sample = data[:LOG_LIMIT - len(capture)]
-        capture.extend(sample)
-        self.truncated |= len(sample) < len(data)
-        return sample
-
-    def receipt(self, code):
-        result = {name: data.decode("utf-8", "replace") for name, data in self.streams.items()}
-        result.update(exitCode=code, truncated=self.truncated)
-        return result
-
-
-def pending_bytes(fd):
-    return struct.unpack("i", fcntl.ioctl(fd, termios.FIONREAD, bytes(4)))[0]
 
 
 def safe_parts(path):
@@ -50,25 +28,6 @@ def safe_parts(path):
                 any(ord(char) < 32 or ord(char) == 127 for char in part) for part in parts)):
         raise ValueError("invalid sandbox directory path")
     return parts
-
-
-def read_exact(stream, size):
-    data = bytearray()
-    while len(data) < size:
-        chunk = stream.read(size - len(data))
-        if not chunk:
-            raise ValueError("truncated Linux directory stream")
-        data.extend(chunk)
-    return data
-
-
-def write_all(stream, data):
-    pending = memoryview(data)
-    while pending:
-        written = stream.write(pending)
-        if not written:
-            raise OSError("incomplete Linux directory stream")
-        pending = pending[written:]
 
 
 def copy_exact(source, destination, size):
@@ -224,7 +183,7 @@ def run_job(request, disk):
         script.write(request["source"])
     if "input" in request:
         with open("input", "xb") as target:
-            target.write(base64.b64decode(request["input"], validate=True))
+            target.write(binascii.a2b_base64(request["input"], strict_mode=True))
     receipt = run_captured(program + ["task"], env)
     exit_code = receipt["exitCode"]
     if exit_code == 0 and request.get("collect"):
@@ -235,28 +194,11 @@ def run_job(request, disk):
             data = output.read(FILE_LIMIT + 1)
             if len(data) > FILE_LIMIT:
                 raise ValueError("output exceeds 1 MiB")
-            receipt["artifact"] = base64.b64encode(data).decode("ascii")
+            receipt["artifact"] = binascii.b2a_base64(data, newline=False).decode("ascii")
     if exit_code == 0 and project is not None:
         disk.seek(TREE_OFFSET)
         receipt["projectBytes"] = collect_tree("project", disk)
     return receipt
-
-
-def load_request(disk):
-    magic, size = HEADER.unpack(read_exact(disk, HEADER.size))
-    if magic != b"TBJ3" or not 0 < size <= HALF - HEADER.size:
-        raise ValueError("invalid request frame")
-    return json.loads(read_exact(disk, size))
-
-
-def store_result(disk, result):
-    data = json.dumps(result, ensure_ascii=False).encode()
-    if len(data) > HALF - HEADER.size:
-        raise ValueError("response exceeds exchange disk")
-    os.fsync(disk.fileno())
-    disk.seek(HALF)
-    write_all(disk, HEADER.pack(b"TBR3", len(data)) + data)
-    os.fsync(disk.fileno())
 
 
 def main():
