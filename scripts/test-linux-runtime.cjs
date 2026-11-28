@@ -18,6 +18,7 @@ const deviceInfo = { deviceType: 'phone' };
 let installTime = 1;
 const boots = [];
 let serialEvents;
+let beforeGuestReady;
 const power = [];
 const MIB = 1024 * 1024;
 const TREE_OFFSET = 4 * MIB;
@@ -175,7 +176,7 @@ const platform = {
   '../model/Diagnostics': { Diagnostics: { log: (...event) => logged.push(event) } },
   './LinuxControl': { LinuxControl: class {
     async connect(dir) { assert.ok(files.has(dir + '/exchange')); }
-    async setRunning(running) { power.push(running); if (running) serialEvents.ready(); }
+    async setRunning(running) { power.push(running); if (running) { if (beforeGuestReady) await beforeGuestReady(); serialEvents.ready(); } }
   } },
   './LinuxSerial': { LinuxSerial: class {
     constructor(events) { this.events = events; }
@@ -285,8 +286,27 @@ async function main() {
   assert.equal(linuxRuntime.snapshot().history[0].outcome, 'failed');
   assert.equal(boots.length, 0);
   brokenImage = false;
-  await Promise.all([linuxRuntime.warmUp(context), linuxRuntime.warmUp(context),
-    catalog.execute(call({}), new Cancellation())]);
+  let releaseBoot, enteredBoot;
+  const bootEntered = new Promise(resolve => { enteredBoot = resolve; });
+  beforeGuestReady = () => new Promise(resolve => { releaseBoot = resolve; enteredBoot(); });
+  let observerBoot;
+  const unsubscribe = linuxRuntime.subscribe(() => {
+    unsubscribe();
+    observerBoot = linuxRuntime.warmUp(context);
+  });
+  const boot = linuxRuntime.warmUp(context);
+  await bootEntered;
+  assert.equal(observerBoot, boot, 'A synchronous listener joins the published boot');
+  const toolSignal = new Cancellation(), viewSignal = new Cancellation();
+  const toolWait = catalog.execute(call({}), toolSignal);
+  const viewWait = linuxRuntime.runConsole(context, { ready: assert.fail }, viewSignal);
+  toolSignal.cancel(); viewSignal.cancel();
+  await Promise.all([assert.rejects(toolWait, RunCancelledError), assert.rejects(viewWait, RunCancelledError)]);
+  assert.equal(requests.length, 0);
+  assert.equal(linuxRuntime.snapshot().active, 'warm-up');
+  const next = catalog.execute(call({}), new Cancellation());
+  beforeGuestReady = undefined; releaseBoot();
+  await Promise.all([boot, next]);
   assert.equal(boots.length, 1);
   assert.equal(requests.length, 1);
   assert.equal(jobs.at(-1).shared, true);
@@ -296,6 +316,32 @@ async function main() {
   await linuxRuntime.save({ timeoutSeconds: 60 });
   await catalog.execute(call({}), new Cancellation());
   assert.equal(jobs.at(-1).seconds, 60);
+  const io = platform['@kit.CoreFileKit'].fileIo;
+  const originalRead = io.read, originalStat = io.stat;
+  const exchangeReads = [];
+  try {
+    io.read = async (file, buffer, options) => {
+      if (file.endsWith('/exchange')) exchangeReads.push([options.offset, buffer.byteLength]);
+      return originalRead(file, buffer, options);
+    };
+    io.stat = async file => {
+      assert.ok(!file.endsWith('/exchange'), 'The VM owns a fixed-capacity exchange disk');
+      return originalStat(file);
+    };
+    await catalog.execute(call({}), new Cancellation());
+    assert.deepEqual(exchangeReads, [[2 * MIB, 512]], 'A short shell receipt needs one native read');
+    const { readLinuxResponse } = load(path.join(root, 'services/LinuxExchange'));
+    const file = '/fixture/exchange', disk = Buffer.alloc(2 * MIB + 4096);
+    files.set(file, disk);
+    for (const length of [504, 505, 1900]) {
+      disk.write('TBR3', 2 * MIB); disk.writeUInt32LE(length, 2 * MIB + 4);
+      const payload = 'a'.repeat(length); disk.write(payload, 2 * MIB + 8);
+      exchangeReads.length = 0;
+      assert.equal(await readLinuxResponse(file), payload);
+      assert.equal(exchangeReads.length, length <= 504 ? 1 : 2);
+    }
+    files.delete(file);
+  } finally { io.read = originalRead; io.stat = originalStat; }
   const customMemory = 768;
   await linuxRuntime.save({ memoryMiB: customMemory });
   for (const bad of [191, 192.25, 2049]) {

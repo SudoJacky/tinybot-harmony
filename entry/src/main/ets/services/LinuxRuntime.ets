@@ -99,6 +99,7 @@ class LinuxRuntime {
   private assetsReady: boolean = false;
   private memoryInUse?: number;
   private memoryLimit: number = 0;
+  private diskBytes: number = 0;
   private boot?: Promise<void>;
   private starting: boolean = false;
   private terminalInUse: boolean = false;
@@ -225,17 +226,26 @@ class LinuxRuntime {
     if (this.toolEnabled && this.settings.startup === 'prewarm') { await this.warmUp(context); }
   }
 
-  warmUp(context: common.Context): Promise<void> {
+  warmUp(context: common.Context, waiting?: Cancellation): Promise<void> {
+    waiting?.check();
     if (!this.toolEnabled || this.saving) {
       return Promise.reject(new ToolFailure('TOOL_UNAVAILABLE', this.fault || t('Linux 沙盒不可用或已停用。'), 'inspect_error'));
     }
     if (!this.boot) {
-      this.boot = this.bootGuest(context).catch((error: Error) => {
+      // Publish only after the shared promise is installed: a subscriber can attach synchronously.
+      this.starting = true;
+      this.boot = Promise.resolve().then(() => this.bootGuest(context)).catch((error: Error) => {
         if (!this.fault) { this.boot = undefined; }
         throw error;
       });
     }
-    return this.boot;
+    const boot = this.boot;
+    if (!waiting || !this.starting) { return boot; }
+    // Detach this caller immediately. The same boot continues for the next tool or terminal.
+    return new Promise<void>((resolve, reject) => {
+      const detach = waiting.onCancel(() => reject(new RunCancelledError()));
+      boot.then(() => { detach(); resolve(); }, (error: Error) => { detach(); reject(error); });
+    });
   }
 
   private fail(error: Error): void {
@@ -252,7 +262,6 @@ class LinuxRuntime {
     const started = Date.now();
     const dir = context.cacheDir + EMBEDDED_CACHE;
     const memory = this.settings.memoryMiB;
-    this.starting = true;
     let childId: string = '';
     let timer: number = -1;
     let engineStarted = false;
@@ -267,7 +276,8 @@ class LinuxRuntime {
       this.publish();
       if (await fs.access(dir)) { await fs.rmdir(dir); }
       await fs.mkdir(dir);
-      await createLinuxDisks(dir, native.linuxStorageBytes(context.cacheDir));
+      this.diskBytes = native.linuxStorageBytes(context.cacheDir);
+      await createLinuxDisks(dir, this.diskBytes);
       engineStarted = true;
       if (this.separateProcess) {
         childId = util.generateRandomUUID();
@@ -319,7 +329,7 @@ class LinuxRuntime {
 
   async runConsole(context: common.Context, events: LinuxSerialEvents, signal: Cancellation): Promise<void> {
     signal.check();
-    await this.warmUp(context);
+    await this.warmUp(context, signal);
     signal.check();
     this.terminals.add(events);
     try {
@@ -406,7 +416,7 @@ class LinuxRuntime {
     }
     const shared = job.session !== 'workspace' && job.inputPath === undefined && job.outputPath === undefined;
     const workspace = !shared && scope ? new LinuxWorkspace(context, scope) : undefined;
-    await this.warmUp(context);
+    await this.warmUp(context, signal);
     signal.check();
     const dir = context.cacheDir + EMBEDDED_CACHE;
     const disk = await fs.open(dir + '/exchange', fs.OpenMode.READ_WRITE);
@@ -433,10 +443,10 @@ class LinuxRuntime {
     } finally {
       try {
         if (!this.fault) {
-          await resetLinuxDisk(fd);
+          await resetLinuxDisk(fd, this.diskBytes);
           if (request.projectBytes !== undefined || request.mountBytes !== undefined) {
             const scratch = await fs.open(dir + '/workspace', fs.OpenMode.READ_WRITE);
-            try { await resetLinuxDisk(scratch.fd); } finally { await fs.close(scratch); }
+            try { await resetLinuxDisk(scratch.fd, this.diskBytes); } finally { await fs.close(scratch); }
           }
         }
       } finally { await fs.close(disk); }

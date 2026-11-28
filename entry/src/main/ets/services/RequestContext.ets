@@ -20,6 +20,7 @@ export interface ContextSource {
   persist: () => Promise<void>;
   progress: (status: string) => void;
 }
+interface RequestMessages { messages: ModelMessage[]; runtimeContext?: string; }
 export interface PreparedRequest { messages: ModelMessage[]; context: ContextDiagnostics; breakdown?: ContextTokenItem[]; runtimeContext?: string; }
 
 const CONTEXT_PREAMBLE: string = 'Current runtime context. This app-provided snapshot supersedes earlier runtime-context snapshots. ' +
@@ -41,7 +42,7 @@ export class RequestContext {
   inspect(tools: ToolDefinition[]): PreparedRequest {
     const sections = this.sections(tools);
     const entries = this.source.entries();
-    const messages = this.assemble(entries, sections, this.source.state.compaction, []);
+    const messages = this.assemble(entries, sections, this.source.state.compaction, []).messages;
     return { messages: messages, context: this.describe(messages, tools, sections),
       breakdown: contextBreakdown(messages, tools, sections, entries, this.source.state.compaction !== undefined) };
   }
@@ -59,12 +60,13 @@ export class RequestContext {
     const settings = contextSettings(this.config);
     if (recoverOverflow && !settings.autoCompact) { throw new ContextOverflowError(); }
     const sections = this.sections(tools);
-    const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
     const entries = this.source.entries();
-    const assemble = (checkpoint?: CompactionData): ModelMessage[] => this.assemble(entries, sections, checkpoint, pending);
-    let messages = assemble(this.source.state.compaction);
+    const assemble = (checkpoint?: CompactionData): RequestMessages => this.assemble(entries, sections, checkpoint, pending);
+    let assembled = assemble(this.source.state.compaction);
+    let messages = assembled.messages;
     let diagnostics = this.describe(messages, tools, sections);
     if (manual || recoverOverflow || (settings.autoCompact && diagnostics.tokens > diagnostics.inputBudget)) {
+      const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
       const currentContext = this.contextUpdate([], sections);
       const admission: ModelMessage[] = instructions ? [{ role: 'system', content: instructions }] : [];
       if (currentContext !== undefined) { admission.push({ role: 'user', content: currentContext }); }
@@ -80,7 +82,7 @@ export class RequestContext {
         { messages: this.summaryPrefix(messages, entries, plan), tools: tools });
       cancellation.check();
       const candidate = assemble(checkpoint);
-      if (estimateContextTokens(candidate, tools) >= estimateContextTokens(messages, tools)) {
+      if (estimateContextTokens(candidate.messages, tools) >= diagnostics.heuristicTokens) {
         throw new Error(t('生成的摘要没有减少上下文用量，原摘要和历史已保留。请积累更多历史后再压缩，或提高窗口设置。'));
       }
       const previous = this.source.state.compaction;
@@ -88,7 +90,8 @@ export class RequestContext {
       try { await this.source.persist(); } catch (error) { this.source.state.compaction = previous; throw error as Error; }
       cancellation.check();
       this.baselineInput = 0;
-      messages = candidate; diagnostics = this.describe(messages, tools, sections);
+      assembled = candidate; messages = assembled.messages;
+      diagnostics = this.describe(messages, tools, sections);
       diagnostics.compactionReason = recoverOverflow ? 'overflow' : manual ? 'manual' : 'threshold';
       this.source.progress(t('较早对话已压缩，完整记录保留'));
     }
@@ -102,16 +105,17 @@ export class RequestContext {
     Diagnostics.log('info', 'context', 'request_prefix', { change: change.change, commonMessages: change.commonMessages,
       sharedCharacters: change.sharedCharacters, systemHash: change.systemHash, toolsHash: change.toolsHash });
     return { messages: messages, context: diagnostics,
-      runtimeContext: this.contextUpdate(projectedHistory(entries, this.source.state.compaction), sections),
+      runtimeContext: assembled.runtimeContext,
       breakdown: contextBreakdown(messages, tools, sections, entries, this.source.state.compaction !== undefined) };
   }
 
-  private assemble(entries: ContextEntry[], sections: PromptSection[], checkpoint: CompactionData | undefined, pending: ModelMessage[]): ModelMessage[] {
+  private assemble(entries: ContextEntry[], sections: PromptSection[], checkpoint: CompactionData | undefined, pending: ModelMessage[]): RequestMessages {
     const instructions = renderPrompt(sections.filter((section) => !section.dynamic));
     const prefix: ModelMessage[] = instructions ? [{ role: 'system', content: instructions }] : [];
     const history = projectedHistory(entries, checkpoint);
     const update = this.contextUpdate(history, sections);
-    return prefix.concat(history, update === undefined ? [] : [{ role: 'user', content: update, runtimeContext: true }], pending);
+    return { messages: prefix.concat(history, update === undefined ? [] : [{ role: 'user', content: update, runtimeContext: true }], pending),
+      runtimeContext: update };
   }
 
   private sections(tools: ToolDefinition[]): PromptSection[] {
@@ -120,7 +124,10 @@ export class RequestContext {
   }
 
   private contextUpdate(history: ModelMessage[], sections: PromptSection[]): string | undefined {
-    const retained = history.slice().reverse().find((message) => message.runtimeContext);
+    let retained: ModelMessage | undefined = undefined;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].runtimeContext) { retained = history[i]; break; }
+    }
     const content = renderPrompt(sections.filter((section) => section.dynamic));
     if (!retained && !content) { return undefined; }
     const snapshot = CONTEXT_PREAMBLE + (content || '(none)');

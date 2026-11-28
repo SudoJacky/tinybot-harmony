@@ -144,6 +144,20 @@ async function attach(name, bytes, id = 'chat') {
 }
 async function main() {
   fs.mkdirSync(disk(root + '/cache'), { recursive: true }); Attachments.configure(root);
+  await workspace.ensureThread('existing');
+  const originalAccess = fileIo.access, originalStat = fileIo.lstat;
+  let lookups = 0;
+  try {
+    fileIo.access = () => assert.fail('An existing directory needs only lstat');
+    fileIo.lstat = async path => { lookups++; return originalStat(path); };
+    await workspace.ensureThread('existing');
+    await workspace.requireWorkspace('existing');
+    assert.equal(lookups, 4, 'One lookup per root and workspace for each caller');
+    await assert.rejects(workspace.requireWorkspace('absent'), /从备份恢复/);
+    fileIo.lstat = async () => { throw Object.assign(Error('Denied'), { code: 13900013 }); };
+    await assert.rejects(workspace.ensureThread('denied'), { code: 13900013 });
+    assert.ok(!fs.existsSync(disk(workspace.pathFor('denied'))));
+  } finally { fileIo.access = originalAccess; fileIo.lstat = originalStat; }
   const raw = Buffer.from('\uFEFFalpha\r\n中文🙂\r\nEND');
   const item = await attach('资料.txt', raw);
   assert.deepEqual(fs.readFileSync(disk(Attachments.path(item))), raw);

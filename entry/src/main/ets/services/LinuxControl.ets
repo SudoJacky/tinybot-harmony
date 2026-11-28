@@ -15,22 +15,31 @@ export class LinuxControl {
   private sequence: number = 0;
   private reply?: QmpMessage;
   private fault: string = '';
+  private notify?: () => void;
   private onFault: (error: Error) => void;
 
   constructor(onFault: (error: Error) => void) { this.onFault = onFault; }
 
   private fail(message: string): void {
     this.fault = message;
+    this.notify?.();
     this.onFault(new Error(message));
   }
 
   private async until(ready: () => boolean, timeout: number, action: string): Promise<void> {
-    const deadline = Date.now() + timeout;
-    while (!ready()) {
-      if (this.fault) { throw new Error(this.fault); }
-      if (timeout > 0 && Date.now() >= deadline) { throw new Error('Linux timed out waiting for ' + action); }
-      await pause();
-    }
+    if (this.fault) { throw new Error(this.fault); }
+    if (ready()) { return; }
+    if (this.notify) { throw new Error('Another Linux control response is pending'); }
+    let timer: number = -1;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.notify = () => {
+          if (this.fault) { reject(new Error(this.fault)); }
+          else if (ready()) { resolve(); }
+        };
+        timer = setTimeout(() => reject(new Error('Linux timed out waiting for ' + action)), timeout);
+      });
+    } finally { clearTimeout(timer); this.notify = undefined; }
   }
 
   private receive(text: string): void {
@@ -45,6 +54,7 @@ export class LinuxControl {
           if (msg.QMP) { this.greeted = true; }
           if (msg.event === 'SHUTDOWN') { this.fail('Linux shut down unexpectedly'); }
           if (msg.id === this.sequence) { this.reply = msg; }
+          this.notify?.();
         }
         end = this.incoming.indexOf('\n');
       }

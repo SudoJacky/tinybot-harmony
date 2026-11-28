@@ -35,6 +35,12 @@ export class HuaweiAccount {
     return this.initialization;
   }
 
+  async onForeground(context: common.UIAbilityContext): Promise<void> {
+    const restored = this.ready;
+    await this.initialize(context);
+    if (restored) { await this.refresh(); }
+  }
+
   private async restore(): Promise<void> {
     try {
       this.openID = await this.vault.readOptional(ACCOUNT_ALIAS) || '';

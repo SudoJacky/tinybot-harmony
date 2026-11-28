@@ -19,8 +19,7 @@ export async function createLinuxDisks(dir: string, bytes: number): Promise<void
   await createDisk(dir + '/workspace', bytes);
 }
 
-export async function resetLinuxDisk(fd: number): Promise<void> {
-  const bytes = (await fs.stat(fd)).size;
+export async function resetLinuxDisk(fd: number, bytes: number): Promise<void> {
   await fs.truncate(fd, 0);
   await fs.truncate(fd, bytes);
 }
@@ -78,11 +77,14 @@ export async function writeLinuxRequest(fd: number, json: string): Promise<void>
 }
 
 export async function readLinuxResponse(fd: number, diagnostics: string = ''): Promise<string> {
-  const header = new DataView(await readAt(fd, HEADER, HALF));
+  // The response starts at a sector boundary on the fixed-size exchange disk.
+  const sector = await readAt(fd, 512, HALF);
+  const header = new DataView(sector);
   const length = header.getUint32(4, true);
   if (header.getUint32(0) !== 0x54425233 || length < 2 || length > HALF - HEADER) {
     throw new ToolFailure('EXECUTION_FAILED', 'Linux guest exited without a valid v3 receipt. ' + diagnostics, 'inspect_result_before_retry');
   }
-  const bytes = await readAt(fd, length, HALF + HEADER);
-  return util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(new Uint8Array(bytes));
+  const bytes = length <= sector.byteLength - HEADER ? new Uint8Array(sector, HEADER, length) :
+    new Uint8Array(await readAt(fd, length, HALF + HEADER));
+  return util.TextDecoder.create('utf-8', { fatal: true }).decodeToString(bytes);
 }

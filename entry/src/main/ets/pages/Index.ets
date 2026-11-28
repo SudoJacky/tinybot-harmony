@@ -251,7 +251,7 @@ struct Index {
     if (!this.privacy.allowed) { return; }
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
     announcements.checkOnStartup(context).then(() => this.offerAnnouncement());
-    this.account.initialize(context).then(() => this.account.refresh());
+    this.account.onForeground(context);
     const starting = !this.session;
     if (!this.session) {
       linuxRuntime.initialize(context);

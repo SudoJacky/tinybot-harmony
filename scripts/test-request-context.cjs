@@ -15,7 +15,7 @@ const { RequestContext } = load(root + '/services/RequestContext');
 const { draftBreakdown } = load(root + '/model/ContextBreakdown');
 const { threadEntries, projectedHistory } = load(root + '/model/ContextProjection');
 const { sessionContextSource } = load(root + '/services/SessionContext');
-const { estimateTextTokens, estimateContextTokens } = load(root + '/model/ConversationContext');
+const { estimateTextTokens, estimateContextTokens, planContextCompaction } = load(root + '/model/ConversationContext');
 const { validateCompaction } = load(root + '/model/ContextCheckpoint');
 const { emptyData, parseAppData } = load(root + '/model/Conversation');
 const { Cancellation } = load(root + '/services/Cancellation');
@@ -33,6 +33,39 @@ function fixture() {
 }
 function source(thread, persist = async () => {}) { return sessionContextSource(thread, () => [{ name: 'rules', content: 'Follow the user.' }], persist, () => {}); }
 async function main() {
+  // A checkpoint may begin inside a turn. Retaining a later step still charges
+  // the original user anchor, even though that entry predates the checkpoint.
+  const part = (id, step, role, content) => ({ messageId: id, step, messages: role ? [{ role, content }] : [] });
+  const compactEntries = [part('a', undefined, 'user', '123456789'), part('a', 0, 'assistant', 'old'),
+    part('a', 1), part('a', 2, 'tool', 'receipt'), part('a', 3, 'assistant', '猫'),
+    part('b', undefined, 'user', 'abc'), part('b', 0, 'assistant', 'ok'), part('b', 1)];
+  const checkpoint = { firstKeptMessageId: 'a', firstKeptStep: 0, summary: 'past' };
+  for (const start of [0, 1]) {
+    for (let budget = 0; budget <= 95; budget++) {
+      const plan = planContextCompaction(compactEntries, start ? checkpoint : undefined, budget, 100);
+      // Enumerate legal boundaries independently and compare against the
+      // estimator on the *actual retained messages*, including an in-turn anchor.
+      const boundaries = compactEntries.slice(start + 1).filter((entry, offset) => {
+        const removed = compactEntries.slice(start, start + offset + 1).flatMap(e => e.messages);
+        return removed.some(m => ['assistant', 'tool'].includes(m.role)) && (entry.messages.length || entry === compactEntries.at(-1));
+      });
+      const expected = boundaries.find(entry => {
+        const history = compactEntries.slice(compactEntries.indexOf(entry)).flatMap(e => e.messages);
+        const anchor = entry.step === undefined ? [] : compactEntries.find(e => e.messageId === entry.messageId && e.step === undefined).messages;
+        return estimateContextTokens(anchor.concat(history)) - 3 <= budget;
+      }) || boundaries.at(-1);
+      assert.equal(plan.firstKeptMessageId, expected.messageId);
+      assert.equal(plan.firstKeptStep, expected.step);
+    }
+  }
+  const schemas = Array.from({ length: 40 }, (_, i) => ({ type: 'function',
+    function: { name: 't' + i, description: 'A猫🙂'.repeat(i % 7), parameters: { type: 'object', properties: {} } } }));
+  const rows = new RequestContext(source(fixture()), config()).inspect(schemas).breakdown.filter(r => r.kind === 'definitions');
+  let previous = 0;
+  schemas.forEach((schema, i) => {
+    const prefix = '[' + schemas.slice(0, i + 1).map(tool => JSON.stringify(tool)).join(',') + (i + 1 === schemas.length ? ']' : '');
+    const total = estimateTextTokens(prefix); assert.equal(rows[i].tokens, total - previous); previous = total;
+  });
   const retained = fixture();
   const earlier = { id: 'u0', role: 'user', content: 'old and expensive', status: 'complete', error: '' };
   retained.messages.unshift(earlier, { id: 'a0', role: 'assistant', content: 'historical answer', status: 'complete', error: '' });

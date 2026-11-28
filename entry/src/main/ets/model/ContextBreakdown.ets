@@ -1,7 +1,7 @@
 import { ModelMessage, ToolDefinition, toolSchemas } from './Agent';
 import { attachmentContext } from './AttachmentContext';
 import { ContextEntry, PromptSection, renderPrompt } from './ContextProjection';
-import { estimateTextTokens } from './ConversationContext';
+import { estimateTextTokens, textTokenThirds } from './ConversationContext';
 import { Attachment } from './Productivity';
 import { fileAnnotationContext } from './FileAnnotation';
 
@@ -26,16 +26,18 @@ export function contextBreakdown(messages: ModelMessage[], tools: ToolDefinition
   const sources = new Map<ModelMessage, ContextEntry>();
   for (const entry of entries) { for (const message of entry.messages) { sources.set(message, entry); } }
   // Marginal prefixes preserve the estimator's rounding and the full schema total.
-  let prefix = '['; let previous = 0;
+  let schemaThirds = 1; let previous = 0;
   const schemas = toolSchemas(tools);
   schemas.forEach((tool, index) => {
-    prefix += (index ? ',' : '') + JSON.stringify(tool) + (index === schemas.length - 1 ? ']' : '');
-    const total = estimateTextTokens(prefix);
+    schemaThirds += (index ? 1 : 0) + textTokenThirds(JSON.stringify(tool)) + (index === schemas.length - 1 ? 1 : 0);
+    const total = Math.ceil(schemaThirds / 3);
     rows.push({ id: 'schema-' + index, kind: 'definitions', name: tool.function.name, tokens: total - previous });
     previous = total;
   });
   let framing = 3;
   let summarySeen = false;
+  const stableSections = sections.filter((section) => !section.dynamic && section.content.trim().length > 0);
+  const instructions = renderPrompt(stableSections);
   messages.forEach((message, index) => {
     framing += 8;
     const source = sources.get(message);
@@ -52,12 +54,11 @@ export function contextBreakdown(messages: ModelMessage[], tools: ToolDefinition
         messageId: source?.messageId, step: source?.step });
       contentTokens = userTokens;
     }
-    const stableSections = sections.filter((section) => !section.dynamic);
-    if (kind === 'system' && message.content === renderPrompt(stableSections)) {
-      let rendered = ''; let counted = 0;
-      stableSections.filter((section) => section.content.trim().length > 0).forEach((section, sectionIndex) => {
-        rendered += (rendered ? '\n\n' : '') + renderPrompt([section]);
-        const total = estimateTextTokens(rendered);
+    if (kind === 'system' && message.content === instructions) {
+      let thirds = 0; let counted = 0;
+      stableSections.forEach((section, sectionIndex) => {
+        thirds += (sectionIndex ? 2 : 0) + textTokenThirds(renderPrompt([section]));
+        const total = Math.ceil(thirds / 3);
         rows.push({ id: id + '-section-' + sectionIndex, kind: kind, name: section.name, tokens: total - counted });
         counted = total;
       });

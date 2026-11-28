@@ -74,6 +74,11 @@ const deferred = () => { let resolve; const promise = new Promise(done => { reso
   assert.equal(account.signedIn, false); assert.equal(system.logins, 0, 'Opening app never signs in without consent');
   await assert.rejects(account.requireLogin(), /登录/);
   await account.signIn(); assert.equal(account.signedIn, true); assert.equal(secrets.get(alias), 'user-A');
+  const restoredAccount = new HuaweiAccount(), beforeRestore = system.checks;
+  await Promise.all([restoredAccount.onForeground({}), restoredAccount.onForeground({})]);
+  assert.equal(system.checks, beforeRestore + 1, 'Concurrent startup restores the saved identity once');
+  await restoredAccount.onForeground({});
+  assert.equal(system.checks, beforeRestore + 2, 'Returning to foreground checks the current identity');
   assert.equal(await account.backupOpenID({}), 'user-A');
   const otherDevice = new HuaweiAccount(); await account.signOut();
   const backupLogins = system.logins;

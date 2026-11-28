@@ -18,9 +18,9 @@ class LocalSocket {
 }
 
 const platform = {
-  '@kit.ArkTS': { util: { TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } } },
+  '@kit.ArkTS': { util: { TextDecoder: class { decodeToString(bytes) { return new TextDecoder().decode(bytes); } }, TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } } },
   '@kit.NetworkKit': { socket: { constructLocalSocketInstance: () => new LocalSocket() } },
-  '@kit.CoreFileKit': { fileIo: { access: async name => name.endsWith('/tty') } }
+  '@kit.CoreFileKit': { fileIo: { access: async name => name.endsWith('/tty') || name.endsWith('/qmp') } }
 };
 
 const modules = new Map();
@@ -96,6 +96,29 @@ async function main() {
   assert.match(events.at(-1), /Invalid Linux console startup response/);
   await broken.close();
 
+  const { LinuxControl } = load(path.join(root, 'services/LinuxControl'));
+  const failures = [];
+  const control = new LinuxControl(error => failures.push(error.message));
+  const connected = control.connect('/cache');
+  const qmp = sockets.at(-1);
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  await tick();
+  qmp.emit(Buffer.from('{"QM')); qmp.emit(Buffer.from('P":{}}\n'));
+  await tick();
+  assert.deepEqual(JSON.parse(qmp.sent[0]), { execute: 'qmp_capabilities', id: 1 });
+  qmp.emit(Buffer.from('{"event":"RESUME"}\n{"id":1,"return":{}}\n'));
+  await connected;
+  const resume = control.setRunning(true);
+  qmp.emit(Buffer.from('{"id":2,"return":{}}\n')); // reply before send() resumes
+  await resume;
+  const pause = control.setRunning(false);
+  await tick();
+  qmp.emit(Buffer.from('{"id":2,"return":{}}\n{"id":3,"error":{"desc":"denied"}}\n'));
+  await assert.rejects(pause, /denied/);
+  const interruptedControl = control.setRunning(true);
+  await tick(); await qmp.close();
+  await assert.rejects(interruptedControl, /closed its control connection/);
+  assert.equal(failures.length, 1);
   testScreenCopy();
   console.log('PASS Linux console serial handshake, UTF-8, resize, input framing and viewport copy');
 }
