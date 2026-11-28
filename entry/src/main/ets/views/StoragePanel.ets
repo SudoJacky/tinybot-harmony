@@ -45,7 +45,7 @@ export struct StoragePanel {
     const revision = ++this.revision;
     this.loading = true; this.error = '';
     try {
-      const report = await StorageUsage.scan(this.context(), this.app.exportSnapshot());
+      const report = await StorageUsage.scan(this.context(), this.app.storageCatalog());
       if (this.mounted && revision === this.revision) { this.report = report; this.loading = false; }
     } catch (error) {
       if (this.mounted && revision === this.revision) { this.error = (error as Error).message; this.loading = false; }
@@ -64,7 +64,7 @@ export struct StoragePanel {
     if (this.locked()) { return; }
     this.busy = true; this.status = ''; this.error = '';
     try {
-      const result = await StorageUsage.cleanSafe(this.context(), this.app.exportSnapshot());
+      const result = await StorageUsage.cleanSafe(this.context(), this.app.storageCatalog());
       let message = result.failed > 0 ? t('已释放 {0}，有 {1} 项未能删除。', [storageSize(result.freedBytes), result.failed])
         : t('已释放 {0}。', [storageSize(result.freedBytes)]);
       if (result.incomplete) { message = t('部分目录无法读取，清理可能不完整。') + ' ' + message; }
@@ -243,7 +243,7 @@ export struct StorageCategoryPanel {
     const revision = ++this.revision;
     this.loading = true; this.error = '';
     try {
-      const result = await StorageUsage.entries(this.context(), this.app.exportSnapshot(), this.category);
+      const result = await StorageUsage.entries(this.context(), this.app.storageCatalog(), this.category);
       if (this.mounted && revision === this.revision) { this.result = result; this.loading = false; }
     } catch (error) {
       if (this.mounted && revision === this.revision) { this.error = (error as Error).message; this.loading = false; }
@@ -273,7 +273,7 @@ export struct StorageCategoryPanel {
     if (this.locked()) { return; }
     this.busy = true; this.error = ''; this.status = '';
     try {
-      const result = await StorageUsage.remove(this.context(), [entry], this.app.exportSnapshot());
+      const result = await StorageUsage.remove(this.context(), [entry], this.app.storageCatalog());
       if (result.removed > 0 || result.freedBytes > 0) {
         this.status = result.failed > 0
           ? t('已释放 {0}，有 {1} 项未能删除。', [storageSize(result.freedBytes), result.failed])

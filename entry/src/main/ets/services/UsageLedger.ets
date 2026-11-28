@@ -72,17 +72,16 @@ export class UsageLedger {
     if (UsageLedger.database) {
       const db = await UsageLedger.database();
       const loaded: RequestUsage[] = [];
-      for (const id of await db.ids(USAGE_SCOPE)) {
-        const text = await db.read(USAGE_SCOPE, id);
-        if (id !== usageRecordId(loaded.length) || text === undefined) { throw new Error(t('用量记录格式损坏。')); }
-        loaded.push(JSON.parse(text) as RequestUsage);
-      }
+      const ids = await db.ids(USAGE_SCOPE);
       const index = new Map<string, number>();
-      for (let i = 0; i < loaded.length; i++) {
-        const id = loaded[i]?.id;
-        if (typeof id !== 'string' || !id || index.has(id)) { throw new Error(t('用量记录格式损坏。')); }
-        index.set(id, i);
-      }
+      await db.readEach(USAGE_SCOPE, ids, (id, text) => {
+        const item = JSON.parse(text) as RequestUsage;
+        if (id !== usageRecordId(loaded.length) || typeof item?.id !== 'string' || !item.id || index.has(item.id)) {
+          throw new Error(t('用量记录格式损坏。'));
+        }
+        index.set(item.id, loaded.length); loaded.push(item);
+      });
+      if (loaded.length !== ids.length) { throw new Error(t('用量记录格式损坏。')); }
       UsageLedger.dirty.clear();
       for (const current of UsageLedger.records) {
         const position = index.get(current.id) ?? loaded.length;

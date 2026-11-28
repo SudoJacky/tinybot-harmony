@@ -23,11 +23,12 @@ function load(relative) {
   } }, { filename: file });
   return exports;
 }
+const { firstUseStatus } = load('model/Onboarding');
 const Preferences = load('services/OnboardingPreferences').OnboardingPreferences;
 const fresh = () => ({ config: { configured: false }, threads: [], projects: [], providerProfiles: [] });
 const ready = { ...fresh(), config: { configured: true }, providerProfiles: [{ id: 'saved' }] };
 let preferences = new Preferences({});
-assert.equal(preferences.resumeStep(fresh()), 1);
+assert.equal(preferences.resumeStep(firstUseStatus(fresh())), 1);
 for (const data of [
   ready, { ...fresh(), providerProfiles: [{ id: 'saved' }] }, { ...fresh(), projects: [{ id: 'project' }] },
   { ...fresh(), threads: [{ messages: [{ content: 'saved chat' }] }] },
@@ -37,33 +38,33 @@ for (const data of [
   ...['archived', 'pinned', 'titleEdited', 'parentThreadId'].map(key => ({ ...fresh(), threads: [{ messages: [], [key]: true }] })),
   { ...fresh(), threads: [{ messages: [], references: [{ threadId: 'source' }] }] },
   { ...fresh(), threads: [{ messages: [] }, { messages: [] }] }
-]) assert.equal(preferences.resumeStep(data), 0, 'Returning users and unsent work must be left alone');
+]) assert.equal(preferences.resumeStep(firstUseStatus(data)), 0, 'Returning users and unsent work must be left alone');
 preferences.reach(3);
-assert.equal(preferences.resumeStep(ready), 0, 'A manual walkthrough does not enroll returning users');
+assert.equal(preferences.resumeStep(firstUseStatus(ready)), 0, 'A manual walkthrough does not enroll returning users');
 failFlush = true;
 assert.throws(() => preferences.begin(), /preference write failed/);
-assert.equal(preferences.resumeStep(ready), 0);
+assert.equal(preferences.resumeStep(firstUseStatus(ready)), 0);
 failFlush = false;
 preferences.begin();
 preferences.reach(2);
 failFlush = true;
 assert.throws(() => preferences.reach(3), /preference write failed/);
-assert.equal(preferences.resumeStep(fresh()), 2);
+assert.equal(preferences.resumeStep(firstUseStatus(fresh())), 2);
 failFlush = false;
 preferences.reach(4);
 preferences.reach(2);
 working = new Map(disk);
 preferences = new Preferences({});
-assert.equal(preferences.resumeStep(ready), 4, 'Restart after provider save keeps the completion page pending');
+assert.equal(preferences.resumeStep(firstUseStatus(ready)), 4, 'Restart after provider save keeps the completion page pending');
 failFlush = true;
 assert.throws(() => preferences.complete(), /preference write failed/);
-assert.equal(preferences.resumeStep(ready), 4);
+assert.equal(preferences.resumeStep(firstUseStatus(ready)), 4);
 failFlush = false;
 preferences.complete();
 working = new Map(disk);
-assert.equal(new Preferences({}).resumeStep(fresh()), 0);
+assert.equal(new Preferences({}).resumeStep(firstUseStatus(fresh())), 0);
 working = new Map([['onboardingComplete', true]]);
-assert.equal(new Preferences({}).resumeStep(fresh()), 0, 'Existing completed installations upgrade without prompting');
+assert.equal(new Preferences({}).resumeStep(firstUseStatus(fresh())), 0, 'Existing completed installations upgrade without prompting');
 console.log('PASS first-use and upgrade gating, durable checkpoints, provider-ready resumption, and failed-write rollback');
 
 
@@ -257,7 +258,7 @@ function page() {
   const view = Object.assign(probe('pages/Index', 'Index',
     ['offerOnboarding', 'openOnboarding', 'moveOnboarding', 'closeOnboarding', 'syncNavigationLocale'],
     { ShareInbox: { peek: () => undefined } }), {
-    app: { ready: true, exportSnapshot: fresh },
+    app: { ready: true, firstUse: () => firstUseStatus(fresh()) },
     onboardingPreferences: () => store,
     paths: {
       size: () => paths.length,

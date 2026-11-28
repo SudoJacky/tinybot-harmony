@@ -1,9 +1,10 @@
+import { UsageStream } from '../../model/Usage';
 import { util } from '@kit.ArkTS';
 import { t } from '../../model/I18n';
 import { DetailedError, providerErrorCode } from '../../model/DetailedError';
 import { MAX_REASONING_CONTENT, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
 import { GeminiPart, validateGeminiContent } from '../../model/GeminiContent';
-import { EventFrames, ModelStream } from './EventStreams';
+import { ModelEvents, ModelStream } from './EventStreams';
 
 interface GeminiCandidate { index?: number; content?: GeminiOutput; finishReason?: string; }
 interface GeminiOutput { role?: string; parts: GeminiPart[]; }
@@ -12,7 +13,7 @@ interface GeminiError { code?: number; status?: string; }
 interface GeminiEvent { candidates?: GeminiCandidate[]; promptFeedback?: GeminiFeedback; error?: GeminiError; usageMetadata?: Object; }
 
 export class GeminiStream implements ModelStream {
-  private frames: EventFrames;
+  private frames: ModelEvents;
   private parts: GeminiPart[] = [];
   private calls: ToolCall[] = [];
   private content: string = '';
@@ -23,10 +24,10 @@ export class GeminiStream implements ModelStream {
   private onReasoning?: (text: string) => void;
   private onToken?: () => void;
 
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void, usage?: UsageStream) {
     this.onText = onText; this.onReasoning = onReasoning;
     this.onToken = onToken;
-    this.frames = new EventFrames((payload) => this.event(payload));
+    this.frames = new ModelEvents((event) => this.event(event as GeminiEvent), usage);
   }
   push(text: string): void { this.frames.push(text); }
   finish(): ModelTurn {
@@ -36,10 +37,7 @@ export class GeminiStream implements ModelStream {
     if (!this.calls.length && !this.content.trim()) { throw new Error(t('模型没有返回可显示的文本。')); }
     return { content: this.content, toolCalls: this.calls, reasoningContent: this.reasoning || undefined, geminiContent: this.parts };
   }
-  private event(payload: string): void {
-    let event: GeminiEvent;
-    try { event = JSON.parse(payload) as GeminiEvent; }
-    catch (_) { throw new Error(t('模型返回了无效的流式 JSON。')); }
+  private event(event: GeminiEvent): void {
     if (!event || typeof event !== 'object' || Array.isArray(event)) { throw new Error(t('Gemini 流式事件无效。')); }
     if (event.error) { throw new DetailedError(t('Gemini 模型服务返回错误。'), {
       code: Number.isInteger(event.error.code) ? event.error.code : undefined,

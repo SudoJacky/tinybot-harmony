@@ -5,7 +5,7 @@ import { toolError } from '../model/Agent';
 
 export interface SearchOptions { path: string; query?: string; glob?: string; ignoreCase?: boolean; context?: number; limit?: number; cursor?: string; }
 interface SearchTask { path: string; directory: boolean; offset: number; version?: string; }
-interface SearchState { key: string; tasks: SearchTask[]; }
+interface SearchState { key: string; tasks: SearchTask[]; next: number; resume?: SearchTask; }
 interface SearchMatch { path: string; line: number; text: string; column: number; before: string[]; after: string[]; }
 interface SkippedFile { path: string; reason: Object; }
 let searchInstance: number = 0;
@@ -47,23 +47,26 @@ export class WorkspaceSearch {
     const pattern = filePattern(args.glob || '*');
     const key = JSON.stringify({ find: find, path: args.path, query: args.query || '', glob: args.glob || '*', ignoreCase: args.ignoreCase === true, context: context, limit: limit });
     let tasks: SearchTask[] = [{ path: args.path, directory: true, offset: 0 }];
+    let next = 0; let resume: SearchTask | undefined = undefined;
+    let shared = false;
     if (args.cursor !== undefined) {
       const saved = this.cursors.get(args.cursor);
       if (!saved || saved.key !== key) { throw new ToolFailure('FS_INVALID_CURSOR', 'Search cursor expired or parameters changed. Restart without cursor.', 'restart_search', { path: args.path }); }
-      tasks = saved.tasks.map((item: SearchTask): SearchTask => ({ path: item.path, directory: item.directory, offset: item.offset, version: item.version }));
+      tasks = saved.tasks; next = saved.next; resume = saved.resume; shared = true;
     }
     const matches: SearchMatch[] = []; const paths: string[] = []; const skipped: string[] = []; const skippedDetails: SkippedFile[] = [];
     let checked = 0; let directories = 0;
     const needle = args.ignoreCase ? (args.query || '').toLowerCase() : args.query || '';
-    while (tasks.length && checked < 200 && directories < 100 && (find ? paths.length : matches.length) < limit) {
-      cancellation.check(); const task = tasks.shift()!;
+    while ((resume || next < tasks.length) && checked < 200 && directories < 100 && (find ? paths.length : matches.length) < limit) {
+      cancellation.check(); const task: SearchTask = resume ?? tasks[next++]; resume = undefined;
       if (task.directory) {
         directories++;
         const page = await this.files.list(task.path, cancellation, task.offset);
         if (page.truncated && (page.nextOffset === undefined || page.nextOffset <= task.offset)) {
           throw new ToolFailure('FS_INCOMPLETE_LIST', 'Directory listing cannot continue.', 'inspect_directory', { path: task.path });
         }
-        // Keep directory continuation after its entries, without dropping any remainder at a page boundary.
+        // Replaying a cursor must not mutate its queue. File-only pages share the same array.
+        if (shared) { tasks = tasks.slice(next); next = 0; shared = false; }
         if (page.nextOffset !== undefined) { tasks.push({ path: task.path, directory: true, offset: page.nextOffset }); }
         for (const entry of page.entries) {
           if (entry.name.startsWith('.') || !['directory', 'file'].includes(entry.kind)) { continue; }
@@ -93,19 +96,19 @@ export class WorkspaceSearch {
           before: lines.slice(Math.max(0, line - context), line).map((value: string) => value.slice(0, 600)),
           after: lines.slice(line + 1, line + context + 1).map((value: string) => value.slice(0, 600)) });
       }
-      if (line < lines.length) { tasks.unshift({ path: task.path, directory: false, offset: line, version: version }); }
+      if (line < lines.length) { resume = { path: task.path, directory: false, offset: line, version: version }; }
     }
     cancellation.check();
     let cursor: string | undefined = undefined;
-    if (tasks.length) {
+    if (resume || next < tasks.length) {
       cursor = 'search-' + this.prefix + '-' + (++this.serial);
-      this.cursors.set(cursor, { key: key, tasks: tasks });
+      this.cursors.set(cursor, { key: key, tasks: tasks, next: next, resume: resume });
       // Cursors retain traversal positions, never file contents. The latest 32 pages can be replayed.
       if (this.cursors.size > 32) { this.cursors.delete(Array.from(this.cursors.keys())[0]); }
     }
-    return find ? JSON.stringify({ paths: paths, checkedFiles: checked, truncated: tasks.length > 0, nextCursor: cursor }) :
+    return find ? JSON.stringify({ paths: paths, checkedFiles: checked, truncated: cursor !== undefined, nextCursor: cursor }) :
       JSON.stringify({ matches: matches, skipped: skipped, skippedDetails: skippedDetails,
         reductions: matches.length ? ['Search results contain excerpts of up to 600 characters per line. Use read_file for complete source before editing.'] : [],
-        checkedFiles: checked, truncated: tasks.length > 0, nextCursor: cursor });
+        checkedFiles: checked, truncated: cursor !== undefined, nextCursor: cursor });
   }
 }

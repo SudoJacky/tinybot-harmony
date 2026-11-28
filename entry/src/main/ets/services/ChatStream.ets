@@ -1,6 +1,7 @@
+import { UsageStream } from '../model/Usage';
 import { t } from '../model/I18n';
 import { MAX_REASONING_CONTENT, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../model/Agent';
-import { ModelStream } from './providers/EventStreams';
+import { ModelEvents, ModelStream } from './providers/EventStreams';
 import { ProviderErrorData, streamProviderError } from './providers/ProviderErrors';
 
 interface StreamToolFunction {
@@ -34,8 +35,7 @@ interface StreamChunk {
 
 // SSE framing survives arbitrary transport chunk boundaries, including CRLF splits.
 export class ChatStream implements ModelStream {
-  private pending: string = '';
-  private lines: string[] = [];
+  private frames: ModelEvents;
   private terminal: string = '';
   private done: boolean = false;
   private content: string = '';
@@ -45,30 +45,20 @@ export class ChatStream implements ModelStream {
   private onReasoning?: (text: string) => void;
   private onToken?: () => void;
 
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void, usage?: UsageStream) {
     this.onText = onText;
     this.onReasoning = onReasoning;
     this.onToken = onToken;
+    this.frames = new ModelEvents((event) => this.dispatch(event as StreamChunk), usage, () => {
+      if (this.done) { throw new Error(t("模型在结束标记后继续返回数据。")); }
+      this.done = true;
+    });
   }
-
-  push(text: string): void {
-    this.pending += text;
-    let newline = this.pending.indexOf('\n');
-    while (newline >= 0) {
-      const line = this.pending.slice(0, newline).replace(/\r$/, '');
-      this.pending = this.pending.slice(newline + 1);
-      if (line.length === 0) {
-        this.dispatch();
-      } else if (line.startsWith('data:')) {
-        this.lines.push(line.slice(5).replace(/^ /, ''));
-      }
-      newline = this.pending.indexOf('\n');
-    }
-  }
+  push(text: string): void { this.frames.push(text); }
 
   finish(): ModelTurn {
     if (!this.done || (this.terminal !== 'stop' && this.terminal !== 'tool_calls') ||
-      this.pending.trim().length > 0 || this.lines.length > 0) {
+      this.frames.incomplete) {
       if (this.terminal === 'length') {
         throw new Error(t("回答达到模型输出上限，内容不完整。"));
       }
@@ -96,25 +86,8 @@ export class ChatStream implements ModelStream {
       reasoningContent: this.reasoningContent.length > 0 ? this.reasoningContent : undefined };
   }
 
-  private dispatch(): void {
-    if (this.lines.length === 0) {
-      return;
-    }
-    const payload = this.lines.join('\n');
-    this.lines = [];
-    if (this.done) {
-      throw new Error(t("模型在结束标记后继续返回数据。"));
-    }
-    if (payload === '[DONE]') {
-      this.done = true;
-      return;
-    }
-    let chunk: StreamChunk;
-    try {
-      chunk = JSON.parse(payload) as StreamChunk;
-    } catch (_) {
-      throw new Error(t("模型返回了无效的流式 JSON。"));
-    }
+  private dispatch(chunk: StreamChunk): void {
+    if (this.done) { throw new Error(t("模型在结束标记后继续返回数据。")); }
     if (!chunk || chunk.error) {
       throw streamProviderError(chunk?.error);
     }

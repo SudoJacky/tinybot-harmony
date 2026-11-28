@@ -1,3 +1,4 @@
+import { EventFrames } from './EventFrames';
 import { ContextDiagnostics } from './Agent';
 export interface TokenUsage { input: number; output: number; cached?: number; reasoning?: number; cacheWrite?: number; }
 export interface UsageOrigin {
@@ -27,31 +28,28 @@ interface GeminiUsage { promptTokenCount?: number; candidatesTokenCount?: number
 interface UsageEvent { type?: string; usage?: WireUsage; usageMetadata?: GeminiUsage; message?: UsageEvent; response?: UsageEvent; }
 function count(value: number | undefined): number | undefined { return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined; }
 export class UsageStream {
-  private pending: string = '';
-  private lines: string[] = [];
+  private frames?: EventFrames;
   private input?: number;
   private output?: number;
   private cached?: number;
   private reasoning?: number;
   private cacheWrite?: number;
   push(text: string): void {
-    this.pending += text;
-    let newline = this.pending.indexOf('\n');
-    while (newline >= 0) {
-      const line = this.pending.slice(0, newline).replace(/\r$/, ''); this.pending = this.pending.slice(newline + 1);
-      if (line.startsWith('data:')) { this.lines.push(line.slice(5).trimStart()); }
-      else if (!line && this.lines.length) { this.consume(this.lines.join('\n')); this.lines = []; }
-      newline = this.pending.indexOf('\n');
+    if (!this.frames) {
+      this.frames = new EventFrames((payload: string) => {
+        let event: Object;
+        try { event = JSON.parse(payload) as Object; } catch (_) { return; }
+        this.observe(event);
+      });
     }
+    this.frames.push(text);
   }
   result(): TokenUsage | undefined {
     return this.input === undefined || this.output === undefined ? undefined : {
       input: this.input, output: this.output, cached: this.cached, reasoning: this.reasoning, cacheWrite: this.cacheWrite };
   }
-  private consume(text: string): void {
-    if (text === '[DONE]') { return; }
-    let event: UsageEvent;
-    try { event = JSON.parse(text) as UsageEvent; } catch (_) { return; }
+  observe(value: Object): void {
+    const event = value as UsageEvent;
     if (event?.usageMetadata) {
       const metadata = event.usageMetadata;
       const input = count(metadata.promptTokenCount); const output = count(metadata.candidatesTokenCount);

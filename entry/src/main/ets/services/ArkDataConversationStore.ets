@@ -32,13 +32,15 @@ export class ArkDataConversationStore implements SessionRepository {
     }
     const data = JSON.parse(index.metadata) as AppData;
     const saved = new Map<string, string>();
-    for (const id of index.threadIds) {
-      const text = await db.read('thread', id);
-      if (text === undefined) { throw new Error('ArkData conversation is missing'); }
+    const positions = new Map<string, number>();
+    index.threadIds.forEach((id, position) => positions.set(id, data.threads.length + position));
+    await db.readEach('thread', index.threadIds, (id, text) => {
       const thread = JSON.parse(text) as ThreadData;
       if (thread.id !== id) { throw new Error('ArkData conversation does not match its index'); }
-      data.threads.push(thread); saved.set(id, text);
-    }
+      data.threads[positions.get(id)!] = thread;
+      saved.set(id, text);
+    });
+    if (saved.size !== index.threadIds.length) { throw new Error('ArkData conversation is missing'); }
     const loaded = normalizeAppData(data);
     this.index = raw; this.saved = saved;
     this.capture.clear(); this.capture.capture(loaded); this.failed = false;

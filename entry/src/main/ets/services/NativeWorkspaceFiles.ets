@@ -25,6 +25,20 @@ async function contentVersion(content: string): Promise<string> {
   return new util.Base64Helper().encodeToStringSync((await hash.digest()).data);
 }
 
+// Keep directory pages ordered without making every metadata read wait for its predecessor.
+async function pageEntries(names: string[], offset: number, cancellation: Cancellation,
+  describe: (name: string) => Promise<WorkspaceEntry>): Promise<WorkspaceEntry[]> {
+  const end = Math.min(names.length, offset + 200);
+  const entries: WorkspaceEntry[] = [];
+  for (let start = offset; start < end; start += 8) {
+    cancellation.check();
+    const group = await Promise.all(names.slice(start, Math.min(start + 8, end)).map(describe));
+    entries.push(...group);
+  }
+  cancellation.check();
+  return entries;
+}
+
 export interface DeviceFileResult { written: boolean; matches: boolean; }
 
 export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
@@ -249,18 +263,13 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
       .concat(Array.from(virtual.keys()))));
     if (this.mounts.length > 0 && (path === '' || path === '.') && !names.includes(SHARED_FOLDER_ROOT)) { names.push(SHARED_FOLDER_ROOT); }
     names.sort();
-    const entries: WorkspaceEntry[] = [];
-    for (const name of names.slice(offset, offset + 200)) {
-      cancellation.check();
-      if (this.mounts.length > 0 && (path === '' || path === '.') && name === SHARED_FOLDER_ROOT) {
-        entries.push({ name: name, kind: 'directory' });
-        continue;
-      }
+    const entries = await pageEntries(names, offset, cancellation, async (name: string): Promise<WorkspaceEntry> => {
+      if (this.mounts.length > 0 && !relative && name === SHARED_FOLDER_ROOT) { return { name: name, kind: 'directory' }; }
       const entry = virtual.get(name);
-      if (entry) { entries.push(entry); continue; }
+      if (entry) { return entry; }
       const stat = await fs.lstat(absolute + '/' + name);
-      entries.push({ name: name, kind: stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file' });
-    }
+      return { name: name, kind: stat.isSymbolicLink() ? 'symlink' : stat.isDirectory() ? 'directory' : 'file' };
+    });
     return { path: path || '.', entries: entries, truncated: names.length > offset + 200,
       nextOffset: names.length > offset + 200 ? offset + 200 : undefined };
   }
@@ -752,12 +761,10 @@ export class NativeWorkspaceFiles implements WorkspaceFiles, FileJobWorkspace {
       }
     }
     names = names.filter((name: string) => !name.startsWith('.tinybot-')).sort();
-    const entries: WorkspaceEntry[] = [];
-    for (const name of names.slice(offset, offset + 200)) {
-      cancellation.check();
+    const entries = await pageEntries(names, offset, cancellation, async (name: string): Promise<WorkspaceEntry> => {
       const stat = await this.externalStat(mount.folder, (mount.relative ? mount.relative + '/' : '') + name);
-      entries.push({ name: name, kind: stat?.isSymbolicLink() ? 'symlink' : stat?.isDirectory() ? 'directory' : 'file' });
-    }
+      return { name: name, kind: stat?.isSymbolicLink() ? 'symlink' : stat?.isDirectory() ? 'directory' : 'file' };
+    });
     return { path: path, entries: entries, truncated: names.length > offset + 200,
       nextOffset: names.length > offset + 200 ? offset + 200 : undefined };
   }

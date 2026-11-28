@@ -1,4 +1,4 @@
-import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
+import { ConversationShareData } from '../model/ConversationShare';
 import { ConversationSharePanel } from '../views/ConversationSharePanel';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { SearchPill } from '../common/SearchPill';
@@ -508,7 +508,7 @@ struct Index {
     if (this.receiving || this.launching || ShareInbox.peek() || this.paths.size() > 0) { return; }
     try {
       const preferences = this.onboardingPreferences();
-      const step = preferences.resumeStep(this.app.exportSnapshot());
+      const step = preferences.resumeStep(this.app.firstUse());
       if (step > 0) { preferences.begin(); this.openOnboarding(step); }
     } catch (error) { this.app.error = t('无法读取首次使用记录：{0}', [(error as Error).message]); }
   }
@@ -528,14 +528,14 @@ struct Index {
     return !this.reviewDisposed && this.privacy.allowed && this.foreground && this.app.ready && this.app.canNavigate &&
       !this.app.busy && !this.receiving && !this.launching && !ShareInbox.peek() && !this.providerEditorActive &&
       !this.announcementDialog && !this.reviewDialog && (this.paths.size() === 0 || this.onboardingActive) &&
-      this.startupBackup !== undefined && this.startupBackup.untouched(this.app.exportSnapshot());
+      this.startupBackup !== undefined && this.startupBackup.untouched(this.app.firstUse());
   }
 
   private async offerStartupBackup(): Promise<void> {
     if (!this.startupBackup || this.startupBackupChecking || this.startupBackupDialog || !this.canOfferStartupBackup()) { return; }
     this.startupBackupChecking = true;
     try {
-      const item = await this.startupBackup.find(this.app.exportSnapshot());
+      const item = await this.startupBackup.find(this.app.firstUse());
       if (!item || !this.canOfferStartupBackup()) { return; }
       const width = WorkbenchLayout.dialogWidth(this.windowWidth);
       this.startupBackupDialog = new CustomDialogController({
@@ -1524,7 +1524,7 @@ struct Index {
     if (page === 'guide') {
       try {
         const preferences = this.onboardingPreferences();
-        const step = preferences.resumeStep(this.app.exportSnapshot());
+        const step = preferences.resumeStep(this.app.firstUse());
         if (step > 0) { preferences.begin(); }
         this.openOnboarding(step || 1);
       } catch (error) {
@@ -1611,12 +1611,7 @@ struct Index {
 
   private openConversationShare(): void {
     if (!this.app.ready || this.app.busy || !this.app.active.messages.length) { return; }
-    const snapshot = this.app.exportSnapshot();
-    const data: ConversationShareData = {
-      thread: snapshot.threads.find((thread) => thread.id === this.app.active.id)!,
-      profiles: snapshot.providerProfiles || []
-    };
-    data.thread.messages = sharingMessages(data.thread.messages);
+    const data = this.app.shareConversation();
     if (!data.thread.messages.length) {
       this.getUIContext().getPromptAction().showToast({ message: t('暂无可分享的正文') });
       return;

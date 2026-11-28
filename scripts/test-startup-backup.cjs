@@ -20,6 +20,7 @@ function load(name) {
     throw Error(id);
   }});return exports;
 }
+const { firstUseStatus } = load('model/Onboarding');
 const {StartupBackup}=load('services/StartupBackup');
 const context={filesDir:'/app'};
 const fresh=()=>({config:{configured:false},threads:[],projects:[],providerProfiles:[]});
@@ -28,15 +29,15 @@ async function main(){
   reset();let state=new StartupBackup(context);assert.equal(saved.get('startupBackupState'),'pending');
   // Session initialization creates a manifest, but first-run identity has already been captured.
   files.add('/app/sessions-v2/index.json');working=new Map(saved);state=new StartupBackup(context);
-  assert.equal((await state.find(fresh())).name,'tinybot-latest.tinybot');assert.equal(syncs,1);
+  assert.equal((await state.find(firstUseStatus(fresh()))).name,'tinybot-latest.tinybot');assert.equal(syncs,1);
   items.unshift({name:'tinybot-auto-11111111-1111-4111-8111-111111111111.tinybot',createdAt:200,size:100,location:2});
-  assert.equal((await state.find(fresh())).name,items[0].name,'Newest automatic backup is preferred over an older manual backup');
-  state.finish();working=new Map(saved);state=new StartupBackup(context);assert.equal(await state.find(fresh()),undefined);assert.equal(syncs,2);
+  assert.equal((await state.find(firstUseStatus(fresh()))).name,items[0].name,'Newest automatic backup is preferred over an older manual backup');
+  state.finish();working=new Map(saved);state=new StartupBackup(context);assert.equal(await state.find(firstUseStatus(fresh())),undefined);assert.equal(syncs,2);
   reset();state=new StartupBackup(context);working.set('onboardingStep',1);
-  assert.equal(state.untouched(fresh()),true,'An available backup can still be restored during sign-in');
+  assert.equal(state.untouched(firstUseStatus(fresh())),true,'An available backup can still be restored during sign-in');
   working.set('onboardingStep',2);
-  assert.equal(state.untouched(fresh()),false,'A late restore cannot overwrite onboarding preferences');
-  assert.equal(await state.find(fresh()),undefined);assert.equal(syncs,0);
+  assert.equal(state.untouched(firstUseStatus(fresh())),false,'A late restore cannot overwrite onboarding preferences');
+  assert.equal(await state.find(firstUseStatus(fresh())),undefined);assert.equal(syncs,0);
   for(const upgrade of ['timestamp','manifest','legacy','completed','pending-upgrade']){
     reset();
     if(upgrade==='timestamp') info.updateTime=200;
@@ -44,16 +45,16 @@ async function main(){
     if(upgrade==='legacy') files.add('/app/tinybot-v1.json');
     if(upgrade==='completed') working.set('onboardingComplete',true);
     if(upgrade==='pending-upgrade'){working.set('startupBackupState','pending');info.updateTime=200;}
-    state=new StartupBackup(context);assert.equal(await state.find(fresh()),undefined,upgrade);assert.equal(syncs,0,upgrade);
+    state=new StartupBackup(context);assert.equal(await state.find(firstUseStatus(fresh())),undefined,upgrade);assert.equal(syncs,0,upgrade);
   }
   for(const data of [{...fresh(),providerProfiles:[{id:'saved'}]},{...fresh(),threads:[{messages:[],draft:'new work'}]},
     {...fresh(),config:{configured:false,userDocument:'personal'}},{...fresh(),productivity:{servers:[{}]}},
     {...fresh(),productivity:{memories:[{}]}}]){
-    reset();state=new StartupBackup(context);assert.equal(await state.find(data),undefined);assert.equal(syncs,0);assert.equal(saved.get('startupBackupState'),'done');
+    reset();state=new StartupBackup(context);assert.equal(await state.find(firstUseStatus(data)),undefined);assert.equal(syncs,0);assert.equal(saved.get('startupBackupState'),'done');
   }
-  reset();state=new StartupBackup(context);items=[];assert.equal(await state.find(fresh()),undefined);assert.equal(saved.get('startupBackupState'),'done');
-  reset();state=new StartupBackup(context);items=[];synced=false;await state.find(fresh());assert.equal(saved.get('startupBackupState'),'pending','incomplete sync can retry later');
-  syncError=Error('cloud unavailable');await assert.rejects(state.find(fresh()),/cloud unavailable/);assert.equal(saved.get('startupBackupState'),'pending');
+  reset();state=new StartupBackup(context);items=[];assert.equal(await state.find(firstUseStatus(fresh())),undefined);assert.equal(saved.get('startupBackupState'),'done');
+  reset();state=new StartupBackup(context);items=[];synced=false;await state.find(firstUseStatus(fresh()));assert.equal(saved.get('startupBackupState'),'pending','incomplete sync can retry later');
+  syncError=Error('cloud unavailable');await assert.rejects(state.find(firstUseStatus(fresh())),/cloud unavailable/);assert.equal(saved.get('startupBackupState'),'pending');
   reset();failFlush=true;assert.throws(()=>new StartupBackup(context),/flush failed/);assert.equal(working.get('startupBackupState'),'');
   failFlush=false;state=new StartupBackup(context);failFlush=true;assert.throws(()=>state.finish(),/flush failed/);assert.equal(working.get('startupBackupState'),'pending');
   console.log('PASS fresh-install capture, upgrade exclusion, durable one-time decision, changed-data suppression, cloud retries and marker failures');
@@ -75,7 +76,7 @@ async function uiTest(){
   });
   function page(){let finished=0,commits=0;const entries=['onboarding'];const data=fresh();
     const view=Object.assign(new exports.Probe(),{privacy:{allowed:true},foreground:true,reviewDisposed:false,appearance:{surface:{}},
-      onboardingActive:true,app:{ready:true,canNavigate:true,busy:false,exportSnapshot:()=>data,importSnapshot:async()=>{commits++;return true;}},
+      onboardingActive:true,app:{ready:true,canNavigate:true,busy:false,firstUse:()=>firstUseStatus(data),exportSnapshot:()=>data,importSnapshot:async()=>{commits++;return true;}},
       startupBackup:{find:async()=>({name:'tinybot-latest.tinybot',createdAt:100}),untouched:d=>!d.providerProfiles.length,finish:()=>finished++},
       paths:{size:()=>entries.length,clear:()=>entries.length=0},onboardingPreferences:()=>({complete(){}}),
       getUIContext:()=>({getHostContext:()=>context,getPromptAction:()=>({showToast(){}})}),receiveShare(){},receiveLaunch(){},offerAnnouncement(){}});

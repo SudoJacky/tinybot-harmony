@@ -15,7 +15,6 @@ import { Cancellation } from '../services/Cancellation';
 import { writeBytes } from '../services/Attachments';
 import { isDocumentPath } from '../services/DocumentFiles';
 import { exportFile, shareFile } from '../services/NativeActions';
-import { aiAssistedFile } from '../model/ConversationExport';
 import { MarkdownView } from './MarkdownView';
 import { DataTable } from './DataTable';
 import { OfficePreview, OfficePreviewSource } from './OfficePreview';
@@ -323,7 +322,7 @@ export struct WorkspacePanel {
       const absolute = await this.files.checkedPath(path);
       if (kind === 'export') {
         await exportFile(context, absolute, this.fileName(path),
-          aiAssistedFile(this.app.exportSnapshot(), this.ownerWorkspaceId, path));
+          this.app.isAiAssistedFile(this.ownerWorkspaceId, path));
       }
       if (kind === 'share') { await shareFile(context, absolute, this.fileName(path)); }
     } catch (error) { if (this.previewing) { this.previewError = this.mutationError(error as Error); } else { this.error = this.mutationError(error as Error); } }

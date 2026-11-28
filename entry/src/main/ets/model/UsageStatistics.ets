@@ -171,6 +171,7 @@ export class UsageAccumulator {
     let period = this.weeks.get(week);
     if (!period) { period = new UsagePeriod(); period.key = week; this.weeks.set(week, period); result.weeks.push(period); }
     add(period, item); group(period.purposes, this.groups, JSON.stringify(['week', week, purpose]), purpose, purpose, item, this.details);
+    if (!origin?.skill && !item.tools?.length) { return; }
     const skills = new Set<string>();
     if (origin?.skill) { skills.add(origin.skill); }
     for (const tool of item.tools || []) {

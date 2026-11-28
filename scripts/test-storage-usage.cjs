@@ -16,7 +16,7 @@ function load(file) {
     if (id === '@kit.AbilityKit') return {};
     if (id === '@kit.BasicServicesKit') return { BusinessError: class {} };
     if (id === '../model/WorkspaceStore') return { WorkspaceStore: class { constructor(filesDir) { this.rootDir = filesDir + '/workspace'; } pathFor(id) { return this.rootDir + '/' + id; } } };
-    if (id === '../model/Agent') return { toolReceipts: tools => tools || [] };
+    if (id === './Agent' || id === '../model/Agent') return { toolReceipts: tools => tools || [] };
     if (id === '../model/I18n') return { t: value => value };
     if (id === './ArkDataWorkspace') return { workspaceDatabase: () => undefined, ArkDataWorkspace: { forRoot: () => undefined } };
     if (id.startsWith('.')) return load(path.resolve(path.dirname(file), id));
@@ -26,6 +26,7 @@ function load(file) {
 }
 
 const files = new Map(), dirs = new Set(['/', '/app', '/files', '/cache']);
+const directoryScans = new Map();
 const now = Date.now();
 let failPath = '', failUnlink = '', failMetric = '';
 function put(file, size, ageMs = 0, content) {
@@ -62,6 +63,7 @@ const fake = {
     throw new Error('ENOENT ' + p);
   },
   listFile: async p => {
+    directoryScans.set(p, (directoryScans.get(p) || 0) + 1);
     if (failPath && p === failPath) throw Object.assign(new Error('EIO PRIVATE_PATH ' + p), { code: 13900013 });
     if (!dirs.has(p)) throw new Error('ENOTDIR ' + p);
     const prefix = p === '/' ? '/' : p + '/';
@@ -87,6 +89,8 @@ const stats = {
   getFreeSize: async () => { if (failMetric === 'free') throw Object.assign(Error('PRIVATE_METRIC_PATH'), { code: 201 }); return 8000; },
   getTotalSize: async () => 10000
 };
+const { StorageCatalog } = load(path.join(sourceRoot, 'model/StorageCatalog'));
+const catalog = () => new StorageCatalog(data);
 const { StorageUsage } = load(path.join(sourceRoot, 'services/StorageUsage'));
 const diagnosticLogs = [];
 load(path.join(sourceRoot, 'model/Diagnostics')).Diagnostics.configureLogSink(data => diagnosticLogs.push(data));
@@ -119,7 +123,10 @@ const data = {
   assert.equal(plan.isCacheCleanable(now - 11 * 60 * 1000, now), true);
 
   const context = { filesDir: '/files', cacheDir: '/cache', getApplicationContext: () => ({ filesDir: '/app' }) };
-  const report = await StorageUsage.scan(context, data);
+  const report = await StorageUsage.scan(context, catalog());
+  for (const path of ['/app/attachments', '/cache', '/app/workspace/orphan']) {
+    assert.equal(directoryScans.get(path), 1, 'One directory walk per scan: ' + path);
+  }
   assert.equal(report.categorizedBytes, 100 + 340 + 90 + 82 + 15 + 48 + 560 + 5);
   assert.equal(report.bundle.totalBytes, 2300, 'system data includes cache, so total adds only installation and data');
   assert.equal(report.bundle.appBytes, 300);
@@ -140,38 +147,38 @@ const data = {
   assert.equal(report.freeBytes, 8000);
   assert.equal(report.deviceBytes, 10000);
 
-  const attachments = await StorageUsage.entries(context, data, 'attachments');
+  const attachments = await StorageUsage.entries(context, catalog(), 'attachments');
   assert.equal(attachments.entries.find(item => item.label === 'a.jpg').removable, false);
   assert.equal(attachments.entries.find(item => item.label === 'b.jpg').removable, true);
   assert.equal(attachments.entries.find(item => item.label === 'c.jpg').removable, false, 'empty display names still count as referenced');
   assert.equal(attachments.entries.find(item => item.label === 'c.jpg').detail, '使用中');
-  const sessions = await StorageUsage.entries(context, data, 'sessions');
+  const sessions = await StorageUsage.entries(context, catalog(), 'sessions');
   assert.ok(sessions.entries.length === 1 && sessions.entries[0].removable === false && sessions.entries[0].label === 'Notes');
-  const diagnostics = await StorageUsage.entries(context, data, 'diagnostics');
+  const diagnostics = await StorageUsage.entries(context, catalog(), 'diagnostics');
   assert.equal(diagnostics.entries.find(item => item.label === 'tinybot-diagnostics.json').bytes, 16);
-  const cacheEntries = await StorageUsage.entries(context, data, 'cache');
+  const cacheEntries = await StorageUsage.entries(context, catalog(), 'cache');
   assert.equal(cacheEntries.entries.find(item => item.label === 'old.bin').removable, true);
   assert.equal(cacheEntries.entries.find(item => item.label === 'new.bin').removable, false);
 
   failPath = '/app/workspace/kept/.tinybot-review';
-  const protectedScan = await StorageUsage.scan(context, data);
+  const protectedScan = await StorageUsage.scan(context, catalog());
   assert.equal(protectedScan.incomplete, true);
   assert.equal(protectedScan.orphanWorkspaces, 0, 'an incomplete ownership inventory cannot authorize deleting unknown dependencies');
   assert.equal(protectedScan.safeBytes, 550, 'ownership failure leaves workspace data protected while ordinary cache cleanup remains available');
   failPath = '';
   assert.equal(diagnosticLogs.findLast(data => data.event === 'scan_failed').fields.errorCode, 13900013);
-  failMetric = 'free'; await StorageUsage.scan(context, data); failMetric = '';
+  failMetric = 'free'; await StorageUsage.scan(context, catalog()); failMetric = '';
   const metricFailure = diagnosticLogs.findLast(data => data.event === 'metric_failed');
   assert.equal(metricFailure.fields.operation, 'free_size'); assert.equal(metricFailure.fields.errorCode, 201);
   failMetric = 'bundle';
-  const withoutBundle = await StorageUsage.scan(context, data);
+  const withoutBundle = await StorageUsage.scan(context, catalog());
   failMetric = '';
   assert.equal(withoutBundle.bundle, undefined, 'an unavailable system total must stay unavailable');
   assert.equal(withoutBundle.categorizedBytes, report.categorizedBytes);
   assert.equal(withoutBundle.safeBytes, report.safeBytes);
   assert.equal(diagnosticLogs.findLast(data => data.event === 'metric_failed').fields.operation, 'bundle_stats');
 
-  const result = await StorageUsage.cleanSafe(context, data);
+  const result = await StorageUsage.cleanSafe(context, catalog());
   assert.equal(result.freedBytes, 750); assert.equal(result.removed, 4); assert.equal(result.failed, 0);
   assert.ok(files.has('/files/sessions-v2/index.json'), 'cleanup never touches conversation history');
   assert.ok(files.has('/app/workspace/thread-1/notes.md'), 'cleanup never touches workspace files');
@@ -181,7 +188,7 @@ const data = {
   assert.ok(!files.has('/app/workspace/orphan/old.md'), 'leftover workspace without baselines is removed');
   assert.ok(files.has('/app/workspace/kept/old.md') && files.has('/app/workspace/kept/.tinybot-review/old.md.json'),
     'edit baselines inside a leftover workspace are preserved');
-  const after = await StorageUsage.scan(context, data);
+  const after = await StorageUsage.scan(context, catalog());
   assert.equal(after.safeBytes, 0);
   assert.equal(after.orphanWorkspaces, 0);
   assert.equal(after.categories.find(item => item.id === 'backups').bytes, 90, 'edit baselines remain in their own category');
@@ -189,10 +196,10 @@ const data = {
   // Deleting the last baseline leaves an empty review folder; it must not block the workspace.
   put('/app/workspace/emptied/old.md', 25);
   dirs.add('/app/workspace/emptied/.tinybot-review');
-  const emptiedScan = await StorageUsage.scan(context, data);
+  const emptiedScan = await StorageUsage.scan(context, catalog());
   assert.equal(emptiedScan.orphanWorkspaces, 1);
   assert.equal(emptiedScan.safeBytes, 25);
-  const emptied = await StorageUsage.cleanSafe(context, data);
+  const emptied = await StorageUsage.cleanSafe(context, catalog());
   assert.equal(emptied.freedBytes, 25);
   assert.equal(emptied.failed, 0);
   assert.ok(!files.has('/app/workspace/emptied/old.md'));
@@ -223,7 +230,7 @@ const data = {
   put('/app/workspace/fresh/x.md', 20);
   put('/cache/fresh.bin', 30, 60 * 60 * 1000);
   failPath = '/app/attachments';
-  const incompleteClean = await StorageUsage.cleanSafe(context, data);
+  const incompleteClean = await StorageUsage.cleanSafe(context, catalog());
   assert.equal(incompleteClean.incomplete, true);
   assert.ok(incompleteClean.failedPaths.includes('/app/attachments'));
   assert.equal(incompleteClean.freedBytes, 50);
@@ -231,30 +238,30 @@ const data = {
   failPath = '';
 
   failPath = '/app/attachments';
-  const broken = await StorageUsage.scan(context, data);
+  const broken = await StorageUsage.scan(context, catalog());
   assert.equal(broken.incomplete, true);
   assert.ok(broken.failedPaths.includes('/app/attachments'));
   assert.equal(broken.categories.find(item => item.id === 'attachments').bytes, 0);
   failPath = '';
   put('/app/workspace/deleted-chat/mini-apps/ledger/app.json', 100);
   put('/app/workspace/deleted-chat/mini-apps/ledger/data.json', 80);
-  const appsScan = await StorageUsage.scan(context, data);
+  const appsScan = await StorageUsage.scan(context, catalog());
   assert.equal(appsScan.orphanWorkspaces, 0, 'mini apps retain a deleted chat workspace without review baselines');
-  const appEntries = await StorageUsage.entries(context, data, 'workspace');
+  const appEntries = await StorageUsage.entries(context, catalog(), 'workspace');
   assert.ok(appEntries.entries.filter(item => item.path.includes('/deleted-chat/')).every(item => !item.removable));
-  await StorageUsage.cleanSafe(context, data);
+  await StorageUsage.cleanSafe(context, catalog());
   assert.ok(files.has('/app/workspace/deleted-chat/mini-apps/ledger/data.json'));
   put('/app/workspace/panel-owner/life-panels/kept/panel.json',120,0,JSON.stringify({definition:{source:{type:'workspace-json',workspaceId:'source-owner',path:'data.json'}}}));
   put('/app/workspace/source-owner/data.json',30);
   put('/app/workspace/board-owner/life-boards/empty/board.json',80);
-  const persistentScan=await StorageUsage.scan(context,data);
+  const persistentScan=await StorageUsage.scan(context,catalog());
   assert.equal(persistentScan.orphanWorkspaces,0,'Persistent cards and empty boards retain their workspaces after chat deletion');
-  const persistentEntries=await StorageUsage.entries(context,data,'workspace');
+  const persistentEntries=await StorageUsage.entries(context,catalog(),'workspace');
   assert.ok(persistentEntries.entries.filter(item=>/\/(panel-owner|board-owner)\//.test(item.path)).every(item=>!item.removable));
   // A stale scan result must not authorize deletion after a card has been published.
   const stale={path:'/app/workspace/panel-owner',label:'stale',detail:'',bytes:120,category:'workspace',removable:true,directory:true};
-  const protectedRemoval=await StorageUsage.remove(context,[stale],data);
+  const protectedRemoval=await StorageUsage.remove(context,[stale],catalog());
   assert.equal(protectedRemoval.removed,0);assert.ok(files.has('/app/workspace/panel-owner/life-panels/kept/panel.json'));
-  await StorageUsage.cleanSafe(context,data);assert.ok(files.has('/app/workspace/board-owner/life-boards/empty/board.json'));
+  await StorageUsage.cleanSafe(context,catalog());assert.ok(files.has('/app/workspace/board-owner/life-boards/empty/board.json'));
   console.log('PASS storage dual roots, mini-app retention, baseline-safe cleanup, partial deletion and read-error reporting');
 })().catch(error => { console.error(error); process.exitCode = 1; });

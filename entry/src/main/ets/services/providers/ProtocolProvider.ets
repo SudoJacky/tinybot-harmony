@@ -62,9 +62,9 @@ export class ProtocolProvider implements ModelProvider {
       if (Diagnostics.recording) { Diagnostics.end('network.publishReasoning', mark, { chars: text.length }); }
     };
     const decoder = new util.TextDecoder('utf-8');
-    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, receiveReasoning, receiveToken) :
-      this.info.protocol === 'gemini' ? new GeminiStream(receiveText, receiveReasoning, receiveToken) :
-      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, receiveReasoning, receiveToken) : new ChatStream(receiveText, receiveReasoning, receiveToken);
+    const parser: ModelStream = this.info.protocol === 'responses' ? new ResponsesStream(receiveText, receiveReasoning, receiveToken, usage) :
+      this.info.protocol === 'gemini' ? new GeminiStream(receiveText, receiveReasoning, receiveToken, usage) :
+      this.info.protocol === 'anthropic-messages' ? new AnthropicStream(receiveText, receiveReasoning, receiveToken, usage) : new ChatStream(receiveText, receiveReasoning, receiveToken, usage);
     const body: Object = this.info.protocol === 'responses' ? responsesRequest(input.model, messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'gemini' ? geminiRequest(messages, input.tools, input.maxOutputTokens) :
       this.info.protocol === 'anthropic-messages' ? anthropicRequest(input.model, messages, input.tools, input.maxOutputTokens, this.info.promptCaching === true) :
@@ -174,7 +174,7 @@ export class ProtocolProvider implements ModelProvider {
             try {
               const text = decoder.decodeToString(new Uint8Array(data), { stream: true });
               responsePrefix += text.slice(0, Math.max(0, 16384 - responsePrefix.length));
-              if (!parseError && (responseCode === 0 || responseCode === 200)) { usage.push(text); parser.push(text); }
+              if (!parseError && (responseCode === 0 || responseCode === 200)) { parser.push(text); }
             } catch (error) {
               if (error instanceof OutputWordGuardStop) { settle(error as Error); return; }
               parseError = error as Error;

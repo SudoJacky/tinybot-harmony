@@ -1,3 +1,7 @@
+import { StorageCatalog } from '../model/StorageCatalog';
+import { FirstUseStatus, firstUseStatus } from '../model/Onboarding';
+import { ConversationShareData, sharingMessages } from '../model/ConversationShare';
+import { aiAssistedFile } from '../model/ConversationExport';
 import { commitBackupKeys } from './BackupKeyRestore';
 import { cloudConfiguration } from '../model/CloudConfiguration';
 import { prepareBackupImport, finishBackupImport, discardBackupImport, rollbackBackupFailure } from '../model/BackupImport';
@@ -119,6 +123,15 @@ export class SessionService {
   }
   configurationSnapshot(): AppData { return JSON.parse(JSON.stringify(cloudConfiguration(this.data))) as AppData; }
   snapshot(): AppData { return JSON.parse(JSON.stringify(this.data)) as AppData; }
+  firstUse(): FirstUseStatus { return firstUseStatus(this.data); }
+  storageCatalog(): StorageCatalog { return new StorageCatalog(this.data); }
+  isAiAssistedFile(owner: string, path: string): boolean { return aiAssistedFile(this.data, owner, path); }
+  shareConversation(): ConversationShareData {
+    const share: ConversationShareData = { thread: this.active, profiles: this.providerProfiles };
+    const snapshot = JSON.parse(JSON.stringify(share)) as ConversationShareData;
+    snapshot.thread.messages = sharingMessages(snapshot.thread.messages);
+    return snapshot;
+  }
   get workspaceId(): string { return workspaceIdFor(this.data, this.active); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return attributeLegacyUsage(records, this.data.threads); }
   async setTeamEnabled(enabled: boolean): Promise<boolean> {
@@ -297,7 +310,8 @@ export class SessionService {
       for (const project of data.projects || []) { await this.resources.ensureWorkspace(project.id, project.workspaceId); }
       if (this.resources.activateProjectFolders) { await this.resources.activateProjectFolders(data.projects || []); }
       for (const thread of data.threads) {
-        await this.ensureThreadWorkspace(thread, data);
+        // Projects and their shared directories were validated above, including those used by side chats.
+        if (thread.projectId === undefined) { await this.ensureThreadWorkspace(thread, data); }
         if ((thread.pendingInputs || []).length > 0) { thread.queuePaused = true; }
         if (migrate && data.config.configured) { thread.modelRef = { providerId: data.config.providerId, modelId: data.config.model }; }
       }
@@ -390,7 +404,7 @@ export class SessionService {
     catch (error) {
       if (thread.attachments?.includes(item)) {
         thread.attachments = thread.attachments.filter((candidate) => candidate !== item);
-        this.draftRevision++; this.dirtyDrafts.add(thread.id); this.publish('snapshot');
+        this.draftRevision++; this.dirtyDrafts.add(thread.id); this.publishThread(thread);
       }
       throw error as Error;
     }
@@ -412,7 +426,7 @@ export class SessionService {
   private async setDraftAttachmentItems(thread: ThreadData, attachments: Attachment[]): Promise<void> {
     validateAttachments(attachments);
     thread.attachments = attachments;
-    this.draftRevision++; this.dirtyDrafts.add(thread.id); this.publish('snapshot');
+    this.draftRevision++; this.dirtyDrafts.add(thread.id); this.publishThread(thread);
     await this.persist(thread.id); this.refreshContext(thread.id);
   }
   private async setFileAnnotations(threadId: string, items: FileAnnotation[]): Promise<void> {
@@ -421,7 +435,7 @@ export class SessionService {
     this.active.annotations = items.slice();
     this.draftRevision++;
     this.dirtyDrafts.add(threadId);
-    this.publish('snapshot');
+    this.publishThread(this.active);
     await this.persist(threadId);
     this.refreshContext(threadId);
   }
@@ -693,7 +707,7 @@ export class SessionService {
   setPanelContext(context: string): void {
     if (!this.application.ready || context.length > 32768 || this.active.archived) { return; }
     this.active.panelContext = context;
-    this.draftRevision++; this.dirtyDrafts.add(this.active.id); this.publish('snapshot');
+    this.draftRevision++; this.dirtyDrafts.add(this.active.id); this.publishThread(this.active);
   }
   async flushDraft(): Promise<void> {
     if (!this.application.ready || this.application.phase === 'saving' || this.application.saveError.length > 0 ||
@@ -1727,15 +1741,16 @@ export class SessionService {
     }
   }
   private publishThread(thread: ThreadData): void {
+    const selection = this.selectedToolSelection(thread);
     const metadata: ThreadData = { id: thread.id, title: thread.title, updatedAt: thread.updatedAt, messages: [],
       projectId: thread.projectId, pinned: thread.pinned, archived: thread.archived, titleEdited: thread.titleEdited, draft: thread.draft, panelContext: thread.panelContext,
       attachments: thread.attachments, annotations: thread.annotations, references: thread.references, parentThreadId: thread.parentThreadId,
       parentMessageId: thread.parentMessageId, disabledMcpIds: thread.disabledMcpIds, modelRef: thread.modelRef,
-      sideChatContext: thread.sideChatContext,
+      sideChatContext: thread.sideChatContext, importSource: thread.importSource,
       pendingInputs: thread.pendingInputs, queuePaused: thread.queuePaused, compaction: thread.compaction,
       memoryReview: thread.memoryReview, reasoningEffort: thread.reasoningEffort, teamEnabled: this.selectedTeamMode(thread),
       toolApprovalMode: thread.toolApprovalMode,
-      agentMode: this.selectedToolSelection(thread).agentMode, disabledTools: this.selectedToolSelection(thread).disabledTools };
+      agentMode: selection.agentMode, disabledTools: selection.disabledTools };
     this.emit({ kind: 'thread', state: this.state, threadId: thread.id,
       thread: JSON.parse(JSON.stringify(metadata)) as ThreadData });
   }

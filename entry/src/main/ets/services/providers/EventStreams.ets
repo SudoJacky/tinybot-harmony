@@ -1,3 +1,5 @@
+import { EventFrames } from '../../model/EventFrames';
+import { UsageStream } from '../../model/Usage';
 import { t } from '../../model/I18n';
 import { AnthropicContentBlock, validateAnthropicContent } from '../../model/AnthropicContent';
 import { MAX_REASONING_CONTENT, MAX_TOOL_CALLS, ModelTurn, ToolCall, validateToolCalls } from '../../model/Agent';
@@ -15,29 +17,33 @@ function parseEvent(payload: string): Object {
   catch (_) { throw new Error(t("模型返回了无效的流式 JSON。")); }
 }
 
-// Shared framing only; completion semantics belong to each protocol.
-export class EventFrames {
-  private pending: string = '';
-  private lines: string[] = [];
-  private receive: (payload: string) => void;
-  constructor(receive: (payload: string) => void) { this.receive = receive; }
-  push(text: string): void {
-    this.pending += text;
-    let newline = this.pending.indexOf('\n');
-    while (newline >= 0) {
-      const line = this.pending.slice(0, newline).replace(/\r$/, '');
-      this.pending = this.pending.slice(newline + 1);
-      if (line.length === 0 && this.lines.length > 0) {
-        const payload = this.lines.join('\n');
-        this.lines = []; this.receive(payload);
-      } else if (line.startsWith('data:')) {
-        this.lines.push(line.slice(5).replace(/^ /, ''));
+// Account for every complete event in the received chunk, including a final
+// usage event after a protocol or consumer error. Report the first error.
+export class ModelEvents {
+  private frames: EventFrames;
+  private failure?: Error;
+  constructor(receive: (event: Object) => void, usage?: UsageStream, done?: () => void) {
+    this.frames = new EventFrames((payload: string) => {
+      try {
+        if (done && payload === '[DONE]') {
+          if (!this.failure) { done(); }
+          return;
+        }
+        const event = parseEvent(payload);
+        usage?.observe(event);
+        if (!this.failure) { receive(event); }
+      } catch (error) {
+        if (!this.failure) { this.failure = error as Error; }
       }
-      newline = this.pending.indexOf('\n');
-    }
+    });
   }
+  push(text: string): void {
+    this.frames.push(text);
+    if (this.failure) { throw this.failure; }
+  }
+  get incomplete(): boolean { return this.frames.incomplete; }
   finish(): void {
-    if (this.pending.trim().length > 0 || this.lines.length > 0) { throw new Error(t("流式数据帧不完整。")); }
+    if (this.incomplete) { throw new Error(t("流式数据帧不完整。")); }
   }
 }
 
@@ -89,7 +95,7 @@ function responsesFailure(event: ResponseEvent): Error {
 }
 
 export class ResponsesStream implements ModelStream {
-  private frames: EventFrames;
+  private frames: ModelEvents;
   private content: string = '';
   private result?: ModelTurn;
   private reasoning: string = '';
@@ -99,11 +105,11 @@ export class ResponsesStream implements ModelStream {
   private onText: (text: string) => void;
   private onReasoning?: (text: string) => void;
   private onToken?: () => void;
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void, usage?: UsageStream) {
     this.onText = onText;
     this.onReasoning = onReasoning;
     this.onToken = onToken;
-    this.frames = new EventFrames((payload: string) => this.event(payload));
+    this.frames = new ModelEvents((event: Object) => this.event(event as ResponseEvent), usage);
   }
   push(text: string): void { this.frames.push(text); }
   finish(): ModelTurn {
@@ -151,9 +157,8 @@ export class ResponsesStream implements ModelStream {
     }
   }
 
-  private event(payload: string): void {
+  private event(event: ResponseEvent): void {
     if (this.result) { throw new Error(t("Responses 在结束后继续返回数据。")); }
-    const event = parseEvent(payload) as ResponseEvent;
     if (!event || typeof event.type !== 'string') { throw new Error(t("Responses 流式事件无效。")); }
     if (event.type === 'error' || event.type === 'response.failed' || event.type === 'response.incomplete' ||
       event.type === 'response.refusal.delta') { throw responsesFailure(event); }
@@ -209,7 +214,7 @@ export class AnthropicStream implements ModelStream {
   private thinkingSize: number = 0;
   private onReasoning?: (text: string) => void;
   private onToken?: () => void;
-  private frames: EventFrames;
+  private frames: ModelEvents;
   private onText: (text: string) => void;
   private content: string = '';
   private started: boolean = false;
@@ -219,11 +224,11 @@ export class AnthropicStream implements ModelStream {
   private closed: Set<number> = new Set<number>();
   private fragments: Set<number> = new Set<number>();
   private calls: Map<number, ToolCall> = new Map<number, ToolCall>();
-  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void) {
+  constructor(onText: (text: string) => void, onReasoning?: (text: string) => void, onToken?: () => void, usage?: UsageStream) {
     this.onText = onText;
     this.onReasoning = onReasoning;
     this.onToken = onToken;
-    this.frames = new EventFrames((payload: string) => this.event(payload));
+    this.frames = new ModelEvents((event: Object) => this.event(event as AnthropicEvent), usage);
   }
   push(text: string): void { this.frames.push(text); }
   finish(): ModelTurn {
@@ -251,9 +256,8 @@ export class AnthropicStream implements ModelStream {
     this.reasoning += text;
     if (text) { this.onToken?.(); this.onReasoning?.(text); }
   }
-  private event(payload: string): void {
+  private event(event: AnthropicEvent): void {
     if (this.done) { throw new Error(t("Anthropic 在结束后继续返回数据。")); }
-    const event = parseEvent(payload) as AnthropicEvent;
     if (!event || typeof event.type !== 'string') { throw new Error(t("Anthropic 流式事件无效。")); }
     if (event.type === 'error') {
       throw streamProviderError(event.error);

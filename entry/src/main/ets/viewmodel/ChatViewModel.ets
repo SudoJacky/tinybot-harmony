@@ -1,3 +1,6 @@
+import { StorageCatalog } from '../model/StorageCatalog';
+import { FirstUseStatus } from '../model/Onboarding';
+import { ConversationShareData } from '../model/ConversationShare';
 import { Diagnostics } from '../model/Diagnostics';
 import { ProjectData } from '../model/Project';
 import { SharedFolder } from '../model/SharedFolders';
@@ -60,8 +63,10 @@ export class ChatViewModel {
     return this.requireSession().saveProject(name, instructions, id, folders);
   }
   openProject(projectId: string): Promise<boolean> {
-    const thread = this.threads.filter((item) => item.projectId === projectId && !item.archived)
-      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    let thread: ThreadViewModel | undefined = undefined;
+    for (const item of this.threads) {
+      if (item.projectId === projectId && !item.archived && (!thread || item.updatedAt > thread.updatedAt)) { thread = item; }
+    }
     return thread ? this.selectThread(thread.id) : this.newThread(projectId);
   }
   productivity: ProductivityData = defaultProductivity();
@@ -268,6 +273,10 @@ export class ChatViewModel {
     return this.requireSession().receiveFromDevice(apply);
   }
   configurationSnapshot(): AppData { return this.requireSession().configurationSnapshot(); }
+  firstUse(): FirstUseStatus { return this.requireSession().firstUse(); }
+  storageCatalog(): StorageCatalog { return this.requireSession().storageCatalog(); }
+  isAiAssistedFile(owner: string, path: string): boolean { return this.requireSession().isAiAssistedFile(owner, path); }
+  shareConversation(): ConversationShareData { return this.requireSession().shareConversation(); }
   exportSnapshot(): AppData { return this.requireSession().snapshot(); }
   attributeUsage(records: RequestUsage[]): RequestUsage[] { return this.requireSession().attributeUsage(records); }
   importSnapshot(data: AppData): Promise<boolean> { return this.requireSession().importSnapshot(data); }

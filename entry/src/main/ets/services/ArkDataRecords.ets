@@ -42,17 +42,49 @@ export class ArkDataRecords {
     return this.readParts(rows);
   }
 
+  // Bound the number of bindings and release the cursor between pages of history.
+  async readEach(scope: string, ids: string[], visit: (id: string, text: string) => void): Promise<void> {
+    const pageSize = 64;
+    for (let start = 0; start < ids.length; start += pageSize) {
+      const page = ids.slice(start, start + pageSize);
+      const rows = await this.store.querySql('SELECT part, part_count, body, record_id FROM records WHERE scope = ? ' +
+        'AND record_id IN (' + page.map(() => '?').join(',') + ') ORDER BY record_id, part', [scope].concat(page));
+      try {
+        let batchStarted = Date.now();
+        while (rows.goToNextRow()) {
+          const id = rows.getString(3);
+          visit(id, this.recordText(rows, id));
+          // A page may contain several long transcripts. Let the UI run between records.
+          if (Date.now() - batchStarted >= 8) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            batchStarted = Date.now();
+          }
+        }
+      } finally { rows.close(); }
+    }
+  }
+
+  // Positioned on the first part on entry and on the last one on return.
+  private recordText(rows: relationalStore.ResultSet, id?: string): string {
+    const count = rows.getLong(1);
+    if (count < 1) { throw new Error('Invalid ArkData record chunks'); }
+    const parts: string[] = [];
+    for (let part = 0; part < count; part++) {
+      if (part > 0 && !rows.goToNextRow()) { throw new Error('Incomplete ArkData record'); }
+      if (rows.getLong(0) !== part || rows.getLong(1) !== count || (id !== undefined && rows.getString(3) !== id)) {
+        throw new Error('Invalid ArkData record chunks');
+      }
+      parts.push(rows.getString(2));
+    }
+    return parts.length === 1 ? parts[0] : parts.join('');
+  }
+
   private readParts(rows: relationalStore.ResultSet): string | undefined {
     try {
-      const parts: string[] = [];
-      let count = 0;
-      while (rows.goToNextRow()) {
-        if (!parts.length) { count = rows.getLong(1); }
-        if (rows.getLong(0) !== parts.length || rows.getLong(1) !== count) { throw new Error('Invalid ArkData record chunks'); }
-        parts.push(rows.getString(2));
-      }
-      if (parts.length !== count) { throw new Error('Incomplete ArkData record'); }
-      return parts.length ? parts.join('') : undefined;
+      if (!rows.goToNextRow()) { return undefined; }
+      const text = this.recordText(rows);
+      if (rows.goToNextRow()) { throw new Error('Invalid ArkData record chunks'); }
+      return text;
     } finally { rows.close(); }
   }
 

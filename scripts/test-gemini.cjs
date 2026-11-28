@@ -129,6 +129,19 @@ async function main() {
     assert.throws(() => { const stream = new GeminiStream(() => {}); chunks.forEach(chunk => stream.push(chunk)); stream.finish(); });
   }
   assert.throws(() => validateSteps([{ content: '', tools: [], geminiContent: [{ thoughtSignature: 4 }] }]));
+  const { ChatStream } = from('services/ChatStream');
+  const meter = new UsageStream();
+  const chat = new ChatStream(() => {}, undefined, undefined, meter);
+  const reply = '多字节'.repeat(16000);
+  const delta = JSON.stringify({ choices: [{ index: 0, delta: { content: reply }, finish_reason: 'stop' }] });
+  const meteredWire = 'data: ' + delta + '\r\n\r\ndata: {"choices":[],\r\ndata: "usage":{"prompt_tokens":9,"completion_tokens":4}}\r\n\r\ndata: [DONE]\r\n\r\n';
+  for (let i = 0; i < meteredWire.length; i += 7) chat.push(meteredWire.slice(i, i + 7));
+  assert.equal(chat.finish().content, reply);
+  assert.equal(meter.result().input, 9);
+  const onError = new UsageStream();
+  const stopped = new ChatStream(() => { throw Error('consumer stopped'); }, undefined, undefined, onError);
+  assert.throws(() => stopped.push(meteredWire), /consumer stopped/);
+  assert.equal(onError.result().output, 4, 'The same network chunk may contain final usage after a consumer stops');
   const usage = new UsageStream();
   usage.push(event({ usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, thoughtsTokenCount: 30, cachedContentTokenCount: 40 } }));
   assert.deepEqual(plain(usage.result()), { input: 100, output: 50, reasoning: 30, cached: 40 });

@@ -1,7 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
-import { AppData } from '../model/Conversation';
-import { ONBOARDING_STEP_KEY, isOnboardingCandidate } from '../model/Onboarding';
+import { ONBOARDING_STEP_KEY, FirstUseStatus } from '../model/Onboarding';
 
 // Installation-local UI history, independent of conversations and exported backups.
 export class OnboardingPreferences {
@@ -9,10 +8,10 @@ export class OnboardingPreferences {
   constructor(context: common.Context) {
     this.store = preferences.getPreferencesSync(context, { name: 'tinybot-ui' });
   }
-  resumeStep(data: AppData): number {
+  resumeStep(status: FirstUseStatus): number {
     if (this.completed()) { return 0; }
     const step = this.checkpoint();
-    return step || (isOnboardingCandidate(data) ? 1 : 0);
+    return step || (status.onboarding ? 1 : 0);
   }
   begin(): void {
     if (!this.completed() && this.checkpoint() === 0) { this.write(ONBOARDING_STEP_KEY, 1, 0); }

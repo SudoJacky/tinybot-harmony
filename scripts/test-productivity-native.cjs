@@ -3002,6 +3002,22 @@ async function test(name, run) {
     assert.equal((await boards.list())[0].board.title, 'ArkData board');
     assert.equal((await panels.list())[0].panel.layout.size, 'L');
     for (const [file, bytes] of legacy) assert.deepEqual(fs.readFileSync(nativePath(file)), bytes, file);
+    // Physical row order can differ from the manifest. Cross a query-page boundary
+    // and leave an unrelated record outside the manifest.
+    const db = await open();
+    const extra = Array.from({ length: 70 }, (_, i) => ({ ...loaded.threads[0], id: 'history-' + i, messages: [] }));
+    loaded.threads.push(...extra.reverse()); await repository.save(loaded);
+    await db.commit([{ scope: 'thread', id: 'not-in-index', text: 'ignored by the manifest' }]);
+    assert.deepEqual(Array.from((await repository.load()).threads, item => item.id), Array.from(loaded.threads, item => item.id));
+    await db.commit([{ scope: 'thread', id: 'history-22' }]);
+    await assert.rejects(repository.load(), /conversation is missing/);
+    await db.commit([{ scope: 'thread', id: 'history-22', text: JSON.stringify(extra.find(t => t.id === 'history-22')) }]);
+    const sql = databases.get(ability);
+    sql.prepare("UPDATE records SET part_count = 2 WHERE scope = 'thread' AND record_id = 'history-22'").run();
+    await assert.rejects(repository.load(), /ArkData record/);
+    sql.prepare("UPDATE records SET part_count = 1 WHERE scope = 'thread' AND record_id = 'history-22'").run();
+    // Keep the rest of the migration/restore fixture scoped to its original thread.
+    loaded.threads.splice(1); await repository.save(loaded);
     const restarted = new NativeData(context, app);
     assert.equal((await new ArkDataConversationStore(() => restarted.open()).load()).threads[0].title, 'ArkData title');
     assert.equal(await (await restarted.open()).read('migration', 'version'), '1');

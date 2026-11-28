@@ -1,8 +1,7 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { fileIo as fs } from '@kit.CoreFileKit';
-import { AppData } from '../model/Conversation';
-import { ONBOARDING_STEP_KEY, isOnboardingCandidate } from '../model/Onboarding';
+import { ONBOARDING_STEP_KEY, FirstUseStatus } from '../model/Onboarding';
 import { CloudBackup, CloudBackupItem, latestCloudBackup } from './CloudBackup';
 
 // Installation-local marker. Capture BEFORE ConversationStore creates an empty manifest.
@@ -25,16 +24,14 @@ export class StartupBackup {
       this.store.getSync('onboardingComplete', false) !== true;
     this.save(fresh ? 'pending' : 'done');
   }
-  untouched(data: AppData): boolean {
+  untouched(status: FirstUseStatus): boolean {
     const step = this.store.getSync(ONBOARDING_STEP_KEY, 0);
     return this.store.getSync('onboardingComplete', false) !== true && !(typeof step === 'number' && step > 1) &&
-      isOnboardingCandidate(data) &&
-      !(data.config.userDocument || '').trim() && !(data.productivity?.servers || []).length &&
-      !(data.productivity?.memories || []).length;
+      status.backup;
   }
-  async find(data: AppData): Promise<CloudBackupItem | undefined> {
+  async find(status: FirstUseStatus): Promise<CloudBackupItem | undefined> {
     if (this.store.getSync('startupBackupState', '') !== 'pending') { return undefined; }
-    if (!this.untouched(data)) { this.finish(); return undefined; }
+    if (!this.untouched(status)) { this.finish(); return undefined; }
     // Pull remote metadata before listing; a new device may not have a cached directory yet.
     const synced = await CloudBackup.sync();
     if (!synced) { return undefined; }

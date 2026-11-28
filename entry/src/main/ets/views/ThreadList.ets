@@ -94,7 +94,10 @@ struct ThreadRow {
   private active(): boolean {
     return this.current;
   }
-  private matchId(): string { return this.thread.messages.find((item) => item.content.toLocaleLowerCase().includes(this.query.trim().toLocaleLowerCase()))?.id || ''; }
+  private matchId(): string {
+    const needle = this.query.trim().toLocaleLowerCase();
+    return this.thread.messages.find((item) => item.content.toLocaleLowerCase().includes(needle))?.id || '';
+  }
   private matchExcerpt(): string {
     const needle = this.query.trim().toLocaleLowerCase();
     if (!needle) { return ''; }
@@ -469,7 +472,9 @@ export struct ThreadList {
   }
   private allSelected(): boolean {
     const threads = this.filtered();
-    return threads.length > 0 && threads.every((thread) => this.selectedIds.includes(thread.id));
+    if (!threads.length || threads.length > this.selectedIds.length) { return false; }
+    const selected = new Set(this.selectedIds);
+    return threads.every((thread) => selected.has(thread.id));
   }
   private selectAll(): void {
     if (this.locked()) { return; }

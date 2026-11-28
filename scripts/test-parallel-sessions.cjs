@@ -232,8 +232,18 @@ async function main() {
     console.log('PASS per-chat approval persistence, refusal, direct execution and new-chat inheritance from the last submitted request');
   }
   {
-    const f=await fixture(),context='Board context: {"boardId":"board-a","description":"Morning"}';
-    f.app.setDraft('Update the board');f.app.setPanelContext(context);await f.app.flushDraft();
+    const f=await fixture(data => { data.threads[0].importSource = 'deepseek'; }),context='Board context: {"boardId":"board-a","description":"Morning"}';
+    f.app.setDraft('Update the board');
+    const updates = [];
+    const unsubscribe = f.session.subscribe(event => updates.push(event));
+    f.app.setPanelContext(context);
+    unsubscribe();
+    assert.deepEqual(updates.map(event => event.kind), ['thread']);
+    assert.equal(updates[0].data, undefined);
+    assert.equal(updates[0].thread.messages.length, 0);
+    assert.equal(f.app.active.importSource, 'deepseek');
+    assert.equal(f.app.active.panelContext, context);
+    await f.app.flushDraft();
     assert.equal(thread(f,'a',true).panelContext,context,'Board context persists with the draft');
     await f.app.selectThread('b');assert.equal(f.app.active.panelContext,undefined);await f.app.selectThread('a');
     assert.equal(f.app.draft,'Update the board','Technical context stays outside the editable text');

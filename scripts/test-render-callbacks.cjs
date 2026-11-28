@@ -27,7 +27,7 @@ const drain = async () => { await Promise.resolve(); await Promise.resolve(); };
     'afterRender', 'speechThreadChanged', 'receiveVoiceShortcut', 'syncMessages', 'scrollToLatest', 'lastMessageListIndex', 'loadEarlierMessages']), {
     TextArea: editor, Context: { animation() {} }, Motion: {}, Font: {}, Color: {}, Alignment: {}, Visibility: {},
     ATTACHMENT_DROP_TYPES: [], t: s => s, clearTimeout, ScrollAlign: { END: 'end', START: 'start' }, Diagnostics: { recording: false },
-    Space: { sm: 8 }, LengthMetrics: { vp: value => value },
+    PHONE_COMPOSER_EDITOR_MIN_HEIGHT: 52, Space: { sm: 8 }, LengthMetrics: { vp: value => value },
     ChatLayoutFrame: class { constructor(action) { this.action = action; } onIdle() { this.action(); } }
   });
   let building = false, changes = 0, selectionWrites = 0;

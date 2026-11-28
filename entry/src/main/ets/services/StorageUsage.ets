@@ -2,16 +2,14 @@ import { common } from '@kit.AbilityKit';
 import { Diagnostics, TIMED_DIAGNOSTICS_FILE } from '../model/Diagnostics';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo as fs, storageStatistics } from '@kit.CoreFileKit';
-import { AppData, ThreadData } from '../model/Conversation';
-import { Attachment } from '../model/Productivity';
-import { toolReceipts } from '../model/Agent';
+import { StorageCatalog } from '../model/StorageCatalog';
 import { WorkspaceStore } from '../model/WorkspaceStore';
 import { t } from '../model/I18n';
 import { WorkspaceRetention, withWorkspaceLifecycle } from './WorkspaceRetention';
 import { workspaceDatabase } from './ArkDataWorkspace';
 import { RecordSize } from './ArkDataRecords';
 import { DiskFile, StorageCategoryId, StorageCleanResult, StorageEntry, StorageEntryResult, StorageReport,
-  emptyStorageReport, isCacheCleanable, isStaleTemporary, orphanAttachmentPaths } from '../model/StoragePlan';
+  emptyStorageReport, isCacheCleanable, isStaleTemporary } from '../model/StoragePlan';
 
 const MAX_ENTRIES: number = 300;
 const REVIEW_DIR: string = '.tinybot-review';
@@ -49,9 +47,11 @@ function fileEntry(file: DiskFile, category: StorageCategoryId, label: string, d
     removable: removable, directory: false };
 }
 
-function under(relative: string, dirs: string[]): boolean {
-  for (const dir of dirs) { if (relative.startsWith(dir + '/')) { return true; } }
-  return false;
+interface CleanupInventory {
+  workspace: DiskFile[];
+  workspaceDirs: string[];
+  cache: DiskFile[];
+  attachments: DiskFile[];
 }
 
 export class StorageUsage {
@@ -85,7 +85,7 @@ export class StorageUsage {
     catch (error) { StorageUsage.failed(failures, 'ArkData/' + scope, error as Error, 'read'); return []; }
   }
 
-  private static async listFiles(root: string, failures: string[]): Promise<DiskFile[]> {
+  private static async listFiles(root: string, failures: string[], rootDirs?: string[]): Promise<DiskFile[]> {
     const result: DiskFile[] = [];
     try {
       if (!await fs.access(root)) { return result; }
@@ -122,10 +122,6 @@ export class StorageUsage {
     return result;
   }
 
-  private static async sizeOf(path: string, failures: string[]): Promise<number> {
-    return sumFiles(await StorageUsage.listFiles(path, failures));
-  }
-
   private static async listDirectories(root: string, failures: string[]): Promise<string[]> {
     const result: string[] = [];
     try {
@@ -152,39 +148,6 @@ export class StorageUsage {
     return result;
   }
 
-  // Attachment paths referenced by any live thread, including pending inputs and tool screenshots.
-  private static references(data: AppData): Map<string, string> {
-    const result = new Map<string, string>();
-    const add = (item: Attachment): void => { if (item && item.path && !item.workspaceId) { result.set(item.path, item.name); } };
-    for (const thread of data.threads) {
-      for (const item of thread.attachments || []) { add(item); }
-      for (const input of thread.pendingInputs || []) {
-        for (const item of input.attachments || []) { add(item); }
-      }
-      for (const message of thread.messages) {
-        for (const item of message.attachments || []) { add(item); }
-        for (const step of message.steps || []) {
-          for (const item of step.steering?.attachments || []) { add(item); }
-          for (const tool of toolReceipts(step.tools)) {
-            if (tool.previewScreenshot) { add(tool.previewScreenshot.image); }
-            if (tool.inspectedImage) { add(tool.inspectedImage); }
-            for (const frame of tool.browserObservation?.frames || []) { add(frame.image); }
-          }
-        }
-      }
-    }
-    return result;
-  }
-
-  private static workspaceNames(data: AppData): Map<string, string> {
-    const result = new Map<string, string>();
-    for (const thread of data.threads) {
-      if (!thread.projectId) { result.set(thread.id, thread.title || thread.id); }
-    }
-    for (const project of data.projects || []) { result.set(project.workspaceId, project.name); }
-    return result;
-  }
-
   private static async workspaceFiles(roots: StorageRoots, failures: string[]): Promise<DiskFile[]> {
     return StorageUsage.listFiles(StorageUsage.workspaceRoot(roots), failures);
   }
@@ -204,44 +167,51 @@ export class StorageUsage {
     return owner.length > 0 ? owner + ' / ' + label : label;
   }
 
-  private static async safeCandidates(roots: StorageRoots, data: AppData, now: number,
-    failures: string[]): Promise<StorageEntry[]> {
-    const workspaceRoot = StorageUsage.workspaceRoot(roots);
-    const workspace = await StorageUsage.workspaceFiles(roots, failures);
+  private static async cleanupInventory(roots: StorageRoots, failures: string[]): Promise<CleanupInventory> {
+    const dirs: string[] = [];
+    const workspace = await StorageUsage.listFiles(StorageUsage.workspaceRoot(roots), failures, dirs);
     const cache = await StorageUsage.listFiles(roots.cacheDir, failures);
     const attachments = await StorageUsage.listFiles(roots.appFilesDir + '/attachments', failures);
-    const dirs = await StorageUsage.listDirectories(workspaceRoot, failures);
+    return { workspace: workspace, workspaceDirs: dirs, cache: cache, attachments: attachments };
+  }
+
+  private static async safeCandidates(roots: StorageRoots, data: StorageCatalog, now: number,
+    failures: string[], inventory: CleanupInventory): Promise<StorageEntry[]> {
+    const workspaceRoot = StorageUsage.workspaceRoot(roots);
     const retained = await StorageUsage.retained(roots, data, failures);
-    const cleanDirs = dirs.filter((id: string) => !retained.has(id));
-    const result: StorageEntry[] = [];
-    for (const dir of cleanDirs) {
-      const bytes = await StorageUsage.sizeOf(workspaceRoot + '/' + dir, failures);
-      result.push({ path: workspaceRoot + '/' + dir, label: dir, detail: t('已删除会话的残留工作区'),
-        bytes: bytes, category: 'workspace', removable: true, directory: true });
+    const orphanSizes = new Map<string, number>();
+    for (const dir of inventory.workspaceDirs) {
+      if (!retained.has(dir)) { orphanSizes.set(dir, 0); }
     }
-    for (const file of workspace) {
-      // A whole orphan folder already counts this file once.
-      if (isStaleTemporary(baseName(file.relative), file.modifiedAt, now) && !under(file.relative, cleanDirs)) {
+    const result: StorageEntry[] = [];
+    for (const file of inventory.workspace) {
+      const slash = file.relative.indexOf('/');
+      const owner = slash < 0 ? '' : file.relative.slice(0, slash);
+      const bytes = orphanSizes.get(owner);
+      if (bytes !== undefined) { orphanSizes.set(owner, bytes + file.bytes); }
+      else if (isStaleTemporary(baseName(file.relative), file.modifiedAt, now)) {
         result.push(fileEntry(file, 'workspace', file.relative, t('临时文件'), true));
       }
     }
-    for (const file of cache) {
+    orphanSizes.forEach((bytes, dir) => {
+      result.push({ path: workspaceRoot + '/' + dir, label: dir, detail: t('已删除会话的残留工作区'),
+        bytes: bytes, category: 'workspace', removable: true, directory: true });
+    });
+    for (const file of inventory.cache) {
       if (isCacheCleanable(file.modifiedAt, now)) {
         result.push(fileEntry(file, 'cache', file.relative, t('缓存文件'), true));
       }
     }
-    const references = StorageUsage.references(data);
-    const attachmentNames = attachments.map((file: DiskFile): string => file.relative);
-    const orphans = new Set<string>(orphanAttachmentPaths(attachmentNames, Array.from(references.keys())));
-    for (const file of attachments) {
-      if (orphans.has(file.relative)) {
+    const references = data.attachments;
+    for (const file of inventory.attachments) {
+      if (!references.has(file.relative)) {
         result.push(fileEntry(file, 'attachments', baseName(file.relative), t('未使用'), true));
       }
     }
     return result;
   }
 
-  static async scan(context: common.Context, data: AppData): Promise<StorageReport> {
+  static async scan(context: common.Context, data: StorageCatalog): Promise<StorageReport> {
     const roots = StorageUsage.roots(context);
     const failures: string[] = [];
     const report = emptyStorageReport();
@@ -249,15 +219,15 @@ export class StorageUsage {
     const threadSizes = await StorageUsage.arkDataSizes(roots, 'thread', failures);
     const sessions = await StorageUsage.listFiles(roots.abilityFilesDir + '/sessions-v2', failures);
     addCategory(report, 'sessions', sumFiles(sessions) + (threadSizes || []).reduce((total, item) => total + item.bytes, 0), sessions.length + (threadSizes?.length || 0));
-    const workspace = await StorageUsage.workspaceFiles(roots, failures);
+    const inventory = await StorageUsage.cleanupInventory(roots, failures);
     let workspaceBytes = 0, workspaceCount = 0, backupBytes = 0, backupCount = 0;
-    for (const file of workspace) {
+    for (const file of inventory.workspace) {
       if (StorageUsage.isReview(file)) { backupBytes += file.bytes; backupCount++; }
       else { workspaceBytes += file.bytes; workspaceCount++; }
     }
     addCategory(report, 'workspace', workspaceBytes, workspaceCount);
     addCategory(report, 'backups', backupBytes, backupCount);
-    const attachments = await StorageUsage.listFiles(roots.appFilesDir + '/attachments', failures);
+    const attachments = inventory.attachments;
     addCategory(report, 'attachments', sumFiles(attachments), attachments.length);
     const requestSizes = await StorageUsage.arkDataSizes(roots, 'usage', failures);
     const usage = await StorageUsage.listFiles(roots.abilityFilesDir + '/usage-records', failures);
@@ -280,7 +250,7 @@ export class StorageUsage {
       }
     }
     addCategory(report, 'diagnostics', diagnosticsBytes, diagnosticsFiles);
-    const cache = await StorageUsage.listFiles(roots.cacheDir, failures);
+    const cache = inventory.cache;
     addCategory(report, 'cache', sumFiles(cache), cache.length);
     const feedback = await StorageUsage.listFiles(roots.abilityFilesDir + '/feedback-files', failures);
     addCategory(report, 'feedback', sumFiles(feedback), feedback.length);
@@ -296,7 +266,7 @@ export class StorageUsage {
     try { report.deviceBytes = await storageStatistics.getTotalSize(); }
     catch (error) { Diagnostics.log('warn', 'storage', 'metric_failed', { operation: 'total_size' }, error as Error); }
 
-    const candidates = await StorageUsage.safeCandidates(roots, data, now, failures);
+    const candidates = await StorageUsage.safeCandidates(roots, data, now, failures, inventory);
     for (const entry of candidates) {
       report.safeBytes += entry.bytes;
       if (entry.category === 'cache') { report.cacheCleanBytes += entry.bytes; }
@@ -311,18 +281,17 @@ export class StorageUsage {
     return report;
   }
 
-  private static async sessionEntries(roots: StorageRoots, data: AppData,
+  private static async sessionEntries(roots: StorageRoots, data: StorageCatalog,
     failures: string[]): Promise<StorageEntry[]> {
     const root = roots.abilityFilesDir + '/sessions-v2';
-    const threads = new Map<string, ThreadData>();
-    for (const thread of data.threads) { threads.set(thread.id, thread); }
+    const threads = data.sessions;
     const result: StorageEntry[] = [];
     const current = await StorageUsage.arkDataSizes(roots, 'thread', failures);
     if (current) {
       for (const item of current) {
         const thread = threads.get(item.id);
         result.push({ path: 'ArkData/thread/' + item.id, label: thread?.title || item.id,
-          detail: t('{0} 条消息', [thread?.messages.length || 0]), bytes: item.bytes,
+          detail: t('{0} 条消息', [thread?.messageCount || 0]), bytes: item.bytes,
           category: 'sessions', removable: false, directory: false });
       }
       return result;
@@ -342,7 +311,7 @@ export class StorageUsage {
         if (!stat.isFile() || stat.isSymbolicLink()) { continue; }
         const thread = threads.get(item.id);
         result.push({ path: root + '/' + item.file, label: thread && thread.title.length > 0 ? thread.title : item.id,
-          detail: t('{0} 条消息', [thread ? thread.messages.length : 0]), bytes: stat.size,
+          detail: t('{0} 条消息', [thread?.messageCount || 0]), bytes: stat.size,
           category: 'sessions', removable: false, directory: false });
       } catch (error) {
         if (!StorageUsage.missing(error as Error)) { StorageUsage.failed(failures, root, error as Error, 'stat'); }
@@ -352,9 +321,9 @@ export class StorageUsage {
     return result;
   }
 
-  private static async workspaceEntries(roots: StorageRoots, data: AppData,
+  private static async workspaceEntries(roots: StorageRoots, data: StorageCatalog,
     failures: string[]): Promise<StorageEntry[]> {
-    const names = StorageUsage.workspaceNames(data);
+    const names = data.workspaces;
     const files = await StorageUsage.workspaceFiles(roots, failures);
     const retained = await StorageUsage.retained(roots, data, failures);
     const result: StorageEntry[] = [];
@@ -369,9 +338,9 @@ export class StorageUsage {
     return result;
   }
 
-  private static async backupEntries(roots: StorageRoots, data: AppData,
+  private static async backupEntries(roots: StorageRoots, data: StorageCatalog,
     failures: string[]): Promise<StorageEntry[]> {
-    const names = StorageUsage.workspaceNames(data);
+    const names = data.workspaces;
     const files = await StorageUsage.workspaceFiles(roots, failures);
     const result: StorageEntry[] = [];
     for (const file of files) {
@@ -382,9 +351,9 @@ export class StorageUsage {
     return result;
   }
 
-  private static async attachmentEntries(roots: StorageRoots, data: AppData,
+  private static async attachmentEntries(roots: StorageRoots, data: StorageCatalog,
     failures: string[]): Promise<StorageEntry[]> {
-    const references = StorageUsage.references(data);
+    const references = data.attachments;
     const files = await StorageUsage.listFiles(roots.appFilesDir + '/attachments', failures);
     const result: StorageEntry[] = [];
     for (const file of files) {
@@ -397,7 +366,7 @@ export class StorageUsage {
     return result;
   }
 
-  static async entries(context: common.Context, data: AppData, category: string): Promise<StorageEntryResult> {
+  static async entries(context: common.Context, data: StorageCatalog, category: string): Promise<StorageEntryResult> {
     const roots = StorageUsage.roots(context);
     const failures: string[] = [];
     let result: StorageEntry[] = [];
@@ -492,16 +461,16 @@ export class StorageUsage {
     }
   }
 
-  private static async retained(roots: StorageRoots, data: AppData | undefined, failures: string[]): Promise<Set<string>> {
+  private static async retained(roots: StorageRoots, data: StorageCatalog | undefined, failures: string[]): Promise<Set<string>> {
     const root = StorageUsage.workspaceRoot(roots);
-    try { return WorkspaceRetention.retained(data, await WorkspaceRetention.inventory(root)); }
+    try { return WorkspaceRetention.retained(new Set(data?.workspaces.keys()), await WorkspaceRetention.inventory(root)); }
     catch (error) {
       StorageUsage.failed(failures, root, error as Error, 'list');
       // An incomplete ownership scan cannot authorize workspace deletion.
       return new Set(await StorageUsage.listDirectories(root, failures));
     }
   }
-  static async remove(context: common.Context, entries: StorageEntry[], data?: AppData): Promise<StorageCleanResult> {
+  static async remove(context: common.Context, entries: StorageEntry[], data?: StorageCatalog): Promise<StorageCleanResult> {
     const storage = StorageUsage.roots(context);
     const roots: string[] = [storage.abilityFilesDir, storage.appFilesDir, storage.cacheDir];
     let freedBytes = 0, removed = 0, failed = 0;
@@ -528,11 +497,12 @@ export class StorageUsage {
     return { freedBytes: freedBytes, removed: removed, failed: failed, incomplete: false, failedPaths: [] };
   }
 
-  static async cleanSafe(context: common.Context, data: AppData): Promise<StorageCleanResult> {
+  static async cleanSafe(context: common.Context, data: StorageCatalog): Promise<StorageCleanResult> {
     const roots = StorageUsage.roots(context);
     const failures: string[] = [];
-    const result = await StorageUsage.remove(context,
-      await StorageUsage.safeCandidates(roots, data, Date.now(), failures), data);
+    const inventory = await StorageUsage.cleanupInventory(roots, failures);
+    const candidates = await StorageUsage.safeCandidates(roots, data, Date.now(), failures, inventory);
+    const result = await StorageUsage.remove(context, candidates, data);
     result.incomplete = failures.length > 0;
     result.failedPaths = failures;
     return result;

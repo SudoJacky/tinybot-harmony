@@ -9,3 +9,11 @@ export function isOnboardingCandidate(data: AppData): boolean {
       !thread.archived && !thread.pinned && !thread.titleEdited && !thread.parentThreadId &&
       !(thread.references || []).length && !(thread.attachments || []).length && !(thread.pendingInputs || []).length);
 }
+
+export interface FirstUseStatus { onboarding: boolean; backup: boolean; }
+
+export function firstUseStatus(data: AppData): FirstUseStatus {
+  const onboarding = isOnboardingCandidate(data);
+  return { onboarding: onboarding, backup: onboarding && !(data.config.userDocument || '').trim() &&
+    !(data.productivity?.servers || []).length && !(data.productivity?.memories || []).length };
+}

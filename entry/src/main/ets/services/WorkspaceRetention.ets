@@ -1,5 +1,4 @@
 import { fileIo as fs } from '@kit.CoreFileKit';
-import { AppData } from '../model/Conversation';
 import { PanelSource, validatePanelSource } from '../model/PanelSource';
 import { threadWorkspacePath } from '../model/Workspace';
 import { withFileMutation } from './FileMutationQueue';
@@ -68,9 +67,7 @@ export class WorkspaceRetention {
       validatePanelSource(source); item.sources.push(source.workspaceId);
     }
   }
-  static retained(data: AppData | undefined, inventory: WorkspaceOwnership[], review: boolean = true): Set<string> {
-    const ids = new Set<string>((data?.threads || []).filter((thread) => !thread.projectId).map((thread) => thread.id)
-      .concat((data?.projects || []).map((project) => project.workspaceId)));
+  static retained(ids: Set<string>, inventory: WorkspaceOwnership[], review: boolean = true): Set<string> {
     for (const item of inventory) {
       if (item.miniApps || item.lifePanels || item.lifeBoards || review && item.review) { ids.add(item.id); }
       item.sources.forEach((id: string) => ids.add(id));

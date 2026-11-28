@@ -36,7 +36,7 @@ export function sharingMessages(messages: MessageData[]): MessageData[] {
       }).join('');
     }
     const referenced = previewReferenceParts(body).filter((part) => part.kind === 'preview').map((part) => part.previewId);
-    const previews = previewReferenceTargets(message.steps || []).filter((target) => referenced.includes(target.previewId));
+    const previews = referenced.length ? previewReferenceTargets(message.steps || []).filter((target) => referenced.includes(target.previewId)) : [];
     // Keep only referenced artifact metadata for static image export, never process narration or unrelated tool results.
     const steps: AgentStep[] | undefined = previews.length ? [{ content: '', tools: previews.map((target) => target.tool) }, { content: body, tools: [] }] : undefined;
     return { id: message.id, role: message.role, content: body, status: message.status, error: '', steps: steps,
@@ -47,7 +47,8 @@ export function sharingMessages(messages: MessageData[]): MessageData[] {
 // Both formats use the same selection in original conversation order.
 export function selectedConversation(thread: ThreadData, ids: string[]): ThreadData {
   const selected = JSON.parse(JSON.stringify(thread)) as ThreadData;
-  selected.messages = sharingMessages(selected.messages.filter((message) => ids.includes(message.id)));
+  const included = new Set(ids);
+  selected.messages = sharingMessages(selected.messages.filter((message) => included.has(message.id)));
   if (selected.messages.length === 0) { throw new Error(t('请至少选择一条消息')); }
   return selected;
 }
