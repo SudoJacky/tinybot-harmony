@@ -277,7 +277,7 @@ class LinuxRuntime {
       if (await fs.access(dir)) { await fs.rmdir(dir); }
       await fs.mkdir(dir);
       this.diskBytes = native.linuxStorageBytes(context.cacheDir);
-      await createLinuxDisks(dir, this.diskBytes);
+      await createLinuxDisks(dir, this.diskBytes, this.settings.startup === 'prewarm');
       engineStarted = true;
       if (this.separateProcess) {
         childId = util.generateRandomUUID();

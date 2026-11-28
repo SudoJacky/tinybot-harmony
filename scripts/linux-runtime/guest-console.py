@@ -197,6 +197,12 @@ def main():
     next_pty_read = 0.0
     sys.path.insert(0, "/")  # Only init's read-only image contains these modules.
 
+    # At startup the exchange disk is private to init. The host submits its first
+    # command only after our ready frame. Importing the shared handler runs no job.
+    with open("/dev/vdb", "rb", buffering=0) as disk:
+        if disk.read(4) == b"TBW1":
+            import linux_shell_task
+
     def resize(columns, rows):
         nonlocal window
         window = WINDOW.pack(rows, columns, 0, 0)

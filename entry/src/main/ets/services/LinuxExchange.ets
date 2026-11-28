@@ -8,14 +8,21 @@ const HEADER: number = 8;
 const COPY_CHUNK: number = 1024 * 1024;
 export const LINUX_TREE_OFFSET: number = 2 * HALF;
 
-async function createDisk(path: string, bytes: number): Promise<void> {
+async function createDisk(path: string, bytes: number, warmShellTools: boolean = false): Promise<void> {
   const file = await fs.open(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-  try { await fs.truncate(file.fd, bytes); }
-  finally { await fs.close(file); }
+  try {
+    await fs.truncate(file.fd, bytes);
+    if (warmShellTools) {
+      // A boot-only marker. The first job replaces it with its regular TBJ3 request.
+      const marker = new util.TextEncoder().encodeInto('TBW1');
+      await writeLinuxBytes(file.fd, marker.buffer as ArrayBuffer, 0);
+      await fs.fsync(file.fd);
+    }
+  } finally { await fs.close(file); }
 }
 
-export async function createLinuxDisks(dir: string, bytes: number): Promise<void> {
-  await createDisk(dir + '/exchange', bytes);
+export async function createLinuxDisks(dir: string, bytes: number, warmShellTools: boolean): Promise<void> {
+  await createDisk(dir + '/exchange', bytes, warmShellTools);
   await createDisk(dir + '/workspace', bytes);
 }
 

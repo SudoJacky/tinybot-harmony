@@ -92,9 +92,9 @@ function info(file) {
 const native = {
   linuxMemoryLimit: () => 2048,
   linuxStorageBytes: () => 24 * MIB,
-  startEmbeddedLinux(dir, memoryMiB) { boots.push({ mode: 'phone', memoryMiB, dir }); },
+  startEmbeddedLinux(dir, memoryMiB) { boots.push({ mode: 'phone', memoryMiB, dir, bootHeader: files.get(dir + '/exchange').subarray(0, 4).toString('hex') }); },
   startLinuxChild(id, dir, memoryMiB) {
-    boots.push({ mode: 'tablet', memoryMiB, dir });
+    boots.push({ mode: 'tablet', memoryMiB, dir, bootHeader: files.get(dir + '/exchange').subarray(0, 4).toString('ascii') });
     return new Promise(() => {});
   },
   async packLinuxDirectory(dir, name, fd, offset) {
@@ -311,6 +311,7 @@ async function main() {
   assert.equal(requests.length, 1);
   assert.equal(jobs.at(-1).shared, true);
   assert.equal(boots[0].memoryMiB, 256);
+  assert.equal(boots[0].bootHeader, '00000000');
   assert.equal(linuxRuntime.snapshot().history[0].kind, 'tool');
   assert.equal(linuxRuntime.snapshot().history[1].kind, 'warm-up');
   await linuxRuntime.save({ timeoutSeconds: 60 });
@@ -437,6 +438,7 @@ async function main() {
   await Promise.all([attached, restored.prewarmOnStartup(context), restored.prewarmOnStartup(context)]);
   assert.equal(boots.length, 2);
   assert.equal(boots.at(-1).mode, 'tablet');
+  assert.equal(boots.at(-1).bootHeader, 'TBW1');
   assert.equal(loading.length, 3, 'Restart reused the installed images');
   assert.equal(requests.length, count);
   serialEvents.output(Buffer.from('before'));
