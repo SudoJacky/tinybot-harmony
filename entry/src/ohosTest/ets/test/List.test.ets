@@ -105,6 +105,7 @@ export default function testsuite() {
         await linuxRuntime.input('printf "caught-%s\\n" interrupt\r');
         await waitFor(() => output.includes('caught-interrupt'));
         const job: LinuxJob = { language: 'shell', source:
+          "sh -c 'kill -PIPE $$; exit 99'; test $? -eq 141 && " +
           'test "$(id -u):$(id -g):$(id -un)" = 0:0:root && test "$TB_TEST:$PWD" = shared:/tmp && ' +
           'export TB_FROM_CHAT=ok && cat /proc/sys/kernel/random/boot_id' };
         const receipt = await linuxRuntime.runTool(context, job, new NativeWorkspaceFiles(context.cacheDir), new Cancellation());

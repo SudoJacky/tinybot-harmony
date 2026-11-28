@@ -1,0 +1,16 @@
+--- a/meson.build
++++ b/meson.build
+@@ -4440,4 +4440,4 @@
+                objects: lib.extract_all_objects(recursive: true),
+-               link_depends: [block_syms, qemu_syms],
+-               link_args: link_args)
++               link_depends: [block_syms, qemu_syms, 'tinybot-engine.map'],
++               link_args: link_args + ['-Wl,--version-script=' + (meson.current_source_dir() / 'tinybot-engine.map')])
+     single_binary_libs += emulator
+--- /dev/null
++++ b/tinybot-engine.map
+@@ -0,0 +1,4 @@
++{
++    global: qemu_system_entry;
++    local: *;
++};

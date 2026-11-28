@@ -1,7 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { webview } from '@kit.ArkWeb';
 import { preferences } from '@kit.ArkData';
-import { util } from '@kit.ArkTS';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppearanceStyle } from '../common/AppearanceStyle';
 import { Btn, Font, Motion, Radius, Space } from '../common/Theme';
@@ -30,18 +29,15 @@ const BATCH_BYTES: number = 48 * 1024;
 class ConsoleBridge {
   private input: (text: string) => void;
   private size: (columns: number, rows: number) => void;
-  private written: (receipt: number) => void;
   private copy: (text: string, screen: boolean) => void;
   constructor(input: (text: string) => void, size: (columns: number, rows: number) => void,
-    written: (receipt: number) => void, copy: (text: string, screen: boolean) => void) {
+    copy: (text: string, screen: boolean) => void) {
     this.input = input;
     this.size = size;
-    this.written = written;
     this.copy = copy;
   }
   consoleInput(text: string): void { this.input(text); }
   consoleSize(columns: number, rows: number): void { this.size(columns, rows); }
-  consoleWritten(receipt: number): void { this.written(receipt); }
   consoleCopy(text: string, screen: boolean): void { this.copy(text, screen); }
 }
 
@@ -73,8 +69,11 @@ export struct LinuxConsolePanel {
   private historyBytes: number = 0;
   private receipt: number = 0;
   private inFlight: number = 0;
+  private outputPorts: webview.WebMessagePort[] = [];
+  private outputTimer: number = -1;
+  private lastWrite: number = 0;
   private bridge: ConsoleBridge = new ConsoleBridge((text) => this.onInput(text), (columns, rows) => this.onSize(columns, rows),
-    (receipt) => this.onWritten(receipt), (text, screen) => this.copyText(text, screen));
+    (text, screen) => this.copyText(text, screen));
 
   private styleStore(): preferences.Preferences {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -135,6 +134,7 @@ export struct LinuxConsolePanel {
   aboutToDisappear(): void {
     this.mounted = false;
     this.unsubscribe?.();
+    this.closeOutputPorts();
     this.signal?.cancel();
     this.discardOutput();
   }
@@ -153,6 +153,11 @@ export struct LinuxConsolePanel {
       await this.controller.runJavaScript('window.tinybotTerminal.configure(' + JSON.stringify(t('Linux 终端')) + ',' +
         JSON.stringify(this.locale) + ',' + JSON.stringify(t('回到最新输出')) + ')');
       if (!this.mounted) { return; }
+      this.outputPorts = this.controller.createWebMessagePorts();
+      this.outputPorts[0].onMessageEvent((data: webview.WebMessage) => {
+        if (typeof data === 'string') { this.onWritten(Number(data)); }
+      });
+      this.controller.postMessage('tinybot-terminal-output', [this.outputPorts[1]], '*');
       this.pageReady = true;
       this.applyTerminalStyle();
       this.connectPage();
@@ -262,7 +267,14 @@ export struct LinuxConsolePanel {
     }
   }
 
+  private closeOutputPorts(): void {
+    this.pageReady = false;
+    for (const port of this.outputPorts) { port.close(); }
+    this.outputPorts = [];
+  }
+
   private discardOutput(): void {
+    if (this.outputTimer !== -1) { clearTimeout(this.outputTimer); this.outputTimer = -1; }
     this.output = [];
     this.outputBytes = 0;
     this.historyBytes = 0;
@@ -283,22 +295,40 @@ export struct LinuxConsolePanel {
 
   private flushOutput(): void {
     if (!this.mounted || !this.pageReady || this.inFlight !== 0 || this.outputBytes === 0) { return; }
+    // Show the first keystroke immediately, then coalesce small writes within
+    // a display frame. Full batches can proceed as soon as xterm acknowledges.
+    const elapsed = Date.now() - this.lastWrite;
+    if (elapsed >= 0 && elapsed < 16 && this.outputBytes < BATCH_BYTES) {
+      if (this.outputTimer === -1) {
+        this.outputTimer = setTimeout(() => { this.outputTimer = -1; this.flushOutput(); }, 16 - elapsed);
+      }
+      return;
+    }
+    if (this.outputTimer !== -1) { clearTimeout(this.outputTimer); this.outputTimer = -1; }
     const history = this.historyBytes > 0;
-    const batch = new Uint8Array(Math.min(history ? this.historyBytes : this.outputBytes, BATCH_BYTES));
-    if (history) { this.historyBytes -= batch.length; }
+    const size = Math.min(history ? this.historyBytes : this.outputBytes, BATCH_BYTES);
+    // Receipt (uint32 LE), history flag, then the original PTY bytes.
+    const packet = new Uint8Array(5 + size);
+    this.receipt = this.receipt % 0xffffffff + 1;
+    new DataView(packet.buffer).setUint32(0, this.receipt, true);
+    packet[4] = history ? 1 : 0;
+    if (history) { this.historyBytes -= size; }
     let length = 0;
-    while (length < batch.length) {
-      const next = this.output[0];
-      const count = Math.min(batch.length - length, next.length);
-      batch.set(next.subarray(0, count), length);
-      if (count === next.length) { this.output.shift(); }
-      else { this.output[0] = next.subarray(count); }
+    let consumed = 0;
+    while (length < size) {
+      const next = this.output[consumed];
+      const count = Math.min(size - length, next.length);
+      packet.set(next.subarray(0, count), 5 + length);
+      if (count === next.length) { consumed++; }
+      else { this.output[consumed] = next.subarray(count); }
       length += count;
     }
-    this.outputBytes -= batch.length;
-    this.inFlight = ++this.receipt;
-    const encoded = new util.Base64Helper().encodeToStringSync(batch);
-    this.evaluate('window.tinybotTerminal.write(' + JSON.stringify(encoded) + ',' + this.inFlight + ',' + String(history) + ')');
+    this.output.splice(0, consumed);
+    this.outputBytes -= size;
+    this.inFlight = this.receipt;
+    this.lastWrite = Date.now();
+    try { this.outputPorts[0].postMessageEvent(packet.buffer as ArrayBuffer); }
+    catch (error) { this.fail(error as Error); }
   }
 
   private onWritten(receipt: number): void {
@@ -467,13 +497,13 @@ export struct LinuxConsolePanel {
             .backgroundColor(TERMINAL_BACKGROUND).javaScriptAccess(true).domStorageAccess(false)
             .fileAccess(false).onlineImageAccess(false).blockNetwork(true).multiWindowAccess(false)
             .javaScriptProxy({ object: this.bridge, name: 'tinybotConsoleHost',
-              methodList: ['consoleInput', 'consoleSize', 'consoleWritten', 'consoleCopy'], controller: this.controller })
+              methodList: ['consoleInput', 'consoleSize', 'consoleCopy'], controller: this.controller })
             .onLoadIntercept((event) => event.data.isMainFrame() && (this.pageReady || event.data.getRequestUrl() !== TERMINAL_PAGE))
             .onPageEnd(() => this.pageLoaded())
             .onPermissionRequest((event) => event.request.deny())
             .onErrorReceive((event) => this.fail(new Error(event.error.getErrorInfo())))
             .onRenderExited(() => {
-              this.pageReady = false;
+              this.closeOutputPorts();
               this.fail(new Error(t('终端界面已退出，请重新打开。')));
             })
         }.width('100%').layoutWeight(1).backgroundColor(TERMINAL_BACKGROUND).borderRadius(Radius.md).clip(true)

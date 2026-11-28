@@ -126,9 +126,10 @@ def drop_privileges():
 
 
 def run_captured(program, env):
-    capture = CapturedOutput()
-    with subprocess.Popen(program, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          env=env, preexec_fn=drop_privileges, start_new_session=True) as process:
+    with (open(os.devnull, "wb", buffering=0) as discard,
+          subprocess.Popen(program, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           env=env, preexec_fn=drop_privileges, start_new_session=True) as process):
+        capture = CapturedOutput(discard.fileno())
         pipes = {process.stdout.fileno(): "stdout", process.stderr.fileno(): "stderr"}
         try:
             done = os.pidfd_open(process.pid)
@@ -138,10 +139,8 @@ def run_captured(program, env):
                     if done in ready:
                         break
                     for fd in ready:
-                        data = os.read(fd, 65536)
-                        if data:
-                            capture.append(pipes[fd], data)
-                        else:
+                        count, _ = capture.drain(fd, pipes[fd])
+                        if not count:
                             del pipes[fd]
             finally:
                 os.close(done)
@@ -154,9 +153,8 @@ def run_captured(program, env):
         for fd, name in pipes.items():
             remaining = pending_bytes(fd)
             while remaining:
-                data = os.read(fd, remaining)
-                capture.append(name, data)
-                remaining -= len(data)
+                count, _ = capture.drain(fd, name, remaining)
+                remaining -= count
         return capture.receipt(process.wait())
 
 

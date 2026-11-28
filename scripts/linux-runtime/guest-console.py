@@ -3,11 +3,11 @@ import errno
 import fcntl
 import os
 import select
+import _signal  # CPython signal primitives, without loading the enum wrappers at boot.
 import struct
 import sys
 import time
 import termios
-import tty
 
 HEADER = struct.Struct("<BH")
 SIZE = struct.Struct("<HH")
@@ -54,6 +54,10 @@ def shell(serial, mapped):
     os.close(mapped)
     os.setresgid(0, 0, 0)
     os.setresuid(0, 0, 0)
+    # CPython ignores broken pipes. Interactive pipelines need the normal
+    # UNIX disposition so writers terminate when their last reader exits.
+    _signal.signal(_signal.SIGPIPE, _signal.SIG_DFL)
+    _signal.signal(_signal.SIGXFSZ, _signal.SIG_DFL)
     os.chdir("/work")
     os.execve("/bin/sh", ["sh", "-i"], {
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/work", "TMPDIR": "/work",
@@ -98,8 +102,7 @@ def start_shell(serial, window):
 
 
 def kill_process(pid):
-    import signal
-    os.kill(pid, signal.SIGKILL)
+    os.kill(pid, _signal.SIGKILL)
 
 
 def start_job():
@@ -144,6 +147,28 @@ def flush_disk(path):
         fcntl.ioctl(disk, 0x1261)  # BLKFLSBUF, drop block cache before host access
 
 
+def read_pty(master):
+    data = os.read(master, CHUNK)
+    if len(data) < 1024 or len(data) == CHUNK:
+        return data
+    # A PTY may return only one line-discipline buffer per read. Drain up to
+    # one transport frame without waiting for more data or delaying keystrokes.
+    batch = bytearray(data)
+    while len(batch) < CHUNK:
+        try:
+            part = os.read(master, CHUNK - len(batch))
+        except BlockingIOError:
+            break
+        except OSError as error:
+            if error.errno != errno.EIO:
+                raise
+            break  # Deliver the last bytes before the next read reports shell exit.
+        if not part:
+            break
+        batch.extend(part)
+    return batch
+
+
 def last_input_key(data):
     # Only the final editing key matters. Skip any complete cursor reports
     # following it without changing the bytes forwarded to the PTY.
@@ -160,8 +185,8 @@ def last_input_key(data):
 
 
 def main():
-    serial = os.open("/dev/ttyAMA0", os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-    tty.setraw(serial)
+    serial = os.open(sys.argv[1], os.O_RDWR | os.O_NONBLOCK)
+    discard_fd = os.open(os.devnull, os.O_WRONLY)
     window = WINDOW.pack(24, 80, 0, 0)
     shell_pid, master = start_shell(serial, window)
     frames, to_shell, to_host = bytearray(), bytearray(), bytearray()
@@ -169,6 +194,7 @@ def main():
     background = set()
     ready = editing = False
     last_input = 0.0
+    next_pty_read = 0.0
     sys.path.insert(0, "/")  # Only init's read-only image contains these modules.
 
     def resize(columns, rows):
@@ -177,7 +203,8 @@ def main():
         fcntl.ioctl(master, termios.TIOCSWINSZ, window)
 
     def input_data(data):
-        nonlocal editing, last_input
+        nonlocal editing, last_input, next_pty_read
+        next_pty_read = 0.0  # Deliver the response to new keyboard input immediately.
         if shared is not None and data == b"\x03":
             shared.stop(shell_pid)
             return
@@ -240,7 +267,7 @@ def main():
         else:
             from linux_shell_task import ShellTask
             try:
-                shared = ShellTask()
+                shared = ShellTask(discard_fd)
                 to_shell.extend(shared.command)
             except (ValueError, OSError, KeyError) as error:
                 task_error(error)
@@ -249,7 +276,12 @@ def main():
         if not ready and idle_prompt():
             to_host[:0] = b"TBC2"
             ready = True
-        reads = ([serial] if len(to_shell) < QUEUE else []) + ([master] if len(to_host) < QUEUE else [])
+        reads = [serial] if len(to_shell) < QUEUE else []
+        delay = max(0.0, next_pty_read - time.monotonic()) if next_pty_read else 0.0
+        if not delay:
+            next_pty_read = 0.0
+            if len(to_host) < QUEUE:
+                reads.append(master)
         if shared is not None:
             reads.extend(shared.pipes)
             reads.append(shared.status_fd)
@@ -258,7 +290,7 @@ def main():
         reads.extend(background)
         writes = ([serial] if ready and to_host else []) + ([master] if to_shell else [])
         check_exit = not ready or (shared is not None and shared.cancelled_at is not None)
-        readable, writable, _ = select.select(reads, writes, [], 0.05 if check_exit else None)
+        readable, writable, _ = select.select(reads, writes, [], delay or (0.05 if check_exit else None))
         for fd in writable:
             target = to_host if fd == serial else to_shell
             try:
@@ -279,7 +311,7 @@ def main():
                 to_host.extend(HEADER.pack(RUN_JOB, 1) + bytes([0 if status == 0 else 1]))
                 continue
             if fd in background:
-                if not os.read(fd, 65536):
+                if not os.splice(fd, discard_fd, 65536):
                     os.close(fd)
                     background.remove(fd)
                 continue
@@ -291,7 +323,7 @@ def main():
                     finish_shared()
                 continue
             try:
-                data = os.read(fd, CHUNK)
+                data = read_pty(master) if fd == master else os.read(fd, CHUNK)
             except BlockingIOError:
                 continue
             except OSError as error:
@@ -307,6 +339,10 @@ def main():
                 if shared is not None:
                     finish_shared()
                 output(data)
+                # Line-buffered programs often write once per line. Let the PTY
+                # collect the next lines while input and task control stay live.
+                if len(data) < CHUNK and b"\n" in data:
+                    next_pty_read = time.monotonic() + 0.012
             else:
                 os.close(master)
                 _, status = os.waitpid(shell_pid, 0)

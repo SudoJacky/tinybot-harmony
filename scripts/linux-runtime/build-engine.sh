@@ -78,18 +78,28 @@ if [[ ! -f "$p/lib/libglib-2.0.a" ]]; then
   ninja -C "$b/glib" -j"$jobs" install
 fi
 q="$work/qemu"
+# The HarmonyOS loader resolves a single entry point. Keep internal emulator
+# symbols local so ThinLTO can optimize them and the loader need not bind them.
+if [[ ! -f "$q/tinybot-engine.map" ]]; then
+  patch --batch --forward -d "$q" -p1 < "$repo/scripts/linux-runtime/qemu-engine-exports.patch"
+fi
 # The fork's ACPI table builder enumerates CXL windows even in a no-CXL build.
 # Complete its disabled-device stubs: such a machine has zero CXL windows.
 if ! grep -q 'cxl_fmws_get_all_sorted' "$q/hw/cxl/cxl-host-stubs.c"; then
   printf '\nGSList *cxl_fmws_get_all_sorted(void) { return NULL; }\n' >> "$q/hw/cxl/cxl-host-stubs.c"
 fi
-printf 'CONFIG_ARM_VIRT=y\nCONFIG_VIRTIO_BLK=y\nCONFIG_VIRTIO_PCI=y\n' > "$q/configs/devices/aarch64-softmmu/tinybot.mak"
+printf 'CONFIG_ARM_VIRT=y\nCONFIG_VIRTIO_BLK=y\nCONFIG_VIRTIO_SERIAL=y\nCONFIG_VIRTIO_PCI=y\n' > "$q/configs/devices/aarch64-softmmu/tinybot.mak"
 mkdir -p "$b/qemu"; cd "$b/qemu"
 extra="-fPIC -I$p/include -D_UAPI_LINUX_VIRTIO_VSOCK_H -D_UAPI_LINUX_VIRTIO_TYPES_H -D_UAPI_LINUX_VIRTIO_RING_H -D_UAPI_LINUX_VIRTIO_PMEM_H -D_UAPI_LINUX_VIRTIO_IOMMU_H -D_UAPI_LINUX_VIRTIO_FS_H -D_UAPI_LINUX_VIRTIO_CONSOLE_H -D_UAPI_LINUX_VIRTIO_CONFIG_H -D_LINUX_SYSINFO_H -D__user= -D__force="
-"$q/configure" --cc="$CC" --cxx="$CXX" --host-cc=cc --cpu="$arch" --cross-prefix="" --target-list=aarch64-softmmu --without-default-features --without-default-devices --with-devices-aarch64=tinybot --enable-tcg --enable-tcg-interpreter --enable-fdt=system --disable-docs --disable-werror --disable-rust --with-coroutine=sigaltstack --extra-cflags="$extra" --extra-ldflags="-L$p/lib"
+"$q/configure" --cc="$CC" --cxx="$CXX" --host-cc=cc --cpu="$arch" --cross-prefix="" --target-list=aarch64-softmmu --without-default-features --without-default-devices --with-devices-aarch64=tinybot --enable-tcg --enable-tcg-interpreter --enable-lto -Db_lto_mode=thin --enable-fdt=system --disable-docs --disable-werror --disable-rust --with-coroutine=sigaltstack --extra-cflags="$extra" --extra-ldflags="-L$p/lib"
 ninja -j"$jobs" libqemu-system-aarch64.so
 grep -Eq '^#define CONFIG_TCG_INTERPRETER( 1)?$' config-host.h
 out="$repo/entry/libs/$abi"
 mkdir -p "$out"
 llvm-strip -o "$out/libqemu-system-aarch64-tci.so" libqemu-system-aarch64.so
+api=$(llvm-nm --dynamic --defined-only "$out/libqemu-system-aarch64-tci.so" | awk '$2 == "T" {print $3}')
+if [[ "$api" != qemu_system_entry ]]; then
+  echo "Unexpected exported engine functions: $api" >&2
+  exit 1
+fi
 readelf -d "$out/libqemu-system-aarch64-tci.so" | grep NEEDED

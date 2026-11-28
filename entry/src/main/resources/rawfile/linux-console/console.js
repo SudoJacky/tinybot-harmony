@@ -70,6 +70,19 @@
   }
   terminal.onData((text) => host().consoleInput(text));
 
+  window.addEventListener('message', (event) => {
+    if (event.data !== 'tinybot-terminal-output' || event.ports.length !== 1) return;
+    const port = event.ports[0];
+    port.onmessage = ({ data }) => {
+      const receipt = new DataView(data).getUint32(0, true);
+      writingHistory = new Uint8Array(data)[4] === 1;
+      terminal.write(new Uint8Array(data, 5), () => {
+        writingHistory = false;
+        port.postMessage(String(receipt));
+      });
+    };
+  });
+
   window.tinybotTerminal = {
     configure(label, language, latestLabel) {
       document.documentElement.lang = language;
@@ -84,15 +97,6 @@
       terminal.options.cursorStyle = cursorStyle;
       terminal.options.cursorInactiveStyle = cursorStyle;
       scheduleFit();
-    },
-    write(encoded, receipt, history) {
-      const raw = atob(encoded);
-      const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
-      writingHistory = history;
-      terminal.write(bytes, () => {
-        writingHistory = false;
-        host().consoleWritten(receipt);
-      });
     },
     setConnected(connected) {
       terminal.options.disableStdin = !connected;

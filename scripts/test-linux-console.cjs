@@ -55,6 +55,14 @@ async function main() {
   tty.emit([0, 0xe7, 0x8c, 0xab]);
   assert.deepEqual(events, ['ready']);
   assert.equal(Buffer.concat(output).toString(), '猫');
+  // A socket callback can contain the tail of one frame and several whole
+  // frames, or just one byte of a maximum-size payload.
+  const full = Buffer.alloc(16384, 0x78);
+  tty.emit([1, 0, 64]);
+  for (const byte of full.subarray(0, 512)) tty.emit([byte]);
+  tty.emit([...full.subarray(512), 1, 1, 0, 0x79, 1, 2, 0, 0x7a]);
+  tty.emit([0x21]);
+  assert.deepEqual(output.slice(-3), [full, Buffer.from('y'), Buffer.from('z!')]);
   await stream.resize(120, 36);
   await stream.input('\x03猫');
   assert.deepEqual([...tty.sent[0]], [2, 4, 0, 120, 0, 36, 0]);
@@ -111,10 +119,21 @@ function testScreenCopy() {
     loadAddon() {} open() {} onScroll() {} onData() {}
     getSelection() { return selected; }
   }
-  const window = { Terminal, FitAddon: { FitAddon: class {} }, addEventListener() {},
+  let connect, writes = [], complete;
+  Terminal.prototype.write = (bytes, callback) => { writes.push(Buffer.from(bytes)); complete = callback; };
+  const window = { Terminal, FitAddon: { FitAddon: class {} },
+    addEventListener(name, callback) { if (name === 'message') connect = callback; },
     tinybotConsoleHost: host, getSelection: () => native };
   const document = { getElementById: id => id === 'terminal' ? surface : { addEventListener() {} } };
   vm.runInNewContext(fs.readFileSync(path.join(root, '../resources/rawfile/linux-console/console.js'), 'utf8'), { window, document });
+  const acknowledgements = [];
+  const port = { postMessage: value => acknowledgements.push(value) };
+  connect({ data: 'tinybot-terminal-output', ports: [port] });
+  port.onmessage({ data: Uint8Array.from([0x34, 0x12, 0, 0, 1, 0, 255, 0xe7, 0x8c, 0xab]).buffer });
+  assert.deepEqual(writes, [Buffer.from([0, 255, 0xe7, 0x8c, 0xab])]);
+  assert.deepEqual(acknowledgements, []);
+  complete();
+  assert.deepEqual(acknowledgements, ['4660']);
   window.tinybotTerminal.copy();
   native = { anchorNode: surface, toString: () => 'touch selection' };
   window.tinybotTerminal.copy();

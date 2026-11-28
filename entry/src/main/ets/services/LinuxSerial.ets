@@ -21,7 +21,10 @@ export class LinuxSerial {
   private marker: number = 0;
   private waitingBytes: number = 0;
   private pending: Promise<void> = Promise.resolve();
-  private incoming: Uint8Array = new Uint8Array(0);
+  private header: Uint8Array = new Uint8Array(3);
+  private headerBytes: number = 0;
+  private payload?: Uint8Array;
+  private payloadBytes: number = 0;
   private jobDone?: (error?: Error, busy?: string) => void;
   private events: LinuxSerialEvents;
 
@@ -40,32 +43,46 @@ export class LinuxSerial {
       }
       if (this.marker === READY.length) { this.events.ready(); }
     }
-    if (offset === bytes.length) { return; }
-    const data = new Uint8Array(this.incoming.length + bytes.length - offset);
-    data.set(this.incoming);
-    data.set(bytes.subarray(offset), this.incoming.length);
-    const view = new DataView(data.buffer);
-    let pos = 0;
-    while (pos + 3 <= data.length) {
-      const kind = data[pos];
-      const size = view.getUint16(pos + 1, true);
+    while (offset < bytes.length && !this.stopping) {
+      if (this.headerBytes < 3) {
+        const count = Math.min(3 - this.headerBytes, bytes.length - offset);
+        this.header.set(bytes.subarray(offset, offset + count), this.headerBytes);
+        offset += count;
+        this.headerBytes += count;
+        if (this.headerBytes < 3) { return; }
+      }
+      const kind = this.header[0];
+      const size = this.header[1] | (this.header[2] << 8);
       if (!(kind === 1 && size > 0 && size <= CHUNK || kind === 3 && size === 1)) {
         this.fail(new Error('Invalid Linux runtime frame'));
         return;
       }
-      const end = pos + 3 + size;
-      if (end > data.length) { break; }
-      if (kind === 1) { this.events.output(data.slice(pos + 3, end)); }
+      let frame: Uint8Array;
+      if (!this.payload && bytes.length - offset >= size) {
+        frame = bytes.subarray(offset, offset + size);
+        offset += size;
+      } else {
+        // Allocate once per split frame, regardless of socket fragmentation.
+        const partial = this.payload ?? (this.payload = new Uint8Array(size));
+        const count = Math.min(size - this.payloadBytes, bytes.length - offset);
+        partial.set(bytes.subarray(offset, offset + count), this.payloadBytes);
+        this.payloadBytes += count;
+        offset += count;
+        if (this.payloadBytes < size) { return; }
+        frame = partial;
+        this.payload = undefined;
+        this.payloadBytes = 0;
+      }
+      this.headerBytes = 0;
+      if (kind === 1) { this.events.output(frame); }
       else if (this.jobDone) {
-        const status = data[pos + 3];
+        const status = frame[0];
         if (status > 4) { this.fail(new Error('Invalid Linux task status')); return; }
         const reasons: string[] = ['', '', 'The terminal has an unfinished input line.',
           'The terminal is processing keyboard input.', 'The terminal is running a foreground command.'];
         this.jobDone(status === 1 ? new Error('Linux task worker exited') : undefined, reasons[status]);
       }
-      pos = end;
     }
-    this.incoming = data.slice(pos);
   }
 
   async connect(path: string, cancellation: Cancellation, exited: () => boolean = () => false): Promise<void> {

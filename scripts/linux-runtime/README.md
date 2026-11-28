@@ -4,7 +4,7 @@
 
 ## Build the optional assets
 
-Use an x86-64 Linux build host or WSL. The engine build uses the HarmonyOS native SDK sysroot and libraries with the host's Clang, LLD, LLVM utilities, GCC, make, pkg-config, Python, Meson and Ninja. The guest build requires curl, tar, e2fsprogs, qemu-img and `qemu-aarch64-static` from `qemu-user-static`. It uses the guest’s own Python to compile bytecode before packaging. Run the guest step as root in a build container or via sudo so apk can restore package ownership. Allow access to the upstream source archives and Alpine package mirror.
+Use an x86-64 Linux build host or WSL. The engine build uses the HarmonyOS native SDK sysroot and libraries with the host's Clang, LLD, LLVM utilities, GCC, make, patch, pkg-config, Python, Meson and Ninja. The guest build requires curl, tar, e2fsprogs, qemu-img and `qemu-aarch64-static` from `qemu-user-static`. It uses the guest’s own Python to compile bytecode before packaging. Run the guest step as root in a build container or via sudo so apk can restore package ownership. Allow access to the upstream source archives and Alpine package mirror.
 
 ```sh
 export OHOS_NDK=/path/to/openharmony/native
@@ -13,13 +13,13 @@ bash scripts/linux-runtime/build-engine.sh x86_64
 sudo bash scripts/linux-runtime/build-guest.sh
 ```
 
-The second engine is for x86-64 emulators. The scripts stage the libraries under `entry/libs/<ABI>/` and the kernel and `root-v5-shell.qcow2` under `entry/src/main/resources/rawfile/linux/`. Rebuild the guest image after changing the guest scripts. Build the entry HAP with the project's normal DevEco SDK and local signing configuration. A clean checkout builds the existing QuickJS tool without those assets. The engine build cache defaults to `~/tinybot-tci-build` and can be moved with `TCI_BUILD_DIR`.
+The second engine is for x86-64 emulators. The scripts stage the libraries under `entry/libs/<ABI>/` and the kernel and `root-v5-shell.qcow2` under `entry/src/main/resources/rawfile/linux/`. The engine and guest both use a dedicated virtio serial port for terminal traffic. Rebuild the guest image after editing its scripts. When upgrading from the UART transport, rebuild both engine ABIs and the guest image before packaging. Build the entry HAP with the project's normal DevEco SDK and local signing configuration. A clean checkout builds the existing QuickJS tool without those assets. The engine build cache defaults to `~/tinybot-tci-build` and can be moved with `TCI_BUILD_DIR`.
 
 The engine script pins the [HiSH QEMU fork](https://github.com/harmoninux/qemu/tree/50ce7096eb6b338bee88a0960c543f93f1b16959) and checks its TCI build flag. The guest script verifies the [HiSH kernel release](https://github.com/harmoninux/linux-config/releases/tag/kernel-20260228) and installs signed packages from Alpine v3.22. Patch versions can change within that repository. For redistribution, retain the matching sources, build configuration and license notices for the kernel, emulator and packages.
 
 ## Run and verify
 
-On the Linux build host, run `python3 scripts/linux-runtime/test-guest-console.py` to check how mixed keystrokes and cursor position reports affect pending terminal input.
+On the Linux build host, run `python3 scripts/linux-runtime/test-guest-console.py` to check terminal editing state and bounded pipe capture. Run `node scripts/test-linux-console.cjs` to check fragmented serial frames and the terminal's binary output bridge.
 
 In a chat with code calculation enabled, ask Tinybot to use `run_linux` to query a SQLite database from its private workspace. To run the example below, set `language` to `shell`, `inputPath` to `items.db`, and `outputPath` to `summary.csv`.
 

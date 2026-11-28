@@ -11,16 +11,24 @@ HEADER = struct.Struct("<4sI")
 
 
 class CapturedOutput:
-    def __init__(self):
+    def __init__(self, discard_fd):
+        self.discard_fd = discard_fd
         self.streams = {"stdout": bytearray(), "stderr": bytearray()}
         self.truncated = False
 
-    def append(self, name, data):
+    def drain(self, fd, name, limit=65536):
         capture = self.streams[name]
-        sample = data[:LOG_LIMIT - len(capture)]
+        remaining = LOG_LIMIT - len(capture)
+        if not remaining:
+            # Keep the writer running without copying discarded pages into Python.
+            count = os.splice(fd, self.discard_fd, limit)
+            self.truncated |= count > 0
+            return count, b""
+        data = os.read(fd, limit)
+        sample = data[:remaining]
         capture.extend(sample)
         self.truncated |= len(sample) < len(data)
-        return sample
+        return len(data), sample
 
     def receipt(self, code):
         result = {name: data.decode("utf-8", "replace") for name, data in self.streams.items()}

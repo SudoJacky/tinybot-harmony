@@ -6,5 +6,11 @@ if [ ! -c /dev/null ]; then /bin/busybox mount -t devtmpfs devtmpfs /dev; fi
 /bin/busybox mount -t tmpfs -o size=24m,nosuid,nodev,mode=755 tmpfs /run
 /bin/busybox mkdir -p /run/tinybot /dev/pts
 /bin/busybox mount -t devpts -o mode=620,ptmxmode=666 devpts /dev/pts
-/bin/busybox chmod 600 /dev/ttyAMA0 /dev/vdb /dev/vdc
-exec /usr/bin/python3 -I -S -B /linux-console.pyc
+# devtmpfs names a port after its controller's enumeration index.
+set -- /dev/vport*p1
+if [ "$#" -ne 1 ] || [ ! -c "$1" ]; then
+  echo "Expected one virtio terminal port, found: $*" >&2
+  exit 1
+fi
+/bin/busybox chmod 600 "$1" /dev/vdb /dev/vdc
+exec /usr/bin/python3 -I -S -B /linux-console.pyc "$1"

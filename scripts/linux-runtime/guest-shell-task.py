@@ -37,14 +37,14 @@ def command_directory():
 
 
 class ShellTask:
-    def __init__(self):
+    def __init__(self, discard_fd):
         with open("/dev/vdb", "rb", buffering=0) as disk:
             request = load_request(disk)
         # Only cancellation needs parentage. At submission a PID snapshot is enough.
         self.previous = {int(pid) for pid in os.listdir("/proc") if pid.isdigit()}
         self.cancelled_at = None
         self.pipes = {}
-        self.capture = CapturedOutput()
+        self.capture = CapturedOutput(discard_fd)
         with ExitStack() as files:
             root = files.enter_context(command_directory())
             with open(f"{root}/source", "x", encoding="utf-8") as source:
@@ -71,11 +71,10 @@ class ShellTask:
             self.files = files.pop_all()
 
     def drain(self, fd, output, limit=65536):
-        data = os.read(fd, limit)
-        sample = self.capture.append(self.pipes[fd], data)
+        count, sample = self.capture.drain(fd, self.pipes[fd], limit)
         if sample:
             output(sample.replace(b"\n", b"\r\n"))
-        return len(data)
+        return count
 
     def close(self, background):
         # A background command may still own its redirected stdout after the
